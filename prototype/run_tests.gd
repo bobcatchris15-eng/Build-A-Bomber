@@ -76,6 +76,7 @@ const SUITE_FILES := {
 	"marking_menu": preload("res://tests/test_marking_menu.gd"),
 	"selection_panel": preload("res://tests/test_selection_panel.gd"),
 	"livery_customization": preload("res://tests/test_livery_customization.gd"),
+	"armor_paint": preload("res://tests/test_armor_paint.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -523,6 +524,16 @@ const SUITE_ORDER := [
 	# coverage guard.
 	["module_action_ring", "test_tweak_station_angle_is_identity_of_name_not_index"],
 	["module_action_ring", "test_tweak_station_coverage_guards_every_tweak_spec_entry"],
+
+	# Armor facet conform. Covers what tests/test_facet_polygon_mesh.gd and
+	# test_facet_polygon_visual.gd structurally cannot: both build their own
+	# MeshInstance3D at identity, so they verify the polygon math while missing
+	# the child transform that was rendering the plate 2.5x oversize and yawed
+	# 90 degrees. This one places through the real placer and round-trips the
+	# blueprint, which is where the fit used to be lost entirely.
+	["armor_paint", "test_paint_coverage_weight_and_round_trip"],
+	["armor_paint", "test_paint_reresolves_when_the_hull_mesh_changes"],
+	["armor_paint", "test_resolver_reads_the_painted_facet"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

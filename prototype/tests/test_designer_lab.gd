@@ -1974,6 +1974,15 @@ func test_resource_harvester_mounting_restrictions_and_procedural_hardware() -> 
 	print("  [PASS] Resource Harvester enforces front-facet restriction, rejects angled prows, and generates procedural mounting block with tricone drill head.")
 	return true
 
+
+# The armor plate conform/round-trip suite lived here and was DELETED, not
+# updated: it placed armor MODULES and asserted the plate mesh conformed to the
+# facet and survived a save. Armor is no longer placeable - it is painted
+# per-facet coverage (ArmorPaint), so every fixture in it described a thing that
+# cannot be built. The behaviour it protected is covered by the armor paint
+# suites instead: coverage, round trip, re-resolve and the resolver's facet
+# lookup.
+
 func type_as_string(thing) -> String:
 	if thing == null:
 		return "null"

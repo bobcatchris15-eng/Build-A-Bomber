@@ -39,6 +39,7 @@ signal part_unhovered()
 # no UIDock here; anything wanting a rect to highlight wants get_bar_focus_rect.
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const ArmorPaint = preload("res://scripts/armor_paint.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnim = preload("res://scripts/ui_anim.gd")
@@ -164,6 +165,16 @@ func _ready() -> void:
 	for type_id in catalog.keys():
 		var data = catalog[type_id]
 		var category = data.get("category", "module")
+
+		# Armor is PAINTED, not placed - it is applied per hull facet in the
+		# Armor Bay, so it has no card here. Its catalog rows still exist and
+		# are still read (they are the paint types, priced per reference patch);
+		# they are simply not draggable. Deliberately no legacy placement path:
+		# two ways to armor a hull is exactly the drift that leaves one of them
+		# silently broken. `energy_barrier_projector` is category "armor" but is
+		# a projector, so it stays placeable.
+		if ArmorPaint.PAINT_TYPE_IDS.has(type_id):
+			continue
 
 		if category == "hull":
 			_bucket(hull_groups, _hull_group(data), type_id, data)

@@ -191,6 +191,22 @@ func _on_library_pressed():
 	else:
 		lab.get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
 
+# Same scratch handoff as the Test Range: write the working design out, then
+# swap screens. The Armor Bay reads that file, paints it and writes it back, so
+# returning to the Lab restores a design whose armor has changed and whose
+# modules have not.
+func _on_armor_bay_pressed():
+	var root = lab.get_node("/root/MainLab")
+	var blueprint_manager = root.get_node_or_null("BlueprintManager") if root else null
+	if blueprint_manager:
+		blueprint_manager.save_scratch()
+	var router = lab.get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/ArmorBay.tscn", "res://scenes/MainLab.tscn")
+	else:
+		lab.get_tree().change_scene_to_file("res://scenes/ArmorBay.tscn")
+
+
 func _on_test_pressed():
 	var root = lab.get_node("/root/MainLab")
 	var blueprint_manager = root.get_node_or_null("BlueprintManager")
@@ -329,10 +345,22 @@ func _build_toolbar() -> void:
 	if mirror_checkbox:
 		mirror_checkbox.reparent(row)
 
-	row.add_child(VSeparator.new())
-	
-	var auto_armor_btn = _toolbar_button(row, "AUTO-ARMOR", "auto_armor", func(): _on_auto_armor_pressed())
-	
+	# AUTO-ARMOR removed 2026-08-17 (Chris): it was the pre-facet plating system
+	# and per-face plates replaced it. It never went through module_placer at
+	# all - it dropped raw build_module() nodes on a 1m grid across the hull's
+	# AABB top, so its plates had no facet measurement, no surface alignment, no
+	# "facet" meta (hence no directional armor in combat), no click collider and
+	# no mirroring. Keeping it would mean teaching a superseded path everything
+	# the placement path already knows. wfc_solver.gd stays - hull_builder.gd
+	# still uses it.
+	#
+	# What replaced it sits here instead: armor is no longer placed on this
+	# screen at all. It is painted per hull facet in the ARMOR BAY, which needs
+	# the chassis stripped of modules and a camera that can reach the belly -
+	# neither of which this screen can offer without a mode gate it does not
+	# have. The scratch design is the handoff, exactly as with the Test Range.
+	_toolbar_button(row, "ARMOR BAY", "icon_armor", _on_armor_bay_pressed)
+
 	row.add_child(VSeparator.new())
 
 	# No "VIEW: " prefix on the items. An OptionButton's minimum width is set by
@@ -614,64 +642,6 @@ func _toolbar_button(parent: Container, label: String, icon_name: String, cb: Ca
 	b.pressed.connect(cb)
 	parent.add_child(b)
 	return b
-
-func _on_auto_armor_pressed():
-	var root = lab.get_node_or_null("/root/MainLab")
-	var hull = root.get_node_or_null("Hull") if root else null
-	if not hull: return
-	
-	var mesh_inst = hull.get_node_or_null("MeshInstance3D")
-	if not mesh_inst: mesh_inst = hull.get_node_or_null("PhysicsMesh")
-	if not mesh_inst or not mesh_inst.mesh: return
-	
-	_push_undo()
-	
-	var WFCSolver = preload("res://scripts/wfc_solver.gd")
-	var wfc = WFCSolver.new()
-	wfc.add_tile("plate_flat", { Vector3i.RIGHT: "edge", Vector3i.LEFT: "edge", Vector3i.FORWARD: "edge", Vector3i.BACK: "edge" })
-	wfc.add_tile("plate_corner", { Vector3i.RIGHT: "corner", Vector3i.FORWARD: "corner", Vector3i.LEFT: "edge", Vector3i.BACK: "edge" })
-	wfc.set_opposite_sockets({"edge": "edge", "corner": "corner"})
-	
-	var aabb = mesh_inst.mesh.get_aabb()
-	var cell_size = 1.0
-	var min_bound = Vector3i(floor(aabb.position.x / cell_size), floor(aabb.position.y / cell_size), floor(aabb.position.z / cell_size))
-	var max_bound = min_bound + Vector3i(ceil(aabb.size.x / cell_size), ceil(aabb.size.y / cell_size), ceil(aabb.size.z / cell_size))
-	
-	var surface_cells: Array[Vector3i] = []
-	for x in range(min_bound.x, max_bound.x + 1):
-		for y in range(min_bound.y, max_bound.y + 1):
-			for z in range(min_bound.z, max_bound.z + 1):
-				if y == max_bound.y:
-					surface_cells.append(Vector3i(x, y, z))
-					
-	wfc.set_grid(surface_cells)
-	var result = wfc.solve()
-	
-	var VisualBuilder = preload("res://scripts/visual_builder.gd")
-
-	for coord in result:
-		var type_id = "armor_plating"
-
-		# If the player already placed armor near here, we might want to skip,
-		# but for this prototype, we'll just spawn them all.
-		# build_module() already sets both "type_id" and a "module_data"
-		# ModuleData object. This used to overwrite the latter with
-		# get_module_data()'s raw Dictionary, which design_stats.analyze()
-		# cannot read - it accesses the payload as `data.type_id`, and a
-		# Dictionary does not answer to property access - so every plate this
-		# autofill placed was silently absent from the design's stats.
-		var module = VisualBuilder.build_module(type_id)
-		module.position = Vector3(coord.x * cell_size, coord.y * cell_size + cell_size * 0.5, coord.z * cell_size)
-		hull.add_child(module)
-		
-	# Refresh UI stats and visually update
-	if root.has_method("update_hull_appearance"):
-		root.update_hull_appearance()
-		
-	var lab_doc = root.get_node_or_null("LabDocument")
-	if lab_doc and lab_doc.telemetry_rail:
-		lab_doc.telemetry_rail.update_stats(hull)
-
 
 # --- Hull spec flyout -------------------------------------------------------
 

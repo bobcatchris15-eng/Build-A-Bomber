@@ -12,6 +12,7 @@ const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 # SLOPE_TRACE_MASK below cannot drift from its definition. battle_layers.gd has
 # no preloads of its own, so this closes no cycle.
 const BattleLayersScript = preload("res://scripts/battle/battle_layers.gd")
+const ArmorPaintScript = preload("res://scripts/armor_paint.gd")
 
 # Elevation combat advantage (multi-map pass): shooting down at a target on
 # meaningfully lower ground pierces more easily - real armor doesn't
@@ -50,6 +51,20 @@ const ARMOR_TABLE = {
 	# rock-paper-scissors (steel=kinetic, reactive=explosive, ablative=thermal,
 	# shielding=energy).
 	"energy_shielding": {"kinetic": [10.0, 0.75], "thermal": [20.0, 0.5], "explosive": [20.0, 0.5], "energy": [35.0, 0.3]},
+	# --- Higher-end paint materials (Armor Bay, exotics-gated) ---
+	#
+	# Both are deliberately NOT strictly better than the tier-1 three, or the
+	# material choice collapses into "buy the expensive one" the way
+	# energy_shielding once did before its kinetic row was weakened.
+	#
+	# carbon_fiber: light and very good against shaped/thermal effects, poor
+	# against raw kinetic - it shatters rather than deforms. Its real advantage
+	# is weight, which it pays out through ArmorPaint's area-scaled mass rather
+	# than through this table.
+	"carbon_fiber": {"kinetic": [7.0, 0.85], "thermal": [22.0, 0.4], "explosive": [24.0, 0.5], "energy": [12.0, 0.7]},
+	# titanium_plate: the kinetic answer, beating hardened_steel head-on, but
+	# heavy and unremarkable against everything else.
+	"titanium_plate": {"kinetic": [26.0, 0.55], "thermal": [8.0, 0.85], "explosive": [14.0, 0.7], "energy": [9.0, 0.8]},
 }
 
 # --- Hit damage math (FABLE_REVIEW.md 1.1 / 3.6 / 2.5) ---
@@ -95,19 +110,22 @@ static func get_material_threshold(material: String, damage_type: String, thickn
 	var pair = row.get(damage_type, row["explosive"])
 	return Vector2(pair[0] * thickness, pair[1])
 
-# Resolves the full threshold/reduction pair for a hit, given the hull's
-# baseline material+thickness plus any placed armor modules. active_modules
-# is the list of module nodes with module_data meta (from get_active_modules()).
+# Resolves the full threshold/reduction pair for a hit, from the hull's baseline
+# material+thickness plus whatever armor is PAINTED on the facet struck.
 #
-# defender + hit_origin (both optional) enable directional resolution: if
-# both are given, only the armor module covering the FACET actually facing
-# the attacker matters - armor on the far side of the hull no longer helps.
-# If that module has its own material choice (phase 3 - a plate can be
-# reactive on the front and ablative on the sides), that material REPLACES
-# the hull baseline for this hit, since the attack strikes the plate, not
-# the bare hull under it. Omitting either defender or hit_origin falls back
-# to the old aggregate-everything-against-the-hull-baseline behavior
-# (AoE, or callers that don't have direction info).
+# `active_modules` is retained for signature compatibility and is no longer read
+# for armor. Armor stopped being a placeable module: it is per-facet coverage
+# now, carried on the hull as the `armor_plan` meta. See ArmorPaint.
+#
+# THREE PATHS, in descending order of what we know:
+#   1. defender + hit_origin, and the trace recovers the triangle struck ->
+#      the EXACT facet's assignment, or bare hull if that facet is unpainted.
+#   2. defender + hit_origin, no usable triangle -> the facing side's summary,
+#      blended by how much of that side is covered.
+#   3. no direction at all (AoE) -> the whole hull's summary, blended by total
+#      coverage.
+# A hull with no plan resolves as bare metal on every path, which is what
+# buildings have always done and still do.
 static func resolve(hull: Node3D, active_modules: Array, damage_type: String, defender: Node3D = null, hit_origin = null) -> Vector2:
 	var hull_mat = "hardened_steel"
 	var hull_thick = 1.0
@@ -118,58 +136,65 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 	var threshold = baseline.x
 	var reduction = baseline.y
 
-	var hit_facet = ""
+	# PAINTED ARMOR. The plan is built once at reconstruct time and hung on the
+	# hull (see ArmorPaint). An absent plan means bare hull, which is exactly
+	# what a structure gets - structure.gd calls resolve(null, [], ...) and must
+	# keep behaving as it always has.
+	var plan: Dictionary = {}
+	if is_instance_valid(hull) and hull.has_meta("armor_plan"):
+		plan = hull.get_meta("armor_plan")
+	var has_plan: bool = not plan.is_empty() and not bool(plan.get("empty", true))
+
 	if defender != null and hit_origin != null:
 		var local_dir = defender.global_transform.basis.inverse() * ((hit_origin as Vector3) - defender.global_position)
-		hit_facet = ModuleCatalogScript.classify_facet(local_dir)
+		var trace := trace_hull(defender, hit_origin as Vector3)
 
-	if hit_facet != "":
-		for m in active_modules:
-			var m_data = m.get_meta("module_data")
-			if m_data and m_data.category == "armor" and m.get_meta("facet", "") == hit_facet:
-				var plate_material = m_data.tweaks.get("material", "") if "tweaks" in m_data else ""
-				if plate_material != "":
-					var plate_t = get_material_threshold(plate_material, damage_type, 1.0)
-					threshold = plate_t.x
-					reduction = plate_t.y
-				threshold += m_data.get_hp() * 0.1
-				if plate_material == "":
-					reduction = clamp(reduction * 0.9, 0.2, 1.0)
-				# Bolt-on plate bias. Applied AFTER the material/hp
-				# contribution and as a multiplier on threshold only, so a
-				# plate shifts what the vehicle is good against without
-				# replacing the hull material's own answer. Plain
-				# armor_plating has no row and multiplies by 1.0.
-				threshold *= ModuleCatalogScript.get_armor_module_bias(
-					m_data.type_id if "type_id" in m_data else "", damage_type)
-				break # a facet only ever has one plate (see mirror-centering skip logic)
+		if has_plan:
+			var assignment: Dictionary = {}
+			# EXACT FACET FIRST. The triangle struck resolves to one facet, and
+			# that facet is either painted or it is not - no blending, no
+			# averaging over a side. This is the whole point of recovering
+			# face_index: a hull whose front is 60% covered means a shot into
+			# the bare 40% gets NOTHING, rather than everyone on that side
+			# receiving 60% of a plate.
+			var fid := ArmorPaintScript.facet_for_triangle(
+				str(plan.get("hull_type", "")), int(trace.get("face_index", -1)))
+			if fid >= 0:
+				var facets: Dictionary = plan.get("facets", {})
+				if facets.has(fid):
+					assignment = facets[fid]
+				else:
+					# Resolved to a real facet that simply is not painted.
+					# Bare hull, and deliberately NOT a fall through to the
+					# side summary - we know precisely what was hit.
+					assignment = {}
+				var applied := _apply_assignment(baseline, assignment, damage_type)
+				threshold = applied.x
+				reduction = applied.y
+			else:
+				# No usable triangle: no hull surface body, an unbaked hull, or
+				# a shot that never reached the defender. Fall back to the
+				# side's area-weighted summary, blended by how much of that side
+				# is actually covered.
+				var side := ModuleCatalogScript.classify_facet(local_dir)
+				var summary: Dictionary = (plan.get("sides", {}) as Dictionary).get(side, {})
+				var blended := _blend_side(baseline, summary, damage_type)
+				threshold = blended.x
+				reduction = blended.y
 
-		# Phase 4: true angle-of-incidence sloped armor. A shot that grazes
-		# the surface at a shallow angle is more survivable than one that
-		# hits square-on (real tank-armor ballistics) - multiplies
-		# threshold, since slope is about whether the hit penetrates at
-		# all, not how much of the damage that does get through is
-		# mitigated (that's what `reduction` represents).
-		threshold *= compute_slope_multiplier(defender, hit_origin as Vector3)
-	else:
-		var armor_module_hp = 0.0
-		var bias_sum = 0.0
-		var bias_count = 0
-		for m in active_modules:
-			var m_data = m.get_meta("module_data")
-			if m_data and m_data.category == "armor":
-				armor_module_hp += m_data.get_hp()
-				# Same bias, averaged in when the hit has no facet to key on
-				# (a fallback path, so it uses the mean rather than letting
-				# whichever plate happens to be last in the list decide).
-				bias_sum += ModuleCatalogScript.get_armor_module_bias(
-					m_data.type_id if "type_id" in m_data else "", damage_type)
-				bias_count += 1
-		if armor_module_hp > 0.0:
-			threshold += armor_module_hp * 0.1
-			reduction = clamp(reduction * 0.9, 0.2, 1.0)
-			if bias_count > 0:
-				threshold *= bias_sum / float(bias_count)
+		threshold *= float(trace.get("slope", 1.0))
+	elif has_plan:
+		# AoE and any caller with no direction. One answer for the whole hull,
+		# blended by overall coverage - the honest expected value when we cannot
+		# say where the blast landed.
+		var whole := {
+			"coverage": float(plan.get("coverage", 0.0)),
+			"type_id": _dominant_type(plan),
+			"material": _dominant_material(plan),
+		}
+		var blended_all := _blend_side(baseline, whole, damage_type)
+		threshold = blended_all.x
+		reduction = blended_all.y
 
 	if defender != null and hit_origin != null:
 		var height_advantage = (hit_origin as Vector3).y - defender.global_position.y
@@ -177,6 +202,80 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 			threshold *= ELEVATION_COMBAT_PIERCE_MULTIPLIER
 
 	return Vector2(threshold, reduction)
+
+# One painted facet's contribution. Coverage is definitionally 1 here - the
+# facet either carries this assignment or it does not.
+#
+# The material REPLACES the hull baseline rather than stacking with it, which is
+# what the original per-plate branch always intended ("a plate can be reactive
+# on the front and ablative on the sides"): the attack strikes the plate, not
+# the bare hull beneath it. That branch was unreachable for as long as armor was
+# a module, because nothing ever wrote a per-plate material. Painting does.
+static func _apply_assignment(baseline: Vector2, a: Dictionary, damage_type: String) -> Vector2:
+	if a.is_empty():
+		return baseline
+	var material := str(a.get("material", ""))
+	if material == "":
+		return baseline
+	var plate := get_material_threshold(material, damage_type, float(a.get("thickness", 1.0)))
+	var threshold := plate.x
+	var type_id := str(a.get("type_id", ""))
+	var data: Dictionary = ModuleCatalogScript.get_module_data(type_id)
+	# HP scales with how much surface this facet actually is, on the same
+	# reference-patch basis as its weight and cost.
+	var units: float = float(a.get("area", 0.0)) / ArmorPaintScript.ARMOR_REFERENCE_AREA
+	threshold += float(data.get("hp", 0.0)) * units * ArmorPaintScript.HP_TO_THRESHOLD
+	threshold *= ModuleCatalogScript.get_armor_module_bias(type_id, damage_type)
+	return Vector2(threshold, plate.y)
+
+
+# Partial coverage, blended linearly on both channels.
+#
+# Exact at both ends - 0% painted is the bare hull, 100% is the full plate - and
+# the middle is the honest expected value of "a random shot at this side has
+# `coverage` chance of meeting armor". Needs no tuning constant, which is why it
+# is a lerp rather than a curve. Only ever used when the exact facet could not
+# be recovered; the precise path never blends.
+static func _blend_side(baseline: Vector2, summary: Dictionary, damage_type: String) -> Vector2:
+	var coverage := clampf(float(summary.get("coverage", 0.0)), 0.0, 1.0)
+	if coverage <= 0.0:
+		return baseline
+	var material := str(summary.get("material", ""))
+	if material == "":
+		return baseline
+	var plated := _apply_assignment(baseline, {
+		"material": material,
+		"type_id": str(summary.get("type_id", "")),
+		"thickness": 1.0,
+		"area": ArmorPaintScript.ARMOR_REFERENCE_AREA,
+	}, damage_type)
+	return Vector2(
+		lerpf(baseline.x, plated.x, coverage),
+		lerpf(baseline.y, plated.y, coverage))
+
+
+static func _dominant_type(plan: Dictionary) -> String:
+	return _dominant_field(plan, "type_id")
+
+
+static func _dominant_material(plan: Dictionary) -> String:
+	return _dominant_field(plan, "material")
+
+
+static func _dominant_field(plan: Dictionary, key: String) -> String:
+	var by_area := {}
+	for fid in (plan.get("facets", {}) as Dictionary).keys():
+		var a: Dictionary = plan["facets"][fid]
+		var k := str(a.get(key, ""))
+		by_area[k] = float(by_area.get(k, 0.0)) + float(a.get("area", 0.0))
+	var best := ""
+	var best_a := 0.0
+	for k in by_area.keys():
+		if float(by_area[k]) > best_a:
+			best_a = float(by_area[k])
+			best = str(k)
+	return best
+
 
 # Real raycast from the attacker to the defender's hull, reading the actual
 # surface normal at impact - not an analytical shortcut off the facet's
@@ -206,24 +305,67 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 const SLOPE_TRACE_MASK := 1 | BattleLayersScript.HULL_SURFACE
 
 static func compute_slope_multiplier(defender: Node3D, hit_origin: Vector3) -> float:
+	return float(trace_hull(defender, hit_origin).get("slope", 1.0))
+
+
+# ONE trace, TWO answers: the slope multiplier and the index of the triangle
+# actually struck.
+#
+# This exists because the facet a shot lands on was previously unknowable and is
+# now free. The ray was already being fired for slope and its result discarded
+# except for the normal; `face_index` on that same result names the triangle,
+# and HullFacets' baked map turns a triangle into a facet. Measured on the
+# shipped roster (tools/probe_face_index.gd): 960 rays, zero missing indices,
+# worst off-plane error 0.0000 - face_index indexes Mesh.get_faces() order
+# exactly, which is the order the facet map is baked against.
+#
+# THE SECOND QUERY IS NOT REDUNDANT. `face_index` is -1 unless the shape struck
+# is a ConcavePolygonShape3D. SLOPE_TRACE_MASK includes layer 1, which in the
+# Design Lab is the hull's BOX collider - it sits outside the mesh skin and is
+# therefore hit first, so a single masked query returns -1 on exactly the path
+# the tests exercise. When that happens we re-query against HULL_SURFACE alone.
+# The slope then comes from the concave hit too, which is a straight
+# improvement: the box's axis-aligned normal was never the real surface angle.
+static func trace_hull(defender: Node3D, hit_origin: Vector3) -> Dictionary:
+	var out := {"slope": 1.0, "face_index": -1, "hit": false}
 	if not is_instance_valid(defender):
-		return 1.0
+		return out
 	var world = defender.get_world_3d()
 	if not world:
-		return 1.0
+		return out
 	var space_state = world.direct_space_state
 	var target_point = defender.global_position + Vector3(0, 0.1, 0)
-	var query = PhysicsRayQueryParameters3D.create(hit_origin, target_point)
-	query.collision_mask = SLOPE_TRACE_MASK
-	var result = space_state.intersect_ray(query)
-	if result.is_empty() or not result.has("normal"):
-		return 1.0
-	if not _hit_belongs_to(result.get("collider"), defender):
-		return 1.0
+
+	var result = _trace_masked(space_state, hit_origin, target_point, SLOPE_TRACE_MASK, defender)
+	if result.is_empty():
+		return out
+	if int(result.get("face_index", -1)) < 0:
+		var precise = _trace_masked(space_state, hit_origin, target_point,
+			BattleLayersScript.HULL_SURFACE, defender)
+		if not precise.is_empty() and int(precise.get("face_index", -1)) >= 0:
+			result = precise
+
+	if not result.has("normal"):
+		return out
 	var incoming_dir = (target_point - hit_origin).normalized()
 	var hit_normal = result.normal as Vector3
 	var cos_angle = clamp(abs(hit_normal.dot(-incoming_dir)), 0.15, 1.0)
-	return 1.0 / cos_angle
+	out["slope"] = 1.0 / cos_angle
+	out["face_index"] = int(result.get("face_index", -1))
+	out["hit"] = true
+	return out
+
+
+static func _trace_masked(space_state, from: Vector3, to: Vector3, mask: int,
+		defender: Node3D) -> Dictionary:
+	var query = PhysicsRayQueryParameters3D.create(from, to)
+	query.collision_mask = mask
+	var result = space_state.intersect_ray(query)
+	if result.is_empty():
+		return {}
+	if not _hit_belongs_to(result.get("collider"), defender):
+		return {}
+	return result
 
 
 # Is `collider` the defender, or something the defender owns?

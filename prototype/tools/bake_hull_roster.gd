@@ -31,6 +31,12 @@ const SDFMeshBaker = preload("res://scripts/sdf_mesh_baker.gd")
 const MeshWeld = preload("res://scripts/mesh_weld.gd")
 const HullCollisionShapes = preload("res://scripts/hull_collision_shapes.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+const HullFacets = preload("res://scripts/hull_facets.gd")
+# Explicit preload rather than leaning on `class_name ModuleCatalog`: this file
+# runs as `--headless --script`, where a cold/stale .godot class cache resolves
+# global class names inconsistently. Used for classify_facet() when grouping
+# facets into the six sides.
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 
 const ASSEMBLY_DIR := "res://data/hull_assemblies"
 const OUT_DIR := "res://assets/models/hulls"
@@ -97,6 +103,12 @@ var strict := false
 # player can see.
 var collision_only := false
 
+# `-- --facets-only` writes ONLY the facet segmentation into the existing
+# sidecars, from the meshes already on disk. Enumerates the same shipped-roster
+# set as --collision-only and for the same reason: the Blender-authored hulls
+# have sidecars but no assembly sources.
+var facets_only := false
+
 # Must stay in sync with hull_builder.gd's PrimitiveType enum. Duplicated
 # here rather than imported because hull_builder.gd is a Node3D bound to a
 # scene full of @onready UI references - instancing it headlessly just to read
@@ -117,9 +129,10 @@ func _init() -> void:
 	# set and cannot be: the assemblies are what this file bakes, the sidecars
 	# are what the game loads, and the Blender-authored hulls that make up the
 	# current roster have the latter without the former.
-	var sources: Array = _list_collision_ids() if collision_only else _list_assemblies()
+	var from_sidecars := collision_only or facets_only
+	var sources: Array = _list_collision_ids() if from_sidecars else _list_assemblies()
 	if sources.is_empty():
-		if collision_only:
+		if from_sidecars:
 			printerr("No hull sidecars found in %s" % OUT_DIR)
 		else:
 			printerr("No assemblies found in %s" % ASSEMBLY_DIR)
@@ -133,10 +146,16 @@ func _init() -> void:
 	for path in sources:
 		# In collision-only mode `path` IS the stem; otherwise it is a full
 		# assembly path to take the basename of.
-		var stem: String = str(path) if collision_only else str(path).get_file().get_basename()
+		var stem: String = str(path) if from_sidecars else str(path).get_file().get_basename()
 		if not only_ids.is_empty() and not only_ids.has(stem):
 			continue
-		var result := _collision_only_one(stem) if collision_only else _bake_one(path, stem)
+		var result: int
+		if facets_only:
+			result = _facets_only_one(stem)
+		elif collision_only:
+			result = _collision_only_one(stem)
+		else:
+			result = _bake_one(path, stem)
 		if result < 0:
 			failed += 1
 		else:
@@ -144,7 +163,10 @@ func _init() -> void:
 			total_tris += result
 
 	print("")
-	if collision_only:
+	if facets_only:
+		print("Wrote facet maps for %d hull(s), %d failed. Total %d triangles." % [
+			baked, failed, total_tris])
+	elif collision_only:
 		print("Wrote collision for %d hull(s), %d failed. Total %d triangles." % [
 			baked, failed, total_tris])
 	else:
@@ -163,6 +185,9 @@ func _parse_id_filter() -> Dictionary:
 			continue
 		if a == "--collision-only":
 			collision_only = true
+			continue
+		if a == "--facets-only":
+			facets_only = true
 			continue
 		ids[a] = true
 	return ids
@@ -259,6 +284,137 @@ func _bake_one(path: String, stem: String) -> int:
 # reported "no baked mesh" for all 94 hulls.
 #
 # Returns the triangle count, or -1 if nothing resolved.
+# `-- --facets-only` writes ONLY the facet segmentation into each hull's
+# existing `<id>.json` sidecar, from the mesh already on disk. Same reasoning as
+# --collision-only: adding placement data must never rewrite hull GEOMETRY, and
+# it resolves the mesh through MeshAssetLoader.get_hull_mesh() - the same
+# precedence chain the game uses - so the segmentation is guaranteed to describe
+# the mesh a unit actually spawns with.
+#
+# The sidecar is read, mutated and rewritten rather than regenerated, so every
+# hand-tuned stat field in it survives untouched.
+func _facets_only_one(stem: String) -> int:
+	var mesh := MeshAssetLoader.get_hull_mesh(stem)
+	if mesh == null:
+		printerr("  %s: get_hull_mesh() resolved nothing - no mesh to segment" % stem)
+		return -1
+	var tris := mesh.get_faces().size() / 3
+	if tris <= 0:
+		printerr("  %s: mesh has no triangles" % stem)
+		return -1
+
+	var path := "%s/%s.json" % [OUT_DIR, stem]
+	var existing = _read_json(path)
+	if not (existing is Dictionary):
+		printerr("  %s: sidecar missing or unreadable at %s" % [stem, path])
+		return -1
+
+	var seg := HullFacets.segment(mesh)
+	if int(seg.get("count", 0)) <= 0:
+		printerr("  %s: segmentation produced no facets" % stem)
+		return -1
+
+	# Stored as a plain int array so the sidecar stays diffable JSON. tri_count
+	# rides along as the runtime guard - the map is indexed BY TRIANGLE, so it
+	# is only meaningful against the exact mesh it came from, and a re-exported
+	# .glb has to be detected rather than silently mis-assigning facets.
+	var map_out := []
+	for v in (seg["map"] as PackedInt32Array):
+		map_out.append(v)
+
+	# Per-facet geometry, plus the six-side grouping the armor brush and the
+	# damage resolver both key on.
+	#
+	# The SIDE classification is done HERE rather than inside HullFacets.segment()
+	# on purpose. hull_facets.gd has no preloads at all - that is what lets it run
+	# in this headless tool and in a test with no scene tree - and pulling in
+	# module_catalog.gd (4000+ lines) to reach one 8-line pure function would cost
+	# it that. Copying classify_facet() instead was the other option and is worse:
+	# its own header calls it the single source of truth for what "the front"
+	# means, shared with weapon mounting, and a second copy is exactly the drift
+	# that comment exists to prevent.
+	var f_normal: PackedVector3Array = seg.get("normal", PackedVector3Array())
+	var f_centroid: PackedVector3Array = seg.get("centroid", PackedVector3Array())
+	var f_area: PackedFloat32Array = seg.get("area", PackedFloat32Array())
+	var n_out := []
+	var c_out := []
+	var a_out := []
+	var side_out := []
+	var weight_out := []
+	var sides := {}
+	var side_area := {}
+	for s in HullFacets.SIDE_AXES.keys():
+		sides[s] = []
+		side_area[s] = 0.0
+	for f in range(int(seg["count"])):
+		var n: Vector3 = f_normal[f]
+		var c: Vector3 = f_centroid[f]
+		var a := float(f_area[f])
+		# The dominant side. Kept as a label and for anything that wants one
+		# answer per facet; it is NOT what the brush or the coverage math use -
+		# see HullFacets.BRUSH_SIDE_MIN_WEIGHT for why that would lose the
+		# glacis on 15 of the 94 hulls.
+		var dominant: String = ModuleCatalog.classify_facet(n)
+		var w := {}
+		for s in HullFacets.SIDE_AXES.keys():
+			var wt: float = maxf(0.0, n.dot(HullFacets.SIDE_AXES[s]))
+			w[s] = wt
+			# Projected area: what this facet is worth when shot at from `s`.
+			# This is the denominator every coverage fraction divides by, so it
+			# has to be the weighted area rather than a raw sum.
+			side_area[s] = float(side_area[s]) + a * wt
+			if wt >= HullFacets.BRUSH_SIDE_MIN_WEIGHT or s == dominant:
+				sides[s].append(f)
+		n_out.append([n.x, n.y, n.z])
+		c_out.append([c.x, c.y, c.z])
+		a_out.append(a)
+		side_out.append(dominant)
+		weight_out.append(w)
+
+	# A side's brush set must never be empty, or that side is unpaintable.
+	# The fixed threshold still leaves five hulls short - heavily rounded ones
+	# (kestrel_oddball_b, tallow_transport_a) where no single facet faces a
+	# given side by 60 degrees even though up to 13% of the hull's projected
+	# area is there. Fall back to everything within half the best weight, which
+	# adapts to how rounded the hull actually is instead of guessing a lower
+	# global threshold that would over-select on the other 89.
+	for s in sides.keys():
+		if not (sides[s] as Array).is_empty():
+			continue
+		var best := 0.0
+		for f in range(int(seg["count"])):
+			best = maxf(best, float((weight_out[f] as Dictionary)[s]))
+		if best <= 0.0:
+			continue
+		for f in range(int(seg["count"])):
+			if float((weight_out[f] as Dictionary)[s]) >= best * 0.5:
+				sides[s].append(f)
+
+	existing[HullFacets.SIDECAR_KEY] = {
+		"tri_count": int(seg["tri_count"]),
+		"facet_count": int(seg["count"]),
+		"winding": float(seg.get("winding", 1.0)),
+		"map": map_out,
+		"facet_normal": n_out,
+		"facet_centroid": c_out,
+		"facet_area": a_out,
+		"facet_side": side_out,
+		"facet_side_weight": weight_out,
+		"sides": sides,
+		"side_area": side_area,
+		"total_area": float(seg.get("total_area", 0.0)),
+	}
+
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		printerr("  %s: could not open sidecar for writing" % stem)
+		return -1
+	f.store_string(JSON.stringify(existing, "  "))
+	f.close()
+	print("  %s: %d triangles -> %d facets" % [stem, tris, int(seg["count"])])
+	return tris
+
+
 func _collision_only_one(stem: String) -> int:
 	var mesh := MeshAssetLoader.get_hull_mesh(stem)
 	if mesh == null:

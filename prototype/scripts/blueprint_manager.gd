@@ -5,17 +5,28 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 # Bumped only when the blueprint JSON schema changes in a way that could
 # silently mis-load older saves (not for every new field - new fields
 # default gracefully via .get() everywhere in reconstruct_vehicle already).
-# Never bumped so far, so this can't fire against any of Chris's real
-# ~29 saved designs today - it exists so a FUTURE schema change doesn't
-# silently load stale data with zero indication, which was the actual gap
-# (every save/load path already tolerates a missing "version" key fine).
+# It exists so a schema change doesn't silently load stale data with zero
+# indication, which was the actual gap (every save/load path already tolerates
+# a missing "version" key fine).
+#
+# This comment used to claim the check "can't fire against any of Chris's real
+# ~29 saved designs". It fired against ALL of them: serialize_hull() wrote a
+# literal 1.0 rather than this constant, so every save was born stale the
+# moment this went to 2.0. Fixed at the write site. Designs already on disk
+# still carry 1.0 and will warn once more each, correctly for the ones that
+# genuinely predate the hull rebuild and harmlessly for the rest - both
+# re-stamp themselves on the next save.
 # Bumped 1.0 -> 2.0 when the hull roster was rebuilt on the SDF/Marching-Cubes
 # pipeline (data/hull_assemblies/ + tools/bake_hull_roster.gd). Hull type_ids
 # and their load-bearing sidecar `size` were both preserved, so v1 designs
 # still LOAD - but their module positions were placed against the previous
 # hull surfaces, so mounts can sit slightly proud of or sunk into the new
 # ones. The version check below surfaces that instead of loading silently.
-const CURRENT_BLUEPRINT_VERSION: float = 2.0
+# Bumped 2.0 -> 3.0 when armor stopped being placed modules and became painted
+# per-facet coverage: armor entries moved out of "modules" into a top-level
+# "armor" block, so a v2 design's armor has to be migrated rather than loaded
+# (_migrate_armor_modules).
+const CURRENT_BLUEPRINT_VERSION: float = 3.0
 
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
@@ -28,6 +39,9 @@ const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
+const HullFacetsScript = preload("res://scripts/hull_facets.gd")
+const ArmorPaintScript = preload("res://scripts/armor_paint.gd")
+const ArmorPaintVisualScript = preload("res://scripts/armor_paint_visual.gd")
 # File-level, not the loop-local `var VisualBuilder = preload(...)` inside
 # reconstruct_vehicle's module loop - the ground-contact measurement at the end
 # of that function runs after the loop, where that local is out of scope.
@@ -101,6 +115,258 @@ static func is_named(bp_name: String) -> bool:
 func _vec3_to_dict(v: Vector3) -> Dictionary:
 	return {"x": v.x, "y": v.y, "z": v.z}
 
+
+# --- Painted armor ----------------------------------------------------------
+
+# The hull carries its assignments as the `armor_assignments` meta - a plain
+# Array of dictionaries, authored by the Armor Bay and consumed by ArmorPaint.
+# This writes them out along with enough to survive the hull mesh changing
+# underneath a saved design.
+#
+# WHY normal/centroid/area RIDE ALONG. A facet_id is an index into a partition
+# baked from one specific .glb; re-export that hull and the ids mean something
+# else. HullFacets already refuses to use a map whose tri_count disagrees with
+# the mesh, precisely so it never mis-assigns - persisting only the integer
+# would hand that same trap to every saved design. With the facet's own outward
+# normal and centre stored, a design can be re-resolved against the new
+# partition by geometry instead of being dropped or, worse, silently applied to
+# whatever facet inherited the number.
+func _serialize_armor(hull: Node3D) -> Dictionary:
+	var hull_type := str(hull.get_meta("type_id", "")) if hull.has_meta("type_id") else ""
+	var table := HullFacetsScript.load_map(hull_type)
+	var out := {
+		"hull_type": hull_type,
+		"hull_tri_count": int(table.get("tri_count", 0)),
+		"facet_count": int(table.get("facet_count", 0)),
+		"assignments": [],
+	}
+	if not hull.has_meta("armor_assignments"):
+		return out
+
+	var normals: PackedVector3Array = table.get("normal", PackedVector3Array())
+	var centroids: PackedVector3Array = table.get("centroid", PackedVector3Array())
+	var areas: PackedFloat32Array = table.get("area", PackedFloat32Array())
+	var side_names = table.get("side", [])
+
+	var rows := []
+	for a in hull.get_meta("armor_assignments", []):
+		if not (a is Dictionary):
+			continue
+		var fid := int(a.get("facet_id", -1))
+		if fid < 0 or fid >= normals.size():
+			continue
+		rows.append({
+			"facet_id": fid,
+			"side": str(side_names[fid]) if fid < side_names.size() else "",
+			"type_id": str(a.get("type_id", "")),
+			"material": str(a.get("material", "hardened_steel")),
+			"thickness": float(a.get("thickness", 1.0)),
+			"normal": _vec3_to_dict(normals[fid]),
+			"centroid": _vec3_to_dict(centroids[fid]) if fid < centroids.size() else _vec3_to_dict(Vector3.ZERO),
+			"area": float(areas[fid]) if fid < areas.size() else 0.0,
+		})
+	# Sorted so the on-disk file is stable and diffable across saves.
+	rows.sort_custom(func(x, y): return int(x["facet_id"]) < int(y["facet_id"]))
+	out["assignments"] = rows
+	return out
+
+
+# Reads the armor block back, re-resolving facet ids against the CURRENT bake
+# when the mesh has changed underneath the save. Returns the assignment array.
+func _deserialize_armor(blueprint_data: Dictionary, hull_type: String) -> Array:
+	var block = blueprint_data.get("armor", {})
+	if not (block is Dictionary):
+		return []
+	var saved: Array = block.get("assignments", [])
+	if saved.is_empty():
+		return []
+
+	var table := HullFacetsScript.load_map(hull_type)
+	var count := int(table.get("facet_count", 0))
+	if count <= 0:
+		return []
+
+	var stale: bool = (
+		str(block.get("hull_type", hull_type)) != hull_type
+		or int(block.get("hull_tri_count", -1)) != int(table.get("tri_count", -2))
+		or int(block.get("facet_count", -1)) != count
+	)
+	if not stale:
+		var kept := []
+		for a in saved:
+			if a is Dictionary and int(a.get("facet_id", -1)) < count:
+				kept.append(a)
+		return kept
+	return _reresolve_armor(saved, table, count, hull_type)
+
+
+# Nearest-normal re-resolution, used only when the bake no longer matches the
+# save. Scores every baked facet against each saved assignment and claims
+# greedily in descending score, so two saved facets that merged into one after a
+# re-bake do not both land on it.
+func _reresolve_armor(saved: Array, table: Dictionary, count: int, hull_type: String) -> Array:
+	var normals: PackedVector3Array = table.get("normal", PackedVector3Array())
+	var centroids: PackedVector3Array = table.get("centroid", PackedVector3Array())
+	if normals.size() < count:
+		return []
+
+	# Normalising the centroid distance by the hull's own extent keeps the
+	# position term meaningful on a 3 m scout and a 30 m transport alike.
+	var lo := Vector3.INF
+	var hi := -Vector3.INF
+	for f in range(count):
+		lo = lo.min(centroids[f]) if f < centroids.size() else lo
+		hi = hi.max(centroids[f]) if f < centroids.size() else hi
+	var diag: float = maxf(0.001, (hi - lo).length())
+
+	var scored := []
+	for a in saved:
+		if not (a is Dictionary):
+			continue
+		var sn: Vector3 = _dict_to_vec3(a.get("normal", {}))
+		if sn.length_squared() < 1e-9:
+			continue
+		sn = sn.normalized()
+		var sc: Vector3 = _dict_to_vec3(a.get("centroid", {}))
+		for f in range(count):
+			var d: float = sn.dot(normals[f])
+			var dist: float = ((centroids[f] - sc).length() / diag) if f < centroids.size() else 1.0
+			scored.append({"score": d - 0.5 * dist, "dot": d, "facet": f, "src": a})
+
+	scored.sort_custom(func(x, y): return float(x["score"]) > float(y["score"]))
+
+	# cos(35 degrees). A facet that has rotated further than this is a different
+	# surface, and quietly re-armouring it would be worse than dropping it.
+	var min_dot := cos(deg_to_rad(35.0))
+	var used_facet := {}
+	var used_src := {}
+	var out := []
+	var dropped := 0
+	for row in scored:
+		if float(row["dot"]) < min_dot:
+			continue
+		var f: int = int(row["facet"])
+		var src: Dictionary = row["src"]
+		var src_key := str(src.get("facet_id", -1)) + ":" + str(src.get("type_id", ""))
+		if used_facet.has(f) or used_src.has(src_key):
+			continue
+		used_facet[f] = true
+		used_src[src_key] = true
+		var moved := src.duplicate()
+		moved["facet_id"] = f
+		out.append(moved)
+	dropped = saved.size() - out.size()
+	if dropped > 0:
+		push_warning("Armor: %d of %d painted facets on '%s' could not be matched to the current hull mesh and were dropped." % [
+			dropped, saved.size(), hull_type])
+	return out
+
+
+# Converts a pre-v3 design's armor MODULES into facet assignments, in place.
+#
+# Runs on load, never on disk. A v2 design placed one plate per side, snapped to
+# the facet's centre, carrying a `facet` meta naming the six-way side. Two cases:
+#
+#   * The module knows its side -> paint the baked facet on that side whose
+#     centroid is nearest the module's saved position. That is the single facet
+#     the plate actually covered.
+#   * It does not (a v1 design, from before the facet meta existed) -> paint
+#     EVERY facet on the side its mount normal implies. That is exactly what a
+#     side-brush stroke does now, so the migrated design reads the way its
+#     author would have painted it rather than losing armor outright.
+#
+# Material and thickness come from the hull-global values, which is where they
+# lived before they became per-facet.
+func _migrate_armor_modules(blueprint_data: Dictionary) -> void:
+	if float(blueprint_data.get("version", 1.0)) >= 3.0:
+		return
+	if blueprint_data.has("armor") and not (blueprint_data["armor"].get("assignments", []) as Array).is_empty():
+		return
+	var modules: Array = blueprint_data.get("modules", [])
+	if modules.is_empty():
+		return
+
+	var hull_type := str(blueprint_data.get("hull_type", "brenntal_medium_a"))
+	var table := HullFacetsScript.load_map(hull_type)
+	var count := int(table.get("facet_count", 0))
+	var normals: PackedVector3Array = table.get("normal", PackedVector3Array())
+	var centroids: PackedVector3Array = table.get("centroid", PackedVector3Array())
+	var areas: PackedFloat32Array = table.get("area", PackedFloat32Array())
+	var side_names = table.get("side", [])
+
+	var material := str(blueprint_data.get("armor_material", "hardened_steel"))
+	var thickness := float(blueprint_data.get("armor_thickness", 1.0))
+
+	var kept := []
+	var by_facet := {}
+	for m in modules:
+		if not (m is Dictionary):
+			kept.append(m)
+			continue
+		var type_id := str(m.get("type_id", ""))
+		if not ArmorPaintScript.PAINT_TYPE_IDS.has(type_id):
+			kept.append(m)
+			continue
+		if count <= 0:
+			# No baked table for this hull - drop the plate rather than keep a
+			# module the rest of the pipeline no longer knows how to build.
+			continue
+
+		var side := str(m.get("facet", ""))
+		if side == "":
+			side = ModuleCatalogScript.classify_facet(_dict_to_vec3(m.get("mount_normal", {})))
+		var targets := PackedInt32Array()
+		if m.has("facet") and side != "":
+			# Nearest facet ON THAT SIDE to where the plate sat.
+			var pos := _dict_to_vec3(m.get("position", {}))
+			var best := -1
+			var best_d := INF
+			for f in ArmorPaintScript.facets_for_side(hull_type, side):
+				if f >= centroids.size():
+					continue
+				var d: float = centroids[f].distance_to(pos)
+				if d < best_d:
+					best_d = d
+					best = f
+			if best >= 0:
+				targets.append(best)
+		if targets.is_empty():
+			targets = ArmorPaintScript.facets_for_side(hull_type, side)
+
+		for f in targets:
+			if f < 0 or f >= count:
+				continue
+			# Last writer wins, matching the old "a facet only ever has one
+			# plate" invariant that damage_resolver relied on.
+			by_facet[f] = {
+				"facet_id": f,
+				"side": str(side_names[f]) if f < side_names.size() else side,
+				"type_id": type_id,
+				"material": material,
+				"thickness": thickness,
+				"normal": _vec3_to_dict(normals[f]) if f < normals.size() else _vec3_to_dict(Vector3.UP),
+				"centroid": _vec3_to_dict(centroids[f]) if f < centroids.size() else _vec3_to_dict(Vector3.ZERO),
+				"area": float(areas[f]) if f < areas.size() else 0.0,
+			}
+
+	if by_facet.is_empty():
+		return
+	var rows := by_facet.values()
+	rows.sort_custom(func(x, y): return int(x["facet_id"]) < int(y["facet_id"]))
+	blueprint_data["modules"] = kept
+	blueprint_data["armor"] = {
+		"hull_type": hull_type,
+		"hull_tri_count": int(table.get("tri_count", 0)),
+		"facet_count": count,
+		"assignments": rows,
+	}
+
+
+func _dict_to_vec3(d) -> Vector3:
+	if not (d is Dictionary):
+		return Vector3.ZERO
+	return Vector3(float(d.get("x", 0.0)), float(d.get("y", 0.0)), float(d.get("z", 0.0)))
+
 func serialize_hull(hull: Node3D) -> Dictionary:
 	if not hull:
 		return {}
@@ -119,7 +385,13 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 	var locomotion_settings = hull.get_meta("locomotion_settings") if hull.has_meta("locomotion_settings") else {}
 
 	var blueprint = {
-		"version": 1.0,
+		# CURRENT_BLUEPRINT_VERSION, not a literal. This was hard-coded to 1.0
+		# while the constant sat at 2.0, so EVERY save this build wrote was
+		# stamped stale and tripped the "predates the hull rebuild" warning in
+		# load_blueprint() below - including a design saved seconds earlier. The
+		# version gate was therefore pure noise and told you nothing about
+		# whether a design actually predated the rebuild.
+		"version": CURRENT_BLUEPRINT_VERSION,
 		"hull_type": hull.get_meta("type_id") if hull.has_meta("type_id") else "brenntal_medium_a",
 		"hull_scale": {"x": hull.get_meta("hull_scale").x, "y": hull.get_meta("hull_scale").y, "z": hull.get_meta("hull_scale").z} if hull.has_meta("hull_scale") else {"x": 1.0, "y": 1.0, "z": 1.0},
 		"hull_size": {"x": hull_size.x, "y": hull_size.y, "z": hull_size.z},
@@ -131,6 +403,9 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 			"type_id": locomotion_type,
 			"settings": locomotion_settings
 		},
+		# Painted armor, keyed by baked facet id. See ArmorPaint's header for why
+		# this is no longer a set of entries in "modules".
+		"armor": _serialize_armor(hull),
 		"modules": []
 	}
 
@@ -727,6 +1002,15 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	hull.set_meta("blueprint_id", blueprint_data.get("id", ""))
 	hull.set_meta("blueprint_name", blueprint_data.get("name", "Untitled Design"))
 
+	# Painted armor. Migration runs first so a pre-v3 design that placed armor
+	# MODULES arrives here as assignments and its armor stops being spawned as
+	# geometry in the module loop below. Deliberately does NOT rewrite the file
+	# on disk: a design re-stamps itself on the next explicit Save, so a bad
+	# migration can never destroy the original.
+	_migrate_armor_modules(blueprint_data)
+	var armor_assignments := _deserialize_armor(blueprint_data, str(hull_type))
+	hull.set_meta("armor_assignments", armor_assignments)
+
 	# Bulk size based on thickness
 	var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
 
@@ -865,6 +1149,19 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# pays for one trimesh no matter how many of it roll out of the factory.
 		HullSurfaceScript.rebuild(hull, mesh_inst, BattleLayersScript.HULL_SURFACE)
 
+	# THE ARMOR PLAN, built once here and read by everything downstream - the
+	# stat rail, the Armor Bay and DamageResolver. Built AFTER mesh_inst exists
+	# because a non-uniform hull_scale changes both each facet's area and, if it
+	# rotates a normal far enough, which side that facet counts toward.
+	#
+	# Hung on the HULL rather than passed around because damage_model already
+	# forwards the hull node into the resolver, and a structure passes none at
+	# all - so "no plan" naturally means "bare hull baseline", which is exactly
+	# what buildings did before and still do.
+	hull.set_meta("armor_plan", ArmorPaintScript.build_plan(
+		str(hull_type), armor_assignments, mesh_inst.transform, str(faction_name)))
+	ArmorPaintVisualScript.rebuild(hull, mesh_inst)
+
 	parent_node.add_child(hull)
 
 	# Raise hull height if wheels are present so they touch the ground (Y=0).
@@ -926,6 +1223,11 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		hull.position = Vector3(0, (base_hull_size.y * hull_scale.y) / 2.0 + wheels_offset, 0)
 	
 	# Spawn modules
+	#
+	# Hoisted out of the loop: the armor facet-conform below needs it too, and a
+	# second `var ModulePlacerScript = preload(...)` inside the loop body would
+	# shadow this one.
+	var ModulePlacerScript = preload("res://scripts/module_placer.gd")
 	var modules = blueprint_data.get("modules", [])
 	for mod in modules:
 		var type_id = mod.get("type_id", "")
@@ -1032,6 +1334,16 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			new_module.set_meta("scale_flip_x", true)
 			_apply_mirror_flip_to(new_module)
 
+		# Armor is no longer a module here. It became painted per-facet coverage
+		# (ArmorPaint), so there is nothing on this path to re-measure and
+		# re-conform - the skins are built once from the plan, above, before the
+		# module loop starts. _migrate_armor_modules() has already lifted any
+		# pre-v3 armor entries out of "modules", so a plate cannot reach here.
+		#
+		# The paragraph this replaces is worth keeping in one line: a facet skin
+		# is GEOMETRY, not a node scale, which is why it is derived rather than
+		# serialised. See armor_paint_visual.gd's header.
+
 		# NOW build the collision volume, against the geometry that finally
 		# exists. The two modes want different shapes and it is not an
 		# inconsistency:
@@ -1043,7 +1355,6 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		#     margin, so a shot connects with the barrel where the barrel is
 		#     drawn and passes through the gap between barrel and receiver.
 		if is_designer:
-			var ModulePlacerScript = preload("res://scripts/module_placer.gd")
 			ModulePlacerScript._refit_module_collider(new_module)
 		else:
 			# An Area3D, not a StaticBody3D, for two reasons. It rides a moving

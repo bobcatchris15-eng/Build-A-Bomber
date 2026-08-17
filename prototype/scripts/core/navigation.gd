@@ -20,6 +20,7 @@ const FRONT_DESK := "front_desk"
 const LAB := "lab"
 const LIBRARY := "library"
 const HULL_BUILDER := "hull_builder"
+const ARMOR_BAY := "armor_bay"
 const MATCH_SETUP := "match_setup"
 const OPERATIONS_SETUP := "operations_setup"
 const OPERATIONS_DRAFT := "operations_draft"
@@ -51,6 +52,18 @@ const ROUTES := {
 		"title": "BLUEPRINT LIBRARY",
 		"parent": FRONT_DESK,
 		"links": [LAB, MATCH_SETUP],
+	},
+	# Armoring is part of designing a vehicle, so BACK goes to the Lab rather
+	# than the Front Desk - you are mid-design, the same reasoning that puts the
+	# Operations draft under its setup. Deliberately IS in this table, unlike the
+	# Livery workshop, which is reached from a hardwired main-menu button and so
+	# hardcodes its own way home and gets no breadcrumb: livery is a profile you
+	# own across the whole force, armor belongs to one blueprint.
+	ARMOR_BAY: {
+		"scene": "res://scenes/ArmorBay.tscn",
+		"title": "ARMOR BAY",
+		"parent": LAB,
+		"links": [LAB, LIBRARY],
 	},
 	HULL_BUILDER: {
 		"scene": "res://scenes/HullBuilder.tscn",

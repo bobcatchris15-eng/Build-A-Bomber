@@ -2664,6 +2664,8 @@ const ARMOR_MATERIAL_REQUIREMENTS = {
 	"reactive_armor": "tech_lab",
 	"ablative_ceramic": "tech_lab",
 	"energy_shielding": "exotics_lab",
+	"carbon_fiber": "tech_lab",
+	"titanium_plate": "exotics_lab",
 }
 
 static func get_required_building(type_id: String) -> String:
