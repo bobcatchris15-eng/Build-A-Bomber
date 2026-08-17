@@ -22,6 +22,11 @@ const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 const LocomotionMountScript = preload("res://scripts/locomotion_mount.gd")
 const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
+# Only for apply_facet_plate's no-mesh-child fallback, which is the one path
+# that has to resolve a part material rather than preserve the one build_visual
+# already applied.
+const PartMaterialsScript = preload("res://scripts/part_materials.gd")
+const HullFacetsScript = preload("res://scripts/hull_facets.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -1064,6 +1069,17 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 				target_x = facet_meas["size"].x
 				target_z = facet_meas["size"].z
 				armor_pos = facet_meas["center"]
+				# ORIENT TO THE FACET, NOT TO THE CLICKED TRIANGLE. The mount
+				# basis above came from the raycast hit normal, which on a
+				# curved facet tilts with the drop point - so two plates on the
+				# same face used to sit at different angles. The facet's own
+				# mean normal is the face's orientation, and it is the frame
+				# build_plate lays the draped geometry out in, so the two cannot
+				# disagree. The bottom-facet flip is deliberately not re-applied:
+				# it exists to keep asymmetric hardware upright, and a plate has
+				# no up.
+				if facet_meas.has("basis"):
+					new_weapon.transform.basis = facet_meas["basis"]
 			else:
 				# Same fallback as update_locomotion's - the collider's box is
 				# the fitted AABB; the reference constant is the "no hull loaded"
@@ -1118,22 +1134,25 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 			# visual rebuilt on the next two lines and its scale is forced to
 			# (1,1,1) above - clobbering either would undo the projector code.
 			if type_id != "energy_barrier_projector" and facet_meas.get("valid", false):
-				var outline: PackedVector2Array = facet_meas.get("outline", PackedVector2Array())
-				if outline.size() >= 3:
-					var poly_mesh := _build_facet_polygon_mesh(outline, cat_size.y)
-					if poly_mesh != null:
-						for child in new_weapon.get_children():
-							if child is MeshInstance3D:
-								(child as MeshInstance3D).mesh = poly_mesh
-								break
-						# Mesh's vertices are already in the new_weapon's local
-						# frame at the right extent and thickness, so the
-						# stretch that the auto-scale above applied is now
-						# wrong - reset it. Same for the scale_multiplier the
-						# collider refit reads.
-						new_weapon.scale = Vector3.ONE
-						if mod_data:
-							mod_data.scale_multiplier = Vector3.ONE
+				if apply_facet_plate(new_weapon, facet_meas, type_id, cat_size, hull):
+					# Mesh's vertices are already in the new_weapon's local
+					# frame at the right extent and thickness, so the
+					# stretch that the auto-scale above applied is now
+					# wrong - reset it. Same for the scale_multiplier the
+					# collider refit reads.
+					new_weapon.scale = Vector3.ONE
+					if mod_data:
+						mod_data.scale_multiplier = Vector3.ONE
+					# NOW the click box can be fitted, against geometry that
+					# finally describes the plate. The blanket `category !=
+					# "armor"` skip further up is justified by "armor is
+					# auto-scaled to its facet right after this" - which was
+					# true while the fit WAS a node scale the box inherited,
+					# and false the moment the plate started carrying its own
+					# extent. Without this a facet-wide plate keeps the
+					# catalog-sized 2 x 0.2 x 2 click target at its centre and
+					# is unselectable everywhere else.
+					_refit_module_collider(new_weapon)
 			if type_id == "energy_barrier_projector":
 				VisualBuilder.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color, tweaks)
 
@@ -1785,6 +1804,21 @@ static func _measure_hull_facet(hull: Node3D, local_pos: Vector3, local_normal: 
 	if not mesh_inst or not mesh_inst.mesh:
 		return result
 
+	# BAKED FACET MAP FIRST. hull_facets.gd answers "which face is this" from a
+	# segmentation computed once per hull, so the result depends only on WHICH
+	# facet was hit and never on where within it - measured across 216 drop
+	# points per hull, zero facets came back ambiguous, against 15 of 15 on the
+	# Brenntal for the live flood below.
+	#
+	# The live measurement stays as the fallback, for three real cases: a hull
+	# whose sidecar has not been baked yet, one whose .glb was re-exported so
+	# the triangle-count guard trips, and the Hull Builder's in-progress
+	# assemblies, which have no sidecar at all.
+	var baked := HullFacetsScript.measure(mesh_inst, hull.get_meta("type_id", ""),
+		local_pos, local_normal, module_basis)
+	if baked.get("valid", false):
+		return baked
+
 	var xform = mesh_inst.transform
 
 	var faces: PackedVector3Array = mesh_inst.mesh.get_faces()
@@ -2068,6 +2102,96 @@ static func _build_facet_polygon_mesh(outline: PackedVector2Array, thickness: fl
 
 	st.generate_normals()
 	return st.commit()
+
+
+# Installs the facet-conforming plate onto an armor module. THE ONLY PLACE that
+# does it: _place_weapon, _reclassify_module_after_drag and
+# blueprint_manager.reconstruct_vehicle all route through here, so a plate is
+# identical whether it was just dropped, dragged onto a new facet, loaded from
+# disk, or spawned into a match.
+#
+# WHY THE CHILD'S TRANSFORM IS RESET, AND WHY THAT IS THE WHOLE FIX
+# ---------------------------------------------------------------------------
+# Every armor type in the catalog ships an authored .glb and none are in
+# MODULAR_ASSEMBLY_TYPES, so build_visual() takes its MONOLITHIC branch, which
+# leaves the mesh child carrying three things the authored plate needs and the
+# conform plate must not inherit:
+#
+#   * rotation.y = 90 deg - the TripoSG native orientation offset
+#   * scale = fit_scale   - uniform fit onto the catalog's largest axis
+#                           (measured: 2.50x armor_plating, 2.00x slat_armor,
+#                            1.96x spaced_composite, 2.01x ablative_foam)
+#   * position.y          - the authored mesh's bottom-anchor correction
+#
+# Assigning `.mesh` alone - which is what this used to do - therefore rendered a
+# plate measured at 2.81 x 3.46 as 8.64 x 7.02, 0.50 thick, floating 0.10 above
+# the skin, with its two tangent axes swapped by the yaw. That is exactly the
+# "much too large, rotated 90 degrees" symptom tests/test_facet_polygon_visual.gd's
+# own header describes, and NEITHER of the two polygon tests could catch it:
+# both build a fresh MeshInstance3D at identity instead of reusing the one
+# build_visual() made, so they verify the mesh math and never touch the
+# transform that was destroying it.
+#
+# The polygon mesh's vertices are ALREADY in the module's local frame, at the
+# measured extent and the catalog thickness, spanning y = 0 (the hull skin) to
+# y = thickness. Identity is the only correct transform for it.
+#
+# THE MATERIAL IS DELIBERATELY LEFT ALONE (Chris, 2026-08-17). Only the SHAPE
+# conforms to the hull; the plate keeps its own armor material and colour, which
+# is what makes it legible as armor rather than as a bulge in the hull. That
+# material is already correct on the way in: the authored .glb goes through
+# _mesh_inst(), which resolves PartMaterials' "armor" role (metallic 0.45,
+# roughness 0.58, hull_upper livery zone) against the catalog colour. Swapping
+# `.mesh` alone preserves it, so this function must NOT repaint - an earlier
+# draft applied the hull's own finish here and erased exactly the distinction
+# the role was added to draw.
+static func apply_facet_plate(module: Node3D, facet_meas: Dictionary,
+		type_id: String, cat_size: Vector3, hull: Node3D = null) -> bool:
+	if module == null or not is_instance_valid(module):
+		return false
+	# CONFORMED when the measurement came from a baked facet map, flat
+	# otherwise. A flat plate is only defensible on a facet that is actually
+	# flat, and most are not - so the extruded convex-hull polygon is now the
+	# FALLBACK for un-baked hulls rather than the normal case.
+	var poly: ArrayMesh = null
+	if hull != null and is_instance_valid(hull) and facet_meas.has("facet_id"):
+		var mesh_inst := hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+		if mesh_inst == null:
+			mesh_inst = hull.get_node_or_null("PhysicsMesh") as MeshInstance3D
+		poly = HullFacetsScript.build_plate(mesh_inst, hull.get_meta("type_id", ""),
+			int(facet_meas["facet_id"]), type_id, cat_size,
+			facet_meas.get("center", module.position),
+			facet_meas.get("basis", module.transform.basis))
+	if poly == null:
+		poly = _build_facet_polygon_mesh(facet_meas.get("outline", PackedVector2Array()), cat_size.y)
+	if poly == null:
+		return false
+	var inst: MeshInstance3D = null
+	for child in module.get_children():
+		if child is MeshInstance3D:
+			inst = child as MeshInstance3D
+			break
+	if inst == null:
+		# No DIRECT mesh child: either the monolithic branch wrapped its mesh in
+		# an animation pivot, or the .glb is missing and the procedural fallback
+		# drew nothing. The plate still has to exist, and it has to be a direct
+		# child so the next call through here finds it rather than stacking a
+		# second one on top. Only THIS path has no material to preserve, so it
+		# is the only one that resolves one - the same role and colour the
+		# authored path would have produced.
+		inst = MeshInstance3D.new()
+		var plate_type := ""
+		if module.has_meta("module_data") and module.get_meta("module_data") != null:
+			plate_type = module.get_meta("module_data").type_id
+		var plate_cat: Dictionary = ModuleCatalog.get_module_data(plate_type) if plate_type != "" else {}
+		inst.material_override = PartMaterialsScript.get_material(
+			PartMaterialsScript.role_for_part(plate_type),
+			plate_cat.get("color", Color.WHITE))
+		module.add_child(inst)
+	inst.mesh = poly
+	inst.transform = Transform3D.IDENTITY
+	return true
+
 
 # Raycast used by every placement path. Traces the precise hull surface first
 # and only falls back to the bounding box if that misses, so a dropped module
@@ -2755,6 +2879,10 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 			target_x = facet_meas["size"].x
 			target_z = facet_meas["size"].z
 			armor_pos = facet_meas["center"]
+			# Same facet-derived orientation as the initial-placement path, so a
+			# plate dragged onto a face lands identically to one dropped there.
+			if facet_meas.has("basis"):
+				module.transform.basis = facet_meas["basis"]
 		else:
 			var hull_x = module.transform.basis.x.abs()
 			var hull_z = module.transform.basis.z.abs()
@@ -2795,17 +2923,15 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 		# above is then wrong (the new mesh is already at the right extent),
 		# so scale and scale_multiplier are reset to (1,1,1).
 		if facet_meas.get("valid", false):
-			var outline: PackedVector2Array = facet_meas.get("outline", PackedVector2Array())
-			if outline.size() >= 3:
-				var poly_mesh := _build_facet_polygon_mesh(outline, catalog_data.get("size", Vector3.ONE).y)
-				if poly_mesh != null:
-					for child in module.get_children():
-						if child is MeshInstance3D:
-							(child as MeshInstance3D).mesh = poly_mesh
-							break
-					module.scale = Vector3.ONE
-					if mod_data:
-						mod_data.scale_multiplier = Vector3.ONE
+			if apply_facet_plate(module, facet_meas, data.type_id,
+					catalog_data.get("size", Vector3.ONE), hull):
+				module.scale = Vector3.ONE
+				if mod_data:
+					mod_data.scale_multiplier = Vector3.ONE
+				# Same reasoning as the initial-placement path: the plate now
+				# carries its own extent, so the click box has to be re-fitted
+				# against it or a dragged plate keeps a catalog-sized target.
+				_refit_module_collider(module)
 
 	elif data.type_id == "resource_harvester":
 		var facet_meas = _measure_hull_facet(hull, module.position, local_normal, module.transform.basis)

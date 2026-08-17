@@ -55,10 +55,24 @@ const NOT_ADJACENT := "TOO FAR FROM YOUR BASE"
 # `terrain_height_at()` and the scene tree groups; that is the same narrow
 # surface ProductionService takes.
 #
+# The `structures` and `resource_nodes` arrays are PRE-HOISTED inputs the AI's
+# find_site() passes in, because a 12-ring x 16-sample ring scan is 192
+# candidates per build attempt and the per-candidate get_nodes_in_group() was
+# the worst-frame cost in the commander section (PR8, 2026-08-16). Every other
+# caller - the player's ghost, the tests, any future direct caller - takes the
+# default-fetch path and pays one get_nodes_in_group() per call, which is fine
+# for the per-frame ghost and the once-off test.
+#
 # Returns {"valid": bool, "reason": String}.
 static func validity(world, team: int, at: Vector3, kind: String,
 		blueprint: Dictionary = {}, structures: Array = [],
 		resource_nodes: Array = []) -> Dictionary:
+	if structures.is_empty() or resource_nodes.is_empty():
+		var tree: SceneTree = world.get_tree()
+		if structures.is_empty():
+			structures = tree.get_nodes_in_group("structures")
+		if resource_nodes.is_empty():
+			resource_nodes = tree.get_nodes_in_group("resource_nodes")
 	var footprint := footprint_for(kind, blueprint)
 	var half: float = maxf(footprint.x, footprint.z) * 0.5
 
