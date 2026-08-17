@@ -345,6 +345,13 @@ func _ready() -> void:
 	# build_phase emissions after this point trace where the hang was.
 	_evaluate_logging_flags()
 	_emit_progress(0.01, "Initializing command systems")
+	# PR9 (2026-08-17). Yield at the first emission so the deploy-gate
+	# bar can paint frame 0 before any of the heavy sync work below
+	# runs. Without this, the bar shows 0% for the entire _ready()
+	# build (60+ seconds in the F4 dump from the 215 s playtest) and
+	# then jumps to 100% when world_is_ready fires - which is what
+	# the user reported as a stuck bar.
+	await get_tree().process_frame
 
 	bp_manager = BlueprintManagerScript.new()
 	bp_manager.name = "BlueprintManager"
@@ -454,6 +461,7 @@ func _ready() -> void:
 	# startup frames leaves a window where a unit's very first path query runs
 	# before NavigationServer3D has resynced, and the unit drives into the lake.
 	_emit_progress(0.02, "Calibrating rule set")
+	await get_tree().process_frame
 	_spawn_resource_nodes()
 	# 2026-08-13: deploy-gate progress emissions. See the `progress` signal
 	# header at :147-160 for the 0..1 fraction contract. Fractions below
@@ -462,8 +470,10 @@ func _ready() -> void:
 	# terrain bake runs - the bake is the wall-clock-dominant phase and
 	# owns 0.10..0.55 of the bar.
 	_emit_progress(0.05, "Locating resource deposits")
+	await get_tree().process_frame
 	_spawn_bases()
 	_emit_progress(0.10, "Surveying build sites")
+	await get_tree().process_frame
 	# 2026-08-16: sub-milestone in the terrain-bake span, so the bar
 	# moves while _setup_terrain() awaits. Otherwise the bar sits at
 	# "Surveying build sites" for the entire terrain phase (which can
@@ -491,7 +501,9 @@ func _ready() -> void:
 	_emit_progress(0.13, "Sculpting terrain mesh")
 	await _setup_terrain()
 	_emit_progress(0.60, "Plotting movement lanes")
+	await get_tree().process_frame
 	_emit_progress(0.62, "Indexing sensor grid")
+	await get_tree().process_frame
 
 	# After the bake: the flow field samples the ground navmesh for passability,
 	# so it needs the map RID that _setup_terrain() just produced.
@@ -506,9 +518,11 @@ func _ready() -> void:
 
 	_setup_vision()
 	_emit_progress(0.65, "Standing up awareness grid")
+	await get_tree().process_frame
 
 	_load_roster()
 	_emit_progress(0.70, "Indexing designs")
+	await get_tree().process_frame
 	# 2026-08-16: sub-milestone for the unit spawn phase. The deploy
 	# gate had 70%->80% with no movement, which on a populated roster
 	# (12+ units) reads as a 2-3 second stall. The unit spawn is also
@@ -516,17 +530,21 @@ func _ready() -> void:
 	# per-unit work the BattleLogger records), so logging the
 	# transition is worth the line.
 	_emit_progress(0.74, "Settling structures")
+	await get_tree().process_frame
 	_spawn_starting_units()
 	_emit_progress(0.80, "Preparing vehicle systems")
+	await get_tree().process_frame
 	_emit_progress(0.83, "Raising HUD")
 	_build_hud()
 	_emit_progress(0.90, "Raising command deck")
+	await get_tree().process_frame
 	# 2026-08-16: 0.90->0.95 was a 5% gap with no movement, including
 	# the AI commander setup (which can be a few hundred ms on a
 	# populated base). The "Briefing opposition" label was applied to
 	# ALL the work in that gap, which is the source of the "stuck"
 	# feel when the AI takes a moment.
 	_emit_progress(0.92, "Indexing telemetry")
+	await get_tree().process_frame
 	stats = MatchStatsScript.new()
 	# Battle-system unification (Phase 2). Test Range's rule set has
 	# enable_ai=false, which is the per-mode gate for "does the AI
@@ -563,12 +581,15 @@ func _ready() -> void:
 	# commander to brief; the jump from 0.90 to 1.00 without it
 	# would be a 10% step the bar smooths over awkwardly.
 	_emit_progress(0.95, "Briefing opposition")
+	await get_tree().process_frame
 	_emit_progress(0.97, "Standing by")
+	await get_tree().process_frame
 	# _setup_audio() was moved from after world_ready (2026-08-16) so
 	# the audio system is live before the deploy gate fires - the gate
 	# is the "everything is ready" beat, and audio is part of everything.
 	_setup_audio()
 	_emit_progress(0.99, "Awaiting deploy")
+	await get_tree().process_frame
 
 	# 1.00 is the LAST emission. world_is_ready flips first so the
 	# flag-based poll in scene_router.gd:_await_world_ready exits on
