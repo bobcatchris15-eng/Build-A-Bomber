@@ -97,6 +97,17 @@ const SUITE_ORDER := [
 	["stat_model", "test_count_tweaks_are_neutral_at_their_declared_default"],
 	["stat_model", "test_count_tweaks_scale_linearly_from_their_default"],
 	["stat_model", "test_armor_level_costs_more_mass_than_it_buys"],
+	# 2026-08-16: the "tuned for the unit" pass. Locomotion auto-scales to
+	# the hull (HULL_RELATIVE is the new default in locomotion_layout.gd),
+	# and the drivetrain's load/speed math is off `carried_weight` (=
+	# everything except hull + loco). Same precondition as the four above:
+	# pure stat arithmetic on a synthetic hull, so safe anywhere.
+	["stat_model", "test_locomotion_node_scale_tracks_hull_factors"],
+	["stat_model", "test_locomotion_scale_multiplier_tracks_node_scale"],
+	["stat_model", "test_drivetrain_bare_hull_is_not_overloaded"],
+	["stat_model", "test_drivetrain_weapons_add_to_load_ratio"],
+	["stat_model", "test_drivetrain_speed_uses_carried_weight_not_total"],
+	["stat_model", "test_drivetrain_overload_still_fires_from_carried_weight"],
 	["semantic_zoom", "test_semantic_zoom_service_thresholds"],
 	["semantic_zoom", "test_semantic_zoom_signal_emission"],
 	["semantic_zoom", "test_lab_view_modes"],

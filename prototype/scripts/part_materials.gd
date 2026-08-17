@@ -65,6 +65,17 @@ const ROLES := {
 	# takes the most paint mottling of anything here.
 	"painted": {"metallic": 0.25, "roughness": 0.62, "tint": 1.0, "base": Color(0.35, 0.35, 0.35), "wear": 0.85},
 
+	# Bolt-on armor plates (slat, spaced composite, ablative, energy
+	# barrier). Treated as a SKIN of the hull rather than as a separate
+	# substance: a player's chosen hull livery has to read across the
+	# armor or the unit looks like two different vehicles zippered
+	# together. tint_weight and zone_tint are both high (0.95 / 1.0) so
+	# the livery dominates the surface and only the role's base grey
+	# bleeds through in the deepest shadow. Wear is higher than steel's
+	# because armor takes hits - the eye expects a plate to look
+	# slightly more lived-in than the frame it bolts onto.
+	"armor": {"metallic": 0.45, "roughness": 0.58, "tint": 0.95, "zone_tint": 1.0, "base": Color(0.35, 0.35, 0.35), "wear": 0.70},
+
 	# Barrels, rails, tubes, bores. Dark, hard, and almost colour-immune to an
 	# INCIDENTAL tint - a barrel is gunmetal on a red gun and on a green gun
 	# alike, which is what `tint` 0.15 protects.
@@ -174,6 +185,12 @@ const ZONE_BY_ROLE := {
 	"action": "weapon_action",
 	"steel": "weapon_action",
 	"painted": "weapon_action",
+	# Bolt-on armor plates read as the hull's outer skin, so they take
+	# the upper hull's livery colour. hull_upper rather than hull_lower
+	# because at RTS zoom what the player sees is the upper silhouette;
+	# the lower zone is mostly the track skirt / running gear, which the
+	# armor plates don't cover.
+	"armor": "hull_upper",
 }
 
 const LiveryScript = preload("res://scripts/livery.gd")
@@ -224,6 +241,16 @@ const ROLE_HINTS := [
 	["venturi", "scorched"],
 	["nozzle", "scorched"],
 	["exhaust", "scorched"],
+	# Armor plates: classified before the generic "plate" / "composite"
+	# substrings below, which would otherwise misroute them. The
+	# substring is the type_id from module_catalog.gd, NOT the rendered
+	# .glb filename - visual_builder hands the catalog id through
+	# role_for_part().
+	["slat_armor", "armor"],
+	["spaced_composite", "armor"],
+	["ablative_foam", "armor"],
+	["armor_plating", "armor"],
+	["energy_barrier", "armor"],
 	["lens", "optics"],
 	["radar", "optics"],
 	["dish", "optics"],

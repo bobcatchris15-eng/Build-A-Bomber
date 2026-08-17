@@ -741,7 +741,13 @@ func _update_drivetrain_readout(dt: Dictionary) -> void:
 	else:
 		_speed_label.tooltip_text = "Chassis rated %.1f%s; this design's power/weight allows %.1f." % [dt["chassis_top_speed"], mult_note, dt["power_top_speed"]]
 
-	_load_label.text = "Load: %.0f / %.0f kg  (%.0f%%)" % [dt["weight"], dt["capacity"], load_pct]
+	# `carried_weight` here, not `weight` - the bar is `load_ratio` (= carried /
+	# capacity), so the numerator in the label has to be the carried mass for
+	# the two figures to agree. The total design mass is shown on the
+	# `weight_label` row above; the chassis/loco split it omits is the point
+	# of the "tuned for the unit" pass (Chris, 2026-08-16).
+	var carried: float = float(dt.get("carried_weight", dt.get("weight", 0.0)))
+	_load_label.text = "Load: %.0f / %.0f kg  (%.0f%%)" % [carried, dt["capacity"], load_pct]
 	_load_bar.value = minf(load_pct, _load_bar.max_value)
 	# HAZARD from 90% - the point of a warning is to arrive BEFORE the cliff,
 	# and a design at 95% is one armor plate away from the penalty.
@@ -765,9 +771,12 @@ func _update_drivetrain_readout(dt: Dictionary) -> void:
 			cost = "Top speed %.1f instead of %.1f (-%.0f%%)." % [move_speed, top_speed, cost_pct]
 		else:
 			cost = "Top speed down %.1f%% so far, and falling steeply from here." % cost_pct
-		_overweight_detail.text = "%.0f kg over what this locomotion is rated to carry. %s Buildable and fieldable as-is - add locomotion, shed mass, or accept the loss." % [
-			dt["weight"] - dt["capacity"], cost]
-	_load_label.tooltip_text = "What this design's locomotion is rated to carry, tweaks included.\nOver capacity, top speed falls steeply - see the warning below.\nUnder %.0f%%, the design runs light and gains top speed, up to +%.0f%% empty." % [
+		# Overage against capacity, not total: the locomotor is calibrated
+		# for the unit, so what it cannot carry is what matters. See the
+		# `_load_label` note above for the same reasoning.
+		_overweight_detail.text = "%.0f kg over what this locomotion is rated to carry. %s Buildable and fieldable as-is - add locomotion, shed carried mass, or accept the loss." % [
+			carried - dt["capacity"], cost]
+	_load_label.tooltip_text = "What this design's locomotion is rated to carry, tweaks included. The chassis and locomotion themselves are not counted against this limit - the locomotor is tuned for the unit.\nOver capacity, top speed falls steeply - see the warning below.\nUnder %.0f%%, the design runs light and gains top speed, up to +%.0f%% empty." % [
 		DrivetrainScript.UNDERLOAD_THRESHOLD * 100.0,
 		(DrivetrainScript.UNDERLOAD_CEILING - 1.0) * 100.0]
 

@@ -56,11 +56,16 @@ enum Pattern {
 ##
 ## HULL_RELATIVE is the default. The locomotor is treated as a self-contained
 ## system "tuned for the unit" (Chris, 2026-08-16): when a player drops a hull
-## into the Lab, the running gear grows or shrinks to fit it, so a 2x tall hull
-## on wheels gets 2x diameter wheels and a 2x wide hull on treads gets a 2x
-## long belt. The visual is the only thing that changes - the catalog's own
-## part weight scales with the hull, and the chassis/loco mass is the
-## "free baseline" excluded from the locomotor's load and speed math (see
+## into the Lab, the running gear grows or shrinks to fit it. The factor is
+## the CUBE ROOT OF THE HULL'S VOLUME, applied uniformly to all three axes -
+## so a 2x bigger hull in every dimension makes the wheel 2x bigger, and a
+## 2x bigger hull in just one dimension makes the wheel ~1.26x bigger
+## (proportional, not stretched to match the hull's aspect ratio). The
+## previous (footprint, height, footprint) split made tall+narrow hulls
+## grow egg-shaped wheels (Chris, 2026-08-16), so the factor is now
+## uniform. The visual is the only thing that scales - the catalog's own
+## part weight follows it, and the chassis/loco mass is the "free baseline"
+## excluded from the locomotor's load and speed math (see
 ## Drivetrain.analyze(), `carried_weight`).
 ##
 ## FIXED opts out. `legs` opts out because a taller hull on legs gives
@@ -75,7 +80,7 @@ enum Pattern {
 enum ScaleMode {
 	FIXED,          ## Use the layout's `node_scale` verbatim, no hull-relative scale.
 	HULL_HEIGHT,    ## Vector3(1, hull_height_factor, 1) - Y only, kept for compat.
-	HULL_RELATIVE,  ## Vector3(hull_footprint_factor, hull_height_factor, hull_footprint_factor).
+	HULL_RELATIVE,  ## Vector3(s, s, s) where s = cbrt(h * fp * fp) - cube root of volume, uniform.
 }
 
 ## Which spelling of the reach vector this type's mesh builder expects. The
@@ -470,12 +475,26 @@ static func has_layout(type_id: String) -> bool:
 ## `legs` because scaling it raised the body (giant-spider-legs) and
 ## `ornithopter_wing` because its 2x is the design intent, not a hull-relative
 ## auto-scale.
+##
+## The HULL_RELATIVE factor is the CUBE ROOT OF THE HULL'S VOLUME, applied
+## uniformly to all three axes. A 2x bigger hull in any one axis makes the
+## wheel bigger; a 2x bigger hull in every axis makes it 2x bigger; a hull
+## that is 2x tall but only 1x wide gives the same wheel as a hull that is
+## 1x tall and 2x wide. The previous (footprint, height, footprint) split
+## stretched the wheel into a tall ovoid on a tall+narrow hull ("egg-
+## shaped wheels", Chris, 2026-08-16) - which is what proportional scale
+## exists to prevent.
 static func node_scale_for(type_id: String, hull_height_factor: float,
 		hull_footprint_factor: float = 1.0) -> Vector3:
 	var spec: Dictionary = LAYOUTS.get(type_id, {})
 	match int(spec.get("scale_mode", ScaleMode.FIXED)):
 		ScaleMode.HULL_RELATIVE:
-			return Vector3(hull_footprint_factor, hull_height_factor, hull_footprint_factor)
+			# (h * fp * fp)^(1/3) = cbrt(hull_height_factor * hull_footprint_factor^2).
+			# Pass the same factor the geometry got, in all three axes, so
+			# the wheel stays a wheel rather than stretching to match the
+			# hull's aspect ratio.
+			var uniform: float = pow(hull_height_factor * hull_footprint_factor * hull_footprint_factor, 1.0 / 3.0)
+			return Vector3(uniform, uniform, uniform)
 		ScaleMode.HULL_HEIGHT:
 			return Vector3(1.0, hull_height_factor, 1.0)
 		_:
@@ -491,12 +510,18 @@ static func node_scale_for(type_id: String, hull_height_factor: float,
 ## with the hull - which is what Drivetrain.analyze() then subtracts to get
 ## `carried_weight`. FIXED types (legs, ornithopter) get their `node_scale`
 ## verbatim - same as before.
+##
+## The HULL_RELATIVE branch mirrors node_scale_for(): a single uniform factor
+## in all three axes, the cube root of the hull's volume, so the catalog
+## weight tracks the actual rendered size and `vol = scale^3` is a true
+## volumetric scale, not a per-axis artefact of the hull's aspect ratio.
 static func scale_multiplier_for(type_id: String, hull_height_factor: float = 1.0,
 		hull_footprint_factor: float = 1.0) -> Vector3:
 	var spec: Dictionary = LAYOUTS.get(type_id, {})
 	match int(spec.get("scale_mode", ScaleMode.FIXED)):
 		ScaleMode.HULL_RELATIVE:
-			return Vector3(hull_footprint_factor, hull_height_factor, hull_footprint_factor)
+			var uniform: float = pow(hull_height_factor * hull_footprint_factor * hull_footprint_factor, 1.0 / 3.0)
+			return Vector3(uniform, uniform, uniform)
 		ScaleMode.HULL_HEIGHT:
 			return Vector3.ONE
 		_:

@@ -2,9 +2,49 @@ import sys
 import os
 import math
 import bmesh
+import bpy
+import mathutils
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _greeble import *  # noqa: F401,F403
+
+# SQUASH DEPTH, NOT FOOTPRINT
+# ---------------------------------------------------------------------------
+# The four hull ARMOR MATERIALS are scattered by greeble_field.gd, which
+# places every instance at its AUTHORED SIZE on the hull face and aligns +Z
+# to the surface normal. The X/Y footprint of the part is the read - a bolt
+# field, an ERA mosaic, a tile lattice - and changing that footprint
+# re-engineers the silhouette. The Z extent is the THICKNESS - how far the
+# part stands off the hull - and that is a different knob.
+#
+# 2026-08-16: THICKNESS_SCALE was briefly set to 0.1 here, on the read of
+# "the armor modules are too thick, make them a tenth of what they are".
+# That was the wrong target. "Modules" in the design-lab vocabulary is the
+# PLACEABLE PARTS FROM THE CATALOG (armor_plating, slat_armor,
+# spaced_composite, ablative_foam), which are scaled at runtime by
+# module_placer._measure_hull_facet / the auto-scale block, not authored
+# in Blender. The greeble scatter on the hull (the bolts, ERA bricks,
+# tiles) is a separate, deliberately protruding system, and the rest of
+# the file's comments are right that they should keep their depth.
+# Reverted to 1.0 (no-op); the helper is kept so the constant stays
+# discoverable if a different read needs it later.
+THICKNESS_SCALE = 1.0
+
+
+def squash_z(bm, factor: float) -> None:
+	"""Compress every vertex's +Z toward z=0 by `factor`. The mounting face
+	(z=0 by convention, per _greeble.py header) does not move; everything
+	above it flattens. Run just before export_bmesh.
+
+	A plain vertex loop rather than bmesh.ops.scale because Blender 5.2's
+	bmesh scale operator has no `geom` keyword - it operates on a selection
+	that has to come from the active mesh, and a free-floating bmesh has no
+	selection. The result is the same; the form is just more honest about
+	what it does."""
+	if abs(factor - 1.0) < 1e-6:
+		return
+	for v in bm.verts:
+		v.co.z *= float(factor)
 
 # Repeating surface greebles that make the four hull ARMOR MATERIALS visually
 # distinguishable, rather than distinguishable only by shader tint.

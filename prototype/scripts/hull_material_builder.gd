@@ -51,8 +51,18 @@ static func apply_livery_zones(mat: ShaderMaterial, livery_id: String) -> void:
 	mat.set_shader_parameter("stripe_enabled", 1.0)
 
 const _DEFAULT_TEXTURE_WORLD_SIZE = 3.0
+# The 0.5 divisor halves the apparent panel-line density relative to the
+# previous "1 tile per AABB" mapping. The source hull_surface_*.png textures
+# were procedurally baked once and ship a uniform grid pattern; at one tile
+# per AABB the grid cells were ~12cm on a 2m unit, which read as a tiled
+# floor rather than panel breaks. 0.5 makes the cells ~24cm on the same
+# unit, in the range of actual armor plate seams. The chip-noise pattern in
+# the shader uses the same tex_pos and scales coherently, so the chipping
+# stays consistent with the panel grid spacing. If the source texture is
+# ever replaced with a hand-authored panel layout, the divisor can come
+# back to 1.0 and the panel density will be governed by the source art.
 static func _texture_scale_for_size(world_size: float) -> float:
-	return clamp(1.0 / max(world_size, 0.1), 0.05, 1.0)
+	return clamp(0.5 / max(world_size, 0.1), 0.05, 1.0)
 
 static func build_hull_material(p1: String, p2: String = "", texture_world_size: float = _DEFAULT_TEXTURE_WORLD_SIZE) -> ShaderMaterial:
 	var livery_id = p2 if p2 != "" else p1
@@ -84,16 +94,32 @@ static func apply_local_bounds(mat: ShaderMaterial, bounds_y: Vector2, bounds_x:
 		bounds_z = Vector2(-0.5, 0.5)
 	mat.set_shader_parameter("local_bounds_z", bounds_z)
 
-# The STRUCTURAL slot (surface 0) - the hull's bare frame.
-static func build_structural_material(_livery_id: String, texture_world_size: float = _DEFAULT_TEXTURE_WORLD_SIZE) -> ShaderMaterial:
+# The STRUCTURAL slot (surface 0).
+#
+# Originally intended to be the hidden interior / bare frame, with the
+# assumption that surface 0 was never visible from outside the hull. The
+# assumption broke when multi-surface hull meshes were authored with the
+# REAR (or most of the body) as surface 0: a large fraction of the
+# visible hull then rendered as a flat gray slab with no livery at all.
+# The user also dropped the original "surface 0 is invisible collide
+# geometry" intent, so the structural is now genuinely a part of the
+# rendered unit.
+#
+# The structural slot is now identical to the armor slot for COLOR, ZONE
+# FINISH, and PATTERN (livery applied in full), and differs from the
+# armor slot only in PBR (metallic=0.015 / roughness=0.97 vs whatever
+# the armor carries) and in base_color (darkened to 0.7 so the
+# structural reads as ~70% of the livery, a touch duller than the
+# painted armor it sits behind - what the "bare frame" character was
+# meant to convey).
+static func build_structural_material(livery_id: String, texture_world_size: float = _DEFAULT_TEXTURE_WORLD_SIZE) -> ShaderMaterial:
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
+	apply_livery_zones(mat, livery_id)
 	mat.set_shader_parameter("base_color", Color(1.0, 1.0, 1.0, 1.0).darkened(0.3))
 	mat.set_shader_parameter("texture_scale", _texture_scale_for_size(texture_world_size))
 	mat.set_shader_parameter("metallic", 0.015)
 	mat.set_shader_parameter("roughness", 0.97)
-	mat.set_shader_parameter("stripe_enabled", 0.0)
-	mat.set_shader_parameter("pattern_type", 0)
 	VisualTuningScript.apply(mat)
 	mat.set_shader_parameter("shield_mode", 0.0)
 	mat.set_shader_parameter("alpha_base", 1.0)

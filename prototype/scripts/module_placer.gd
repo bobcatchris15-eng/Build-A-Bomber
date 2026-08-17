@@ -1110,6 +1110,30 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 				mod_data.scale_multiplier = Vector3(new_weapon.scale.x, 1.0, new_weapon.scale.z)
 
 			new_weapon.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
+			# SHAPE CONFORM. Replace the BoxMesh the visual-builder fallback
+			# created (line ~3587 in visual_builder.gd, the "Simple box mesh
+			# for armor and basic parts" branch) with a polygonal plate whose
+			# outline is the facet's convex hull. Skipped for the energy
+			# barrier projector because that module has its own procedural
+			# visual rebuilt on the next two lines and its scale is forced to
+			# (1,1,1) above - clobbering either would undo the projector code.
+			if type_id != "energy_barrier_projector" and facet_meas.get("valid", false):
+				var outline: PackedVector2Array = facet_meas.get("outline", PackedVector2Array())
+				if outline.size() >= 3:
+					var poly_mesh := _build_facet_polygon_mesh(outline, cat_size.y)
+					if poly_mesh != null:
+						for child in new_weapon.get_children():
+							if child is MeshInstance3D:
+								(child as MeshInstance3D).mesh = poly_mesh
+								break
+						# Mesh's vertices are already in the new_weapon's local
+						# frame at the right extent and thickness, so the
+						# stretch that the auto-scale above applied is now
+						# wrong - reset it. Same for the scale_multiplier the
+						# collider refit reads.
+						new_weapon.scale = Vector3.ONE
+						if mod_data:
+							mod_data.scale_multiplier = Vector3.ONE
 			if type_id == "energy_barrier_projector":
 				VisualBuilder.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color, tweaks)
 
@@ -1749,6 +1773,7 @@ static func _measure_hull_facet(hull: Node3D, local_pos: Vector3, local_normal: 
 	var result = {
 		"size": Vector3.ZERO,
 		"center": local_pos,
+		"outline": PackedVector2Array(),
 		"valid": false
 	}
 	if not hull or not is_instance_valid(hull):
@@ -1804,11 +1829,17 @@ static func _measure_hull_facet(hull: Node3D, local_pos: Vector3, local_normal: 
 			best_d = d
 			start_idx = i
 
-	# Flood-fill connected coplanar triangles from start_idx
+	# Flood-fill connected coplanar triangles from start_idx. The plate's
+	# intent is to be the WHOLE FACET, slightly thickened - so the
+	# facet_verts set has to grow out to every triangle that shares the
+	# facet's normal and is vertex-connected to the initial click hit,
+	# not stop at the 0.20m plane_dist filter. (The 0.20m filter is
+	# still used above to pick the STARTING triangle - the click
+	# registration; everything connected past that is in.)
 	var visited = {}
 	var queue = [start_idx]
 	visited[start_idx] = true
-	var facet_verts = []
+	var facet_verts: Array = []
 
 	while not queue.is_empty():
 		var curr = queue.pop_back()
@@ -1840,6 +1871,14 @@ static func _measure_hull_facet(hull: Node3D, local_pos: Vector3, local_normal: 
 	var max_x = -1e9
 	var min_z = 1e9
 	var max_z = -1e9
+	# Outline points are collected in 2D tangent coordinates (relative to the
+	# clicked position). The convex hull of these is the facet's actual outline
+	# in the (bx, bz) plane - used by the armor visual to take the shape of the
+	# facet instead of just the bounding rectangle. The 2D coords are kept
+	# raw here; the caller can re-centre against `mid_x`/`mid_z` (returned via
+	# the existing `center` field) before passing them to mesh builders.
+	var outline_pts: PackedVector2Array = PackedVector2Array()
+	outline_pts.resize(facet_verts.size())
 
 	for v in facet_verts:
 		var rel = v - local_pos
@@ -1850,6 +1889,10 @@ static func _measure_hull_facet(hull: Node3D, local_pos: Vector3, local_normal: 
 		min_z = min(min_z, pz)
 		max_z = max(max_z, pz)
 
+	for i in range(facet_verts.size()):
+		var rel = facet_verts[i] - local_pos
+		outline_pts[i] = Vector2(rel.dot(bx), rel.dot(bz))
+
 	var size_x = max_x - min_x
 	var size_z = max_z - min_z
 	if size_x > 0.1 and size_z > 0.1:
@@ -1858,8 +1901,173 @@ static func _measure_hull_facet(hull: Node3D, local_pos: Vector3, local_normal: 
 		result["size"] = Vector3(size_x, 0, size_z)
 		result["center"] = local_pos + bx * mid_x + bz * mid_z
 		result["valid"] = true
+		# 2D convex hull of the facet's vertices, in the (bx, bz) tangent
+		# plane. Re-centred on the bounding-box midpoint so the resulting
+		# mesh's local origin = the bbox centre, matching where the placer
+		# positions the module. The input set is the whole facet
+		# (flood-filled above), so the convex hull is the facet's actual
+		# outline, not just a small clicked area. The placer then extrudes
+		# the polygon along +Y (the new_weapon's Y axis, which is the
+		# surface normal because the basis is _align_up_to(local_normal))
+		# by the catalog thickness, and the result reads as a slightly
+		# thicker bit of hull with the facet's shape, size, and
+		# orientation. Geometry2D.convex_hull handles degenerate input
+		# (collinear points, duplicates) by returning the largest subset,
+		# but the caller still has to guard against `size() < 3` for a
+		# polygon mesh.
+		if outline_pts.size() >= 3:
+			var centred := PackedVector2Array()
+			centred.resize(outline_pts.size())
+			for i in range(outline_pts.size()):
+				centred[i] = Vector2(outline_pts[i].x - mid_x, outline_pts[i].y - mid_z)
+			var hull_pts := Geometry2D.convex_hull(centred)
+			if hull_pts.size() >= 3:
+				result["outline"] = hull_pts
 
 	return result
+
+
+# Builds the polygonal plate that replaces an armor module's BoxMesh once the
+# facet's outline is known. The plate is built in the new_weapon's LOCAL frame
+# (X = bx tangent, Y = hull normal, Z = bz tangent), with its bottom face at
+# Y=0 (the hull skin) and its top face at Y=thickness (the catalog's stated
+# plate depth). The outline must already be centred on the bounding-box
+# midpoint - see _measure_hull_facet's "outline" field.
+#
+# WHAT THIS IS AND ISN'T
+# ---------------------------------------------------------------------------
+# It IS a polygonal plate whose outline matches the facet's convex hull, so a
+# plate dropped on a pentagon-shaped hull facet reads as a pentagon and not as
+# a rectangle stretched over the same bounding box. UVs on the top face are
+# normalised to the outline's own bounding box (0..1), so the catalog's
+# color/pattern scales with the facet - a thin long facet gets a thin long
+# plate, a fat short facet gets a fat short one, with no per-facet tweaking.
+#
+# It IS NOT a concave hull. Geometry2D.convex_hull fills concavities. For the
+# roster's hulls (mostly boxy, simple convex facets) this is exact; for a
+# hypothetical notched or L-shaped facet the plate will smooth over the
+# notch. That is a deliberate "good enough for now" - going to a real concave
+# hull means an alpha shape / re-rim algorithm, which is out of scope for the
+# facet-fitting pass.
+#
+# It IS NOT a CSG cut against the hull mesh. The plate sits flat on the
+# hull surface; the hull's own micro-curvature is the only thing that
+# prevents a perfect flush on non-planar facets. For a true coplanar fit the
+# hull mesh's UVs would have to be reused and the plate projected onto them,
+# which is a different architecture.
+static func _build_facet_polygon_mesh(outline: PackedVector2Array, thickness: float) -> ArrayMesh:
+	if outline.size() < 3 or thickness <= 0.0:
+		return null
+	# Outline bbox for UV mapping on the top face. Bbox-relative UVs are the
+	# same frame the BoxMesh was implicitly using (its size.x/.z was the
+	# catalog extent, with the same default UV stretch).
+	var min_x = 1e9
+	var max_x = -1e9
+	var min_y = 1e9
+	var max_y = -1e9
+	for p in outline:
+		min_x = min(min_x, p.x)
+		max_x = max(max_x, p.x)
+		min_y = min(min_y, p.y)
+		max_y = max(max_y, p.y)
+	var w = max_x - min_x
+	var h = max_y - min_y
+	if w < 0.001 or h < 0.001:
+		return null
+
+	# Centroid in 2D - the apex of the top and bottom fan. The fan's apex is
+	# the mean of the outline vertices; for a symmetric outline (rectangle,
+	# regular polygon) this matches the bounding-box midpoint already encoded
+	# in the outline's frame, and for an irregular one it just makes the fan
+	# tessellate a bit more evenly.
+	var c := Vector2.ZERO
+	for p in outline:
+		c += p
+	c /= float(outline.size())
+
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+	# --- TOP FACE (triangular fan from centroid, normal +Y) ----------------
+	# Godot's default mesh winding is CCW for front faces, and Geometry2D's
+	# convex_hull returns vertices in CCW order viewed from +Y. Fan triangles
+	# (centroid, p_i, p_{i+1}) therefore face UP, which is what an armor plate
+	# wants - the visible side is the one facing the camera/player.
+	#
+	# UV channel gotcha: SurfaceTool 4.x has set_uv(), NOT add_uv(). The UV
+	# is bound to the NEXT vertex added - so set_uv() has to be called before
+	# add_vertex(), not after, or the wrong vertex carries the UV. (Stacking
+	# three add_uv()s then three add_vertex()s is the silent failure mode the
+	# original draft shipped with - the mesh was built but every vertex
+	# carried UV (0,0) and the armor's color stretched across the whole top
+	# face. set_uv() is the correct API.)
+	var centroid_top_uv := Vector2((c.x - min_x) / w, (c.y - min_y) / h)
+	var centroid_top := Vector3(c.x, thickness, c.y)
+	for i in range(outline.size()):
+		var p := outline[i]
+		var p_next := outline[(i + 1) % outline.size()]
+		var p_top := Vector3(p.x, thickness, p.y)
+		var p_next_top := Vector3(p_next.x, thickness, p_next.y)
+		var p_uv := Vector2((p.x - min_x) / w, (p.y - min_y) / h)
+		var p_next_uv := Vector2((p_next.x - min_x) / w, (p_next.y - min_y) / h)
+		st.set_uv(centroid_top_uv)
+		st.add_vertex(centroid_top)
+		st.set_uv(p_uv)
+		st.add_vertex(p_top)
+		st.set_uv(p_next_uv)
+		st.add_vertex(p_next_top)
+
+	# --- BOTTOM FACE (same fan, reversed winding, normal -Y) ---------------
+	# Reversed so the bottom face's triangles face DOWN. Visible from below
+	# the hull, which is the only place a viewer ever sees it.
+	#
+	# UV channel note (carried over from the top-face block): set_uv() binds
+	# to the NEXT vertex and stays bound. The top-fan loop ends with the
+	# last outline vertex's UV still active, so every add_vertex() below
+	# would inherit that UV silently and pin all the bottom / side verts
+	# to a single texel. Explicitly binding (0, 0) before each add_vertex()
+	# below resets the binding to a known value - safe for these faces
+	# because the standard material does not texture the underside anyway.
+	var centroid_bot := Vector3(c.x, 0.0, c.y)
+	for i in range(outline.size()):
+		var p := outline[i]
+		var p_next := outline[(i + 1) % outline.size()]
+		var p_bot := Vector3(p.x, 0.0, p.y)
+		var p_next_bot := Vector3(p_next.x, 0.0, p_next.y)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(centroid_bot)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_next_bot)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_bot)
+
+	# --- SIDE FACES (quads between top and bottom edges) --------------------
+	# Two triangles per side. The exact winding is left to generate_normals()
+	# below; for an armor plate the side faces are a thin strip whose normals
+	# mostly matter for shading, not for visibility. Same UV-clear rule as
+	# the bottom face: explicit (0, 0) before each add_vertex().
+	for i in range(outline.size()):
+		var p := outline[i]
+		var p_next := outline[(i + 1) % outline.size()]
+		var p_top := Vector3(p.x, thickness, p.y)
+		var p_next_top := Vector3(p_next.x, thickness, p_next.y)
+		var p_bot := Vector3(p.x, 0.0, p.y)
+		var p_next_bot := Vector3(p_next.x, 0.0, p_next.y)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_top)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_bot)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_next_top)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_next_top)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_bot)
+		st.set_uv(Vector2.ZERO)
+		st.add_vertex(p_next_bot)
+
+	st.generate_normals()
+	return st.commit()
 
 # Raycast used by every placement path. Traces the precise hull surface first
 # and only falls back to the bounding box if that misses, so a dropped module
@@ -2579,6 +2787,25 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 			mod_data.scale_multiplier = Vector3(module.scale.x, 1.0, module.scale.z)
 
 		module.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
+		# SHAPE CONFORM. Mirrors the same swap _place_weapon does at initial
+		# placement: the BoxMesh the visual-builder fallback created is the
+		# old "rectangle stretched to the bounding box" approximation, and
+		# for any facet with a measurable outline it is replaced with a
+		# polygonal plate whose outline is the convex hull. The auto-scale
+		# above is then wrong (the new mesh is already at the right extent),
+		# so scale and scale_multiplier are reset to (1,1,1).
+		if facet_meas.get("valid", false):
+			var outline: PackedVector2Array = facet_meas.get("outline", PackedVector2Array())
+			if outline.size() >= 3:
+				var poly_mesh := _build_facet_polygon_mesh(outline, catalog_data.get("size", Vector3.ONE).y)
+				if poly_mesh != null:
+					for child in module.get_children():
+						if child is MeshInstance3D:
+							(child as MeshInstance3D).mesh = poly_mesh
+							break
+					module.scale = Vector3.ONE
+					if mod_data:
+						mod_data.scale_multiplier = Vector3.ONE
 
 	elif data.type_id == "resource_harvester":
 		var facet_meas = _measure_hull_facet(hull, module.position, local_normal, module.transform.basis)

@@ -63,9 +63,14 @@ static func evaluate(stats: Dictionary) -> Array:
 	elif bool(dt.get("is_overloaded", false)) \
 			and float(dt.get("load_ratio", 0.0)) >= OVERLOAD_NAG_RATIO:
 		var lost := float(dt.get("speed_lost_to_overload", 0.0))
+		# `carried_weight` here, not `weight` - the load_ratio is off the
+		# carried weight (Chris, 2026-08-16, "tuned for the unit"), so the
+		# numerator on the verdict has to be the same figure the bar shows,
+		# or the rail reads two different stories.
+		var carried := float(dt.get("carried_weight", dt.get("weight", 0.0)))
 		out.append(_v(Severity.BLOCKING, "OVER CAPACITY",
 			"%s kg on %s kg of drive. Top speed cut by %.1f m/s." % [
-				_round(dt.get("weight", 0.0)), _round(dt.get("capacity", 0.0)), lost]))
+				_round(carried), _round(dt.get("capacity", 0.0)), lost]))
 
 	if not bool(stats.get("has_weapons", false)):
 		# Harvesters and scouts are legitimately unarmed, and DesignStats already

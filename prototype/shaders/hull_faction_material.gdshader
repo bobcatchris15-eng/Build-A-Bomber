@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode blend_mix, depth_draw_always, cull_disabled, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, depth_draw_always, cull_disabled, diffuse_lambert_wrap, specular_schlick_ggx;
 
 // -----------------------------------------------------------------------------
 // HULL LIVERY & SURFACE SHADER
@@ -31,6 +31,16 @@ uniform float normal_strength : hint_range(0.0, 2.0) = 0.45;
 uniform float shield_mode : hint_range(0.0, 1.0) = 0.0;
 uniform float alpha_base : hint_range(0.0, 1.0) = 1.0;
 uniform float flash_amount : hint_range(0.0, 1.0) = 0.0;
+// Indirect / ambient lift. Without this, PBR diffuse is 0 on back-facing
+// surfaces and the livery is unreadable from the side/back of the hull.
+// The default 0.25 is in the realistic IBL range for non-metals (metals
+// get less lift from real IBL because their reflectance eats the diffuse,
+// but the simple version here lifts everything uniformly - dial down to
+// 0.0 if you want the back to be properly black on a metallic livery).
+// Added as EMISSION so it stacks on top of the PBR diffuse without
+// interfering with the diffuse_lambert_wrap model; for the front face
+// the PBR already gives full diffuse, and the EMISSION clamps to 1.0.
+uniform float indirect_lift : hint_range(0.0, 1.0) = 0.25;
 uniform float edge_ink_strength : hint_range(0.0, 1.0) = 0.95;
 uniform float ink_width : hint_range(0.05, 0.9) = 0.32;
 uniform vec3 ink_color : source_color = vec3(0.04, 0.035, 0.05);
@@ -394,6 +404,15 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * vec4(final_world_normal, 0.0)).xyz);
 
 	ALPHA = alpha_base;
+	// Indirect/ambient lift: the PBR diffuse contribution is zero on a
+	// face that points away from the light, so the livery is unreadable
+	// from the back/side of the unit without an indirect term. Set the
+	// baseline EMISSION to a fraction of the weathered+grimed colour so
+	// the back reads as the same material in shadow rather than as a
+	// black silhouette. The shield / emissive_strength overrides below
+	// win when active, so a glowing shield or a true emissive accent
+	// still override the ambient lift.
+	EMISSION = color * indirect_lift;
 	if (shield_mode > 0.5) {
 		EMISSION = base_color.rgb * 0.12;
 	} else if (emissive_strength > 0.0) {
