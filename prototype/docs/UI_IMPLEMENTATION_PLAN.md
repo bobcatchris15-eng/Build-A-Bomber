@@ -179,7 +179,7 @@ Not in the original plan, but the substance of the AAA polish pass.
 3. **Procedural Prop Textures & Depth/Wear (Phases 2 & 3):** Deterministic 256x256 albedo/ORM/height generation (`tools/generate_ui_props.py`), PCG3D integer hash swap in shaders, Parallax Occlusion Mapping (POM) raymarching with tangent-space normals, and world-normal equipment dust.
 4. **Lab Gizmo & Planar Handles (Phase 5):** Hull excluded from gizmo manipulation (`D10`), dynamic face-on planar handles (`PlanarXY`, `PlanarXZ`, `PlanarYZ`) with angle culling (`D12`), and precision modifier (5x reduction).
 5. **Machined Radials (Phases 6 & 7):** Shared `RingDraw` rendering library, silhouette-sized `ModuleActionRing` (`D13`) framing 3D modules, and transient stroke-driven `MarkingMenu` (`D9`, `D14`) with fast-flick and slow-hold paths.
-6. **Command Card & Selection Panels (Phases 8, 9, 10):** 3x4 positional command card backed by `CommandRegistry`, `SelectionPanel` and `ModuleSelectionPanel` with design aggregation and RTS sub-group grammar.
+6. **Command Card & Selection Panels (Phases 8, 9, 10):** 3x4 positional command card backed by `CommandRegistry` and `SelectionPanel` with design aggregation and RTS sub-group grammar. The Phase 10 multi-module aggregation was scoped as `ModuleSelectionPanel` but never built; the lab uses single-module selection via `LabToolbar`.
 7. **Unified Pointer & Camera Feel (Phase 11):** Monotonic `PointerGain` transfer function unified across `DesignerCamera` orbit and `RTSCamera` middle-drag pan.
 8. **Enforcement Audits (Phase 12):** `UIAudit` extended with no-emoji verification and keybinding collision assertions; scene load probing integrated into `run_tests.gd`.
 
