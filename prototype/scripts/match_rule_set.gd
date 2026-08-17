@@ -140,6 +140,15 @@ var ai_difficulty: String = "normal"
 # an RTS. Test Range stays at 60 so unit responsiveness feels snappy.
 var physics_ticks_per_second: int = 60
 
+# PR6 (2026-08-15). Enable the structured per-match JSONL log +
+# the in-memory section profiler. Default OFF for the shipping game
+# (the BattleLogger file handle is process-global and the section
+# timers add a static-bool read per call site, however cheap); ON
+# for playtests. The match_setup.gd / operations_draft.gd /
+# test_range_launcher.gd factories can flip it for their mode, or
+# the engine can set it via an env var (KITBASH_LOG_PROFILING=1).
+var log_profiling: bool = false
+
 # --- Simulation seed ----------------------------------------------------------
 #
 # The seed for the simulation random stream (scripts/battle/sim_rng.gd). This
@@ -231,6 +240,11 @@ static func skirmish(map_id: String, player_faction: String,
 	rs.selected_blueprint_paths = blueprint_paths.duplicate()
 	rs.ai_difficulty = difficulty
 	rs.physics_ticks_per_second = 30   # Fix A: double the unit ceiling
+	# PR6 (2026-08-15). Skirmish is the playtest entry point; default to
+	# the structured log on so a playtest always produces a file the
+	# post-mortem can read. The harness sets it back to false for its
+	# control runs.
+	rs.log_profiling = true
 	# Defaults are the Skirmish values; nothing else to flip.
 	return rs
 

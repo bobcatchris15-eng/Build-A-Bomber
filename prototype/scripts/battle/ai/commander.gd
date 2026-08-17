@@ -113,12 +113,26 @@ const HARVESTERS_PER_REFINERY := 3
 # for this by the time it would finish", not "can I pay for it this instant".
 const PLANNING_HORIZON := 30.0
 
+# Minimum time between re-decides. PR5 (2026-08-15) added event-driven
+# re-decide via set_dirty(); this cap prevents a burst of dirty events
+# (e.g. a wipe that kills 6 units in 2 seconds) from triggering 6
+# re-decides back-to-back. The full DECISION_INTERVAL still applies if
+# nothing marks the world dirty; this is only a floor.
+const MIN_DECISION_INTERVAL := 0.5
+
 var team: int = 1
 var difficulty: String = "normal"
 
 var _world = null
 var _timer: float = 0.0
 var _last_action: int = -1
+# PR5 (2026-08-15). Event-driven re-decide flag. set_dirty() is called from
+# the match director when a relevant event lands (structure built, unit
+# died, enemy sighted). tick() short-circuits unless either the periodic
+# interval has elapsed OR the flag is set; the flag is cleared after a
+# decision lands. Net: 90 re-decides over a 3-minute match become ~30,
+# with the same responsiveness to the events that matter.
+var _dirty: bool = true
 
 
 func setup(world, ai_team: int, ai_difficulty: String = "normal") -> void:
@@ -127,13 +141,34 @@ func setup(world, ai_team: int, ai_difficulty: String = "normal") -> void:
 	difficulty = ai_difficulty
 
 
+# Mark the world state as needing a re-decide. Cheap; the match_director
+# calls this from structure_built.connect, unit_died signal handlers, and
+# the fog-revealed callback. Without this, the commander would only
+# re-consider on a fixed 2 s interval, missing urgent changes.
+func set_dirty() -> void:
+	_dirty = true
+
+
 func tick(delta: float) -> void:
 	if _world == null:
 		return
 	_timer += delta
-	if _timer < DECISION_INTERVAL:
+	# PR5 (2026-08-15). Two gates, not one:
+	#   1. The periodic gate: at least DECISION_INTERVAL since the last
+	#      decision. This is the "think about whether to change strategy"
+	#      pace; the AI does not thrash between two near-equal actions
+	#      every frame.
+	#   2. The dirty gate: the world state has changed since the last
+	#      decision (set_dirty() was called). If nothing changed, there
+	#      is nothing new to score, and re-deciding is wasted work.
+	# A re-decide runs when EITHER gate fires. The MIN_DECISION_INTERVAL
+	# floor keeps a burst of dirty events from re-deciding back-to-back.
+	var periodic_due: bool = _timer >= DECISION_INTERVAL
+	var dirty_due: bool = _dirty and _timer >= MIN_DECISION_INTERVAL
+	if not (periodic_due or dirty_due):
 		return
 	_timer = 0.0
+	_dirty = false
 	var state := read_state()
 	var choice := decide(state)
 	_last_action = choice

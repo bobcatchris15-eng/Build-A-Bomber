@@ -484,6 +484,16 @@ func _ready() -> void:
 	if ai_enabled:
 		commander = CommanderScript.new()
 		commander.setup(self, ENEMY_TEAM, ai_diff)
+		# PR5 (2026-08-15). The commander is now event-driven (see
+		# commander.gd's set_dirty()). Wire the structure-built event so
+		# the AI re-decides when something on the field actually changes,
+		# rather than only on its 2 s periodic tick. Unit deaths are
+		# routed through record_unit_lost(), which is called for every
+		# team - we only flag the commander for enemy losses (its own
+		# team's losses already factor in via the structure count change).
+		structure_built.connect(func(_t: int, _k: String):
+			if commander != null:
+				commander.set_dirty())
 	# Always emit the 0.95 step, even when the AI is disabled (Test
 	# Range's rule set has enable_ai=false). The label is the
 	# "briefing" beat regardless of whether there is an opponent
@@ -507,15 +517,25 @@ func _ready() -> void:
 	# dominates "first frame" timings (terrain bake, mesh bakes, unit
 	# spawns), which would otherwise make every section look expensive
 	# and drown out the live-match stutter the logger exists to find.
+	#
+	# PR6 (2026-08-15). The default is OFF; the rule set's log_profiling
+	# field flips it on for playtest builds. The KITBASH_LOG_PROFILING
+	# env var is a kill switch for ad-hoc investigation without changing
+	# the rule set.
+	var _env_flag := OS.get_environment("KITBASH_LOG_PROFILING")
+	var _profiling_on: bool = (_match_rule_set != null and _match_rule_set.log_profiling) \
+			or _env_flag == "1" or _env_flag == "true"
 	Profiler.reset()
-	Profiler.enabled = true
-	BattleLogger.enabled = true
-	BattleLogger.begin_match(_rule_set_label(), {
-		"map_id": map_id,
-		"player_faction": player_faction,
-		"enemy_faction": enemy_faction,
-		"build_path": _match_build_path(),
-	})
+	Profiler.enabled = _profiling_on
+	BattleLogger.enabled = _profiling_on
+	if _profiling_on:
+		BattleLogger.begin_match(_rule_set_label(), {
+			"map_id": map_id,
+			"player_faction": player_faction,
+			"enemy_faction": enemy_faction,
+			"build_path": _match_build_path(),
+			"via": "rule_set" if (_match_rule_set != null and _match_rule_set.log_profiling) else "env",
+		})
 
 	_setup_audio()
 
@@ -1726,6 +1746,12 @@ func record_combat_damage(victim, source, amount: float, damage_class: String) -
 func record_unit_lost(victim, source) -> void:
 	if _audio != null and "team" in victim and victim.team == PLAYER_TEAM:
 		_audio.play_voice("radio_unit_lost")
+	# PR5 (2026-08-15). An enemy loss changes the commander's threat
+	# balance, so flag the world dirty. Ally losses are also flagged -
+	# the commander's own army shrinking is the same kind of change.
+	# record_unit_lost fires for both teams via the unit.died signal.
+	if commander != null:
+		commander.set_dirty()
 
 	# Lifecycle log line. Source may be null (death by self-destruct, a
 	# wreck, a no-killer kill) - the log records whatever the engine
