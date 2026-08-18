@@ -210,6 +210,15 @@ const SUITE_ORDER := [
 	# writing a test against _on_zoom's signature; it is a new test, not a
 	# rename, which is why it was dropped rather than repointed.
 	["ui_and_camera", "test_rts_camera_world_scale_property_defaults_inert"],
+	# 2026-08-18: tilt-shift band re-enabled in rts_camera.gd (the band
+	# was deleted 2026-08-10 for a 50->3 FPS regression and re-added
+	# with the per-frame write fix). This is the new test for the
+	# re-enabled band; the removed test_rts_camera_dof_band_widens_-
+	# monotonically_with_height() at this position is gone because
+	# its target method (dof_band_half_width) was deleted with the
+	# band. The new test drives _apply_dof_distances() directly
+	# (rts_camera.gd:75) which is the current implementation.
+	["ui_and_camera", "test_rts_camera_dof_band_widens_with_height"],
 	["terrain_and_maps", "test_world_scale_default_and_per_map_override"],
 	["terrain_and_maps", "test_greeble_prop_scale_is_inert_at_1_and_doubles_at_2"],
 	["terrain_and_maps", "test_greeble_density_holds_coverage_fraction_as_prop_scale_rises"],

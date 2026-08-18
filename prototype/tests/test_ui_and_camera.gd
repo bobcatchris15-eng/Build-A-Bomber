@@ -59,6 +59,88 @@ func test_rts_camera_edge_scroll_direction() -> bool:
 # neither could ever pass again. DECISIONS.md flagged them for exactly this
 # housekeeping pass. The one-line re-enable recipe lives in rts_camera.gd's
 # file header; if the band ever comes back, these are cheap to rewrite.
+#
+# 2026-08-18: the band was re-enabled (see rts_camera.gd's file header
+# 'DOF (re-enabled)'). The removal note above stays as the historical
+# record of why the original tests were deleted, but
+# test_rts_camera_dof_band_widens_with_height below is a new test
+# for the current implementation - the band transition does widen with
+# zoom (rts_camera.gd:81-84), which is exactly the assertion the
+# deleted test was making before its target method disappeared.
+
+func test_rts_camera_dof_band_widens_with_height() -> bool:
+	print("Running Test Suite: RTS Camera - DOF band widens with height (CORE_DESIGN_LANGUAGE.md §2)...")
+	# The tilt-shift band has to widen as the camera pulls back, or
+	# the band either swallows the whole view at min zoom (a 20-unit
+	# transition over a 20-unit visible area is fully blurred) or
+	# vanishes at max zoom (20 units over a 320-unit visible area is
+	# imperceptible). rts_camera.gd:81-84 lerps dof_blur_far_transition
+	# from 10.0 at min_height to 50.0 at max_height. This test pins
+	# that monotonic widening.
+	var RTSCam = preload("res://scripts/rts_camera.gd")
+	var cam = Camera3D.new()
+	cam.set_script(RTSCam)
+	var attrs := CameraAttributesPractical.new()
+	cam.attributes = attrs
+	root.add_child(cam)
+	# _ready() pulls height from global_position.y and clamps; on a
+	# fresh Camera3D at the origin that lands at 0, so we drive
+	# _apply_dof_distances() ourselves across the documented range.
+	cam.min_height = 10.0
+	cam.max_height = 160.0
+
+	var transitions: Array = []
+	for h in [10.0, 45.0, 85.0, 120.0, 160.0]:
+		cam.height = h
+		cam._apply_dof_distances()
+		transitions.append(attrs.dof_blur_far_transition)
+
+	# MONOTONIC WIDENING. Each step's transition must be strictly
+	# greater than the previous. Strict (not >=) is what the design
+	# asks for - a flat segment would read as a hard band, the opposite
+	# of a smooth tilt-shift falloff.
+	for i in range(1, transitions.size()):
+		if transitions[i] <= transitions[i - 1]:
+			print("  [FAIL] transition did not widen: h=%f -> %.2f, h=%f -> %.2f" %
+					[10.0 if i == 1 else 0.0, transitions[i - 1], 0.0, transitions[i]])
+			cam.queue_free()
+			return false
+
+	# ENDS LAND NEAR THE DOCUMENTED RANGE. lerp(10, 50, 0) = 10 at
+	# min_height; lerp(10, 50, 1) = 50 at max_height. Pin both ends
+	# within a tight tolerance so a future change to the interpolation
+	# does not silently regress the playable band shape.
+	if not is_equal_approx(transitions[0], 10.0):
+		print("  [FAIL] transition at min_height should be 10.0, got ", transitions[0])
+		cam.queue_free()
+		return false
+	if not is_equal_approx(transitions[transitions.size() - 1], 50.0):
+		print("  [FAIL] transition at max_height should be 50.0, got ", transitions[transitions.size() - 1])
+		cam.queue_free()
+		return false
+
+	# FAR DISTANCE TRACKS ZOOM TOO. The focal plane moves with the
+	# camera so the band stays locked to the gameplay area
+	# (CORE_DESIGN_LANGUAGE.md §2.1). rts_camera.gd:80 sets
+	# dof_blur_far_distance = height + 30.0 - asserted on the same
+	# two ends.
+	cam.height = 10.0
+	cam._apply_dof_distances()
+	if not is_equal_approx(attrs.dof_blur_far_distance, 40.0):
+		print("  [FAIL] far distance at min_height should be 40.0 (height + 30), got ", attrs.dof_blur_far_distance)
+		cam.queue_free()
+		return false
+	cam.height = 160.0
+	cam._apply_dof_distances()
+	if not is_equal_approx(attrs.dof_blur_far_distance, 190.0):
+		print("  [FAIL] far distance at max_height should be 190.0 (height + 30), got ", attrs.dof_blur_far_distance)
+		cam.queue_free()
+		return false
+
+	cam.queue_free()
+	print("  [PASS] DOF band widens monotonically with height (10 -> 50 over the camera's range) and the far distance tracks zoom (40 -> 190).")
+	return true
+
 
 func test_rts_camera_world_scale_property_defaults_inert() -> bool:
 	print("Running Test Suite: RTS Camera - world_scale Property Defaults To 1.0 (Chunk 18)...")
