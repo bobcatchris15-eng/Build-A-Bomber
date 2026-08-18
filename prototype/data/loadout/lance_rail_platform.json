@@ -181,7 +181,7 @@
 				"weight": 234.0
 			},
 			"tweaks": {
-				"rail_length": 1.3
+				"barrel_length": 1.3
 			},
 			"type_id": "gauss_railgun",
 			"yaw_offset": 0.0

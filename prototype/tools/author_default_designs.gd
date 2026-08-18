@@ -341,7 +341,7 @@ const LOADOUT := [
 		"armor": "hardened_steel", "thickness": 1.1, "faction": "technocrats",
 		"mounts": [
 			{"type": "gauss_railgun", "x": 0.0, "z": -0.4,
-				"tweaks": {"rail_length": 1.3}},
+				"tweaks": {"barrel_length": 1.3}},
 			{"type": "pd_laser", "x": 1.4, "z": 2.4},
 		],
 	},

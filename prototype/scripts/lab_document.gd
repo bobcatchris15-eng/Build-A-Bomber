@@ -125,7 +125,7 @@ const TWEAK_SPECS = {
 	],
 	"gauss_railgun": [
 		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "rail_length", "label": "Electromagnetic Rail Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Electromagnetic Rail Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 	],
 	"artillery": [
 		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
@@ -139,7 +139,7 @@ const TWEAK_SPECS = {
 	],
 	"guided_missile": [
 		{"name": "seeker_size", "label": "Missile Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "engine_length", "label": "Launch Tube Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Launch Tube Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "barrel_count", "label": "Launcher Tube Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 1.0},
 	],
 	"missile_pod": [
@@ -149,11 +149,13 @@ const TWEAK_SPECS = {
 	],
 	"cluster_dispenser": [
 		{"name": "dispersion", "label": "Dispersion Spread Radius", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "payload_size", "label": "Canister Payload Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "tube_count", "label": "Projector Tube Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
 	],
 	"flamethrower": [
 		{"name": "nozzle_width", "label": "Emitter Nozzle Width", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Nozzle Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "pressure_valve", "label": "Pressure Fuel Valve", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 	],
 	"heavy_laser": [
@@ -195,7 +197,7 @@ const TWEAK_SPECS = {
 	],
 	"coil_gun": [
 		{"name": "caliber", "label": "Slug Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "rail_length", "label": "Accelerator Stage Count", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 	],
 	"autocannon": [
 		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
@@ -239,6 +241,7 @@ const TWEAK_SPECS = {
 	],
 	"spigot_mortar": [
 		{"name": "rod_thickness", "label": "Spigot Rod", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Spigot Barrel Length", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "payload_size", "label": "Bomb Size", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
 	],
 	"rocket_artillery": [
@@ -364,22 +367,26 @@ const TWEAK_SPECS = {
 	],
 	"arc_projector": [
 		{"name": "containment", "label": "Arc Containment Field", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Emitter Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 	],
 	# dish_aperture is the classic width-vs-reach trade made physical: a
 	# bigger dish spreads the cone wider and shortens it, which the player can
 	# predict from the model before touching the slider.
 	"microwave_emitter": [
 		{"name": "dish_aperture", "label": "Dish Aperture", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Horn Length", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
 	],
 	# charge_time buys per-shot damage with exposure: a longer wind-up is more
 	# time an alert enemy has to kill you before the shot lands. focal_length
 	# scales the accelerator spine alone.
 	"particle_lance": [
 		{"name": "charge_time", "label": "Capacitor Charge", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "focal_length", "label": "Accelerator Length", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
 	],
 	"ion_cannon": [
 		{"name": "lens_aperture", "label": "Ion Focusing Lens", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 	],
 	# --- Propulsion modules (speed pass, 2026-08-08) ---
 	# Every tweak name here is reused from LINEAR_SCALE_WEAPON_TWEAKS/

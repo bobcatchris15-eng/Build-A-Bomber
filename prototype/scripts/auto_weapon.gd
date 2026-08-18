@@ -64,7 +64,7 @@ const TRAVERSE_LENGTH_EXPONENT: float = 0.90
 # Only the tweaks that ARE the long projecting tube the shot travels down.
 # Everything else that makes a part bigger is already paid for through weight;
 # listing it here too is the double-charge this model was built to remove.
-const TRAVERSE_LENGTH_TWEAKS := ["barrel_length", "rail_length", "focal_length"]
+const TRAVERSE_LENGTH_TWEAKS := ["barrel_length", "focal_length"]
 # Floor and ceiling. The floor exists so an extreme build (a max-length barrel
 # on the heaviest gun in the roster) is punishing rather than literally stuck -
 # 0.08 rad/s is still 78 seconds for a full circle.

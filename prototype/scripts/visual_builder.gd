@@ -982,7 +982,7 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 
 	elif type_id == "gauss_railgun":
 		var caliber = tweaks.get("caliber", 1.0)
-		var length = tweaks.get("rail_length", 1.0)
+		var length = tweaks.get("barrel_length", 1.0)
 
 		# 1. HEAVY CASEMATE HULL MOUNT (railgun_casemate_mount.glb) - Non-traversing hull citadel
 		var mount_mesh = _part("railgun_casemate_mount")
@@ -1023,7 +1023,7 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			capacitor.position = Vector3(0, trunnion_y, -0.12 * caliber)
 		parent_node.add_child(capacitor)
 
-		# 3. ACCELERATOR RAILS (railgun_rails.glb) - Deformed ONLY by rail_length and caliber!
+		# 3. ACCELERATOR RAILS (railgun_rails.glb) - Deformed ONLY by barrel_length and caliber!
 		var rail_mesh = _part("railgun_rails")
 		var rails: MeshInstance3D
 		if rail_mesh:
@@ -1297,7 +1297,7 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 		var b_count = int(tweaks.get("barrel_count", 1.0))
 		b_count = clamp(b_count, 1, 4)
 		var seeker = tweaks.get("seeker_size", 1.0)
-		var engine = tweaks.get("engine_length", 1.0)
+		var engine = tweaks.get("barrel_length", 1.0)
 
 		# 1. PINTLE MOUNT & GUIDANCE OPTIC SIGHT (tow_pintle_mount.glb)
 		var base_w_scale = (1.0 + (b_count - 1) * 0.35) * seeker
@@ -3255,10 +3255,10 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 
 			"coil_gun":
 				var trunnion_y = 0.27
-				# Stage count drives BOTH the coil instance count and the rail
+				# Barrel length drives BOTH the coil instance count and the rail
 				# length, so the tweak reads as "a longer accelerator with more
 				# stages" rather than just a number changing.
-				var stage_tweak = tweaks.get("rail_length", 1.0)
+				var stage_tweak = tweaks.get("barrel_length", 1.0)
 				var stages = clamp(int(round(stage_tweak * 5.0)), 3, 9)
 
 				# 1. MOUNT
@@ -6229,7 +6229,7 @@ const MONOLITHIC_TWEAK_AXES := {
 	"heavy_machine_gun": {"caliber": Vector3(1, 1, 0), "drum_size": Vector3(1, 1, 1)},
 	"rotary_cannon": {"caliber": Vector3(1, 1, 0), "motor_size": Vector3(1, 1, 1)},
 	"artillery": {"caliber": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1)},
-	"guided_missile": {"seeker_size": Vector3(1, 1, 0), "engine_length": Vector3(0, 0, 1)},
+	"guided_missile": {"seeker_size": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1)},
 	"flamethrower": {"nozzle_width": Vector3(1, 1, 0), "pressure_valve": Vector3(1, 1, 1)},
 	"heavy_laser": {"lens_aperture": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1), "focal_length": Vector3(0, 0, 1)},
 	"plasma_lobber": {"containment": Vector3(1, 1, 1), "caliber": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1), "charge_rate": Vector3(0, 0, 1)},

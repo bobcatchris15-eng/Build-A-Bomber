@@ -45,8 +45,8 @@ const FIRE_RANGE_MAX: float = 260.0
 # torque; dispersion is spread pattern; cooling_jacket is sustained-fire
 # capacity).
 const RANGE_TWEAKS_UP := [
-	"barrel_length", "elevation", "engine_length", "radar_dish", "caliber",
-	"rail_length", "seeker_size", "ascent_thruster", "pressure_valve",
+	"barrel_length", "elevation", "radar_dish", "caliber",
+	"seeker_size", "ascent_thruster", "pressure_valve",
 	"fuse_setting", "optic_power", "focal_length", "optic_aperture", "radar_size",
 	"mast_extension",
 ]
