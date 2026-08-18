@@ -26,6 +26,7 @@ const CommandCardScript = preload("res://scripts/ui/command_card.gd")
 const SpecPlacardScript = preload("res://scripts/ui/spec_placard.gd")
 const EdgeMarkerScript = preload("res://scripts/ui/edge_marker.gd")
 const RightRailScript = preload("res://scripts/battle/hud/right_rail.gd")
+const SelectionPanelScript = preload("res://scripts/battle/hud/selection_panel.gd")
 
 # Coarser than the fog grid on purpose: a minimap needs a recognisable
 # silhouette, not per-vision-tick precision.
@@ -101,6 +102,7 @@ var command_card: Control = null
 var placard: Control = null
 var edge_marker: Control = null
 var right_rail: Control = null
+var selection_panel: Control = null
 
 
 func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
@@ -127,6 +129,12 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	# the temporary overlap with the production bar that this whole
 	# programme exists to fix.
 	_build_right_rail()
+	# SelectionPanel goes on the LEFT in PR3b (UIDock, minimizable),
+	# but in this PR it still lives in the right rail at the top of
+	# the stack. The order of add_child calls into right_rail.body()
+	# is the visual order top-to-bottom, so the panel must be added
+	# before the placard and command card.
+	_build_selection_panel()
 	_build_command_card()
 	
 	edge_marker = EdgeMarkerScript.new()
@@ -253,10 +261,41 @@ func _build_right_rail() -> void:
 	# The under-minimap tactical rail. Owns its own anchoring (see
 	# RightRail._anchor_under_minimap), so the only job here is to
 	# instantiate and parent. PR1 ships the empty bezel; PR2 re-parents
-	# the command card and placard into it.
+	# the command card and placard into it; PR3 adds the SelectionPanel.
 	right_rail = RightRailScript.new()
 	right_rail.name = "RightRail"
 	add_child(right_rail)
+
+
+# Phase 9 SelectionPanel, wired up. Was built but never instantiated
+# (selection_panel.gd is complete; no caller added it to a tree before
+# this PR). The panel aggregates the current selection by blueprint
+# design, shows silhouette + count + aggregate HP per group, and
+# exposes a primary_changed signal that the placard and the command
+# card can both read from so they cannot disagree about which design
+# is primary.
+#
+# LAYOUT. The panel lives in the right rail, on top of the placard
+# and command card - the natural reading order "what do I have -> what
+# is this -> what can I do" maps top-to-bottom on the rail. PR3b moves
+# it to a left-side UIDock where the player can minimize it, but the
+# panel instance and its binding to the selection service stay the
+# same.
+#
+# BINDING. bind_selection_service() auto-connects
+# service.selection_changed to update_selection, so the panel updates
+# without any other wire-up. The existing _on_selection_changed
+# handler in this file keeps running in parallel for the placard; both
+# paths read from the same selection_service so they cannot disagree
+# on which units are selected, only on which is the primary. Routing
+# the placard through the panel's primary_changed signal is a
+# follow-up polish; the existing first-unit-wins behaviour is correct
+# for the most common single-selection case.
+func _build_selection_panel() -> void:
+	selection_panel = SelectionPanelScript.new()
+	selection_panel.name = "SelectionPanel"
+	selection_panel.bind_selection_service(_director.selection)
+	right_rail.body().add_child(selection_panel)
 
 
 func _build_command_card() -> void:
