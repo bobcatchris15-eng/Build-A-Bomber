@@ -25,6 +25,7 @@ const WorldScaleScript = preload("res://scripts/world_scale.gd")
 const CommandCardScript = preload("res://scripts/ui/command_card.gd")
 const SpecPlacardScript = preload("res://scripts/ui/spec_placard.gd")
 const EdgeMarkerScript = preload("res://scripts/ui/edge_marker.gd")
+const RightRailScript = preload("res://scripts/battle/hud/right_rail.gd")
 
 # Coarser than the fog grid on purpose: a minimap needs a recognisable
 # silhouette, not per-vision-tick precision.
@@ -99,6 +100,7 @@ var minimap_rect: TextureRect = null
 var command_card: Control = null
 var placard: Control = null
 var edge_marker: Control = null
+var right_rail: Control = null
 
 
 func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
@@ -120,6 +122,11 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	_build_top_strip()
 	_bake_minimap(current_map)
 	_build_minimap()
+	# Right rail first so the command card and placard can move INTO it
+	# in PR2 - today they are still anchored BOTTOM_RIGHT and that is
+	# the temporary overlap with the production bar that this whole
+	# programme exists to fix.
+	_build_right_rail()
 	_build_command_card()
 	
 	edge_marker = EdgeMarkerScript.new()
@@ -240,6 +247,16 @@ func _build_minimap() -> void:
 		minimap_rect.material = smat
 
 	add_child(minimap_rect)
+
+
+func _build_right_rail() -> void:
+	# The under-minimap tactical rail. Owns its own anchoring (see
+	# RightRail._anchor_under_minimap), so the only job here is to
+	# instantiate and parent. PR1 ships the empty bezel; PR2 re-parents
+	# the command card and placard into it.
+	right_rail = RightRailScript.new()
+	right_rail.name = "RightRail"
+	add_child(right_rail)
 
 
 func _build_command_card() -> void:
