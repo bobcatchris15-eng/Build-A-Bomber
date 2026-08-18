@@ -157,8 +157,13 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 			# face_index: a hull whose front is 60% covered means a shot into
 			# the bare 40% gets NOTHING, rather than everyone on that side
 			# receiving 60% of a plate.
-			var fid := ArmorPaintScript.facet_for_triangle(
-				str(plan.get("hull_type", "")), int(trace.get("face_index", -1)))
+			# The tri_map is embedded in the plan at build time from the live
+			# segment — no baked sidecar lookup needed at resolve time.
+			var tri_map: PackedInt32Array = plan.get("tri_map", PackedInt32Array())
+			var face_idx := int(trace.get("face_index", -1))
+			var fid := -1
+			if face_idx >= 0 and face_idx < tri_map.size():
+				fid = tri_map[face_idx]
 			if fid >= 0:
 				var facets: Dictionary = plan.get("facets", {})
 				if facets.has(fid):

@@ -173,7 +173,7 @@ func _serialize_armor(hull: Node3D) -> Dictionary:
 
 # Reads the armor block back, re-resolving facet ids against the CURRENT bake
 # when the mesh has changed underneath the save. Returns the assignment array.
-func _deserialize_armor(blueprint_data: Dictionary, hull_type: String) -> Array:
+func _deserialize_armor(blueprint_data: Dictionary, hull_type: String, mesh: Mesh = null) -> Array:
 	var block = blueprint_data.get("armor", {})
 	if not (block is Dictionary):
 		return []
@@ -181,14 +181,19 @@ func _deserialize_armor(blueprint_data: Dictionary, hull_type: String) -> Array:
 	if saved.is_empty():
 		return []
 
-	var table := HullFacetsScript.load_map(hull_type)
-	var count := int(table.get("facet_count", 0))
+	# Prefer live segment over baked sidecar.
+	var table := {}
+	if mesh != null:
+		table = HullFacetsScript.cached_segment(mesh)
+	if table.is_empty():
+		table = HullFacetsScript.load_map(hull_type)
+	var count := int(table.get("facet_count", table.get("count", 0)))
 	if count <= 0:
 		return []
 
 	var stale: bool = (
 		str(block.get("hull_type", hull_type)) != hull_type
-		or int(block.get("hull_tri_count", -1)) != int(table.get("tri_count", -2))
+		or int(block.get("hull_tri_count", block.get("tri_count", -1))) != int(table.get("tri_count", -2))
 		or int(block.get("facet_count", -1)) != count
 	)
 	if not stale:
@@ -905,7 +910,8 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	# designs without an "armor" block load as-is and any orphan "modules"
 	# entries in PAINT_TYPE_IDS are silently ignored (treated as unknown types
 	# by the module loop below).
-	var armor_assignments := _deserialize_armor(blueprint_data, str(hull_type))
+	var _hull_mesh := MeshAssetLoader.get_hull_mesh(hull_type)
+	var armor_assignments := _deserialize_armor(blueprint_data, str(hull_type), _hull_mesh)
 	hull.set_meta("armor_assignments", armor_assignments)
 
 	# Bulk size based on thickness
@@ -1055,7 +1061,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	# all - so "no plan" naturally means "bare hull baseline", which is exactly
 	# what buildings did before and still do.
 	hull.set_meta("armor_plan", ArmorPaintScript.build_plan(
-		str(hull_type), armor_assignments, mesh_inst.transform, str(faction_name)))
+		str(hull_type), armor_assignments, mesh_inst.mesh, mesh_inst.transform, str(faction_name)))
 	ArmorPaintVisualScript.rebuild(hull, mesh_inst)
 
 	parent_node.add_child(hull)

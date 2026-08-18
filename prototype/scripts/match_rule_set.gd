@@ -48,6 +48,8 @@ extends RefCounted
 # concerns because the question "what is this match optimising for" is
 # per-mode.
 
+const LiveryScript = preload("res://scripts/livery.gd")
+
 enum Mode { TEST_RANGE, SKIRMISH, OPERATIONS }
 enum CameraMode { RTS, CHASE }
 enum WinCondition {
@@ -296,11 +298,11 @@ static func test_range(player_blueprint_path: String,
 	var rs := MatchRuleSet.new()
 	rs.mode = Mode.TEST_RANGE
 	rs.map_id = map_id
-	# Test Range uses the player faction as a placeholder on the dummies so
-	# the dummy spawn path can read the same faction-aware assembly code as
-	# Skirmish; the dummies themselves are forced to team=1 in the
+	# The player's faction is PLAYER_ID so reconstruct_vehicle reads the
+	# authored livery from user://livery.json rather than rolling a
+	# deterministic random; the dummies are forced to team=1 in the
 	# launcher.
-	rs.player_faction = "industrialists"
+	rs.player_faction = LiveryScript.PLAYER_ID
 	rs.enemy_faction = "technocrats"
 	rs.player_blueprint_path = player_blueprint_path
 	rs.enemy_blueprint_paths = enemy_blueprint_paths.duplicate()

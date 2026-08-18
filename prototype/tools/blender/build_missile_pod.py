@@ -108,25 +108,35 @@ def build_missile_pod_parts():
 	export_bmesh(bm1, "missile_pod_pintle_mount", "missile_pod_pintle_mount.glb")
 
 	# 2. ROCKET LAUNCHER HOUSING BOX (missile_pod_housing.glb)
-	# Origin at trunnion height (0, 0, 0)
+	# Origin at trunnion height (0, 0, 0). The trunnion brackets stay at Z=0
+	# so the visual_builder can park the housing on the mount's trunnion
+	# (which lives at Z=0.24 in the pintle GLB - that becomes the trunnion
+	# height in Godot). The main shell, face plate, and rear vents are
+	# shifted UP by pod_h/2 so the shell sits on top of the brackets
+	# instead of engulfing them; that way the brackets can mate with the
+	# trunnion while the shell clears the yoke arms.
 	bm2 = bmesh.new()
 	pod_w = 0.48
 	pod_h = 0.38
 	pod_d = 0.85
+	shell_z = pod_h * 0.5
 
-	# Main Armored Shell Box (centered at Y = 0 so it tilts on trunnion pivot)
-	add_box(bm2, (0, 0, 0), (pod_w, pod_d, pod_h), bevel=0.025)
+	# Main Armored Shell Box (above the trunnion brackets)
+	add_box(bm2, (0, 0, shell_z), (pod_w, pod_d, pod_h), bevel=0.025)
 
-	# Side Trunnion Mounting Brackets
+	# Side Trunnion Mounting Brackets (tall enough to bridge from the mount
+	# trunnion at Z=0 down to the brackets' lower lip and up to the shell
+	# bottom at Z=shell_z. Without the upper extension the shell would float
+	# 0.12 above the brackets.)
 	for side_x in (-0.25, 0.25):
-		add_box(bm2, (side_x, 0.0, 0.0), (0.04, 0.24, 0.14), bevel=0.008)
+		add_box(bm2, (side_x, 0.0, 0.0), (0.04, 0.24, shell_z * 2.0), bevel=0.008)
 
-	# Front Recessed Cell Face Plate (dark interior mask)
-	add_box(bm2, (0, -pod_d * 0.5 + 0.01, 0), (pod_w * 0.92, 0.02, pod_h * 0.90), bevel=0.005)
+	# Front Recessed Cell Face Plate (moved with the shell)
+	add_box(bm2, (0, -pod_d * 0.5 + 0.01, shell_z), (pod_w * 0.92, 0.02, pod_h * 0.90), bevel=0.005)
 
-	# Rear Exhaust Vent Slits
+	# Rear Exhaust Vent Slits (moved with the shell)
 	for i in range(4):
-		z_pos = -pod_h * 0.35 + i * (pod_h * 0.7 / 3)
+		z_pos = shell_z - pod_h * 0.35 + i * (pod_h * 0.7 / 3)
 		add_box(bm2, (0, pod_d * 0.5 + 0.01, z_pos), (pod_w * 0.80, 0.02, 0.03), bevel=0.002)
 
 	export_bmesh(bm2, "missile_pod_housing", "missile_pod_housing.glb")

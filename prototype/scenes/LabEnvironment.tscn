@@ -1,0 +1,84 @@
+[gd_scene load_steps=5 format=3 uid="uid://cxablabenv01"]
+
+; WHAT THIS IS, AND WHY
+;
+; The shared "workshop floor" for both design-lab screens
+; (MainLab.tscn and HullBuilder.tscn). A self-healing cutting mat at
+; y = -12, sized 50x50 so it reads as a real room floor, with three
+; kraft-cardboard model-kit boxes scattered around the model's feet
+; for context. Everything past the floating model is heavily DOF-
+; blurred, so the mat mostly reads as a green-and-white smear and
+; the boxes as soft kraft shapes.
+;
+; History (Chris's iterations on 2026-08-17):
+;   * First pass: mat at y=-20, four floating "crates" replaced with
+;     five cardboard boxes. Too far down - looked disconnected.
+;   * Second pass: mat pulled up to y=-12, size 50x50, a back wall
+;     added at z=-25 to "make it a room".
+;   * Third pass (this one): back wall removed (the room reads fine
+;     as a mat on a work surface; the wall was overcommitting), and
+;     the two most crate-shaped cardboard boxes (Box1 at front-left
+;     and Box4 at back-right, the largest of the bunch) dropped -
+;     the heavy DOF blur on the mat made them look like floating
+;     crates against the green smear. Three remain.
+;
+; Both MainLab and HullBuilder instance this scene. The hull
+; itself stays at lab-specific positions: y = 2.5 (floating, no
+; pedestal) in MainLab, y = 0 in HullBuilder because the user drops
+; primitives at ground level there.
+
+[ext_resource type="Shader" path="res://shaders/cutting_mat.gdshader" id="1_mat_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_cutting_mat"]
+shader = ExtResource("1_mat_shader")
+; Matches the 50u BoxMesh below. The red border band is computed
+; from this value, not from the mesh extents, so the two have to
+; stay in sync.
+mat_half_size = 25.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+size = Vector3(50, 0.1, 50)
+
+[sub_resource type="BoxMesh" id="BoxMesh_cardboard_box"]
+size = Vector3(1.5, 1.0, 2.0)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cardboard"]
+; The kraft tan model kits ship in. Slightly desaturated, matte, no
+; specular - the "cheap thin cardboard" read. Roughness pushed up so
+; the SSAO term picks it up as the soft non-metal it is.
+albedo_color = Color(0.78, 0.68, 0.48, 1)
+roughness = 0.9
+metallic = 0.0
+
+[node name="LabEnvironment" type="Node3D"]
+
+[node name="CuttingMat" type="MeshInstance3D" parent="."]
+; Centre at y = -12.05 so the visible top surface lands at y = -12
+; (the "ground" the cardboard boxes sit on). World-space pattern, so
+; the y offset doesn't affect the grid; only the visible vertical
+; position of the mesh.
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -12.05, 0)
+mesh = SubResource("BoxMesh_floor")
+; MeshInstance3D in Godot 4 reads "material_override" not "material";
+; the shorter name silently no-ops. (The old CSGBox3D crates used
+; `material =` and got away with it because CSG primitives still
+; expose the shorter name; MeshInstance3D does not.)
+material_override = SubResource("ShaderMaterial_cutting_mat")
+
+[node name="CardboardBox2" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.924, 0, 0.383, 0, 1, 0, -0.383, 0, 0.924, 10, -11.5, 7)
+scale = Vector3(0.9, 1.1, 0.85)
+mesh = SubResource("BoxMesh_cardboard_box")
+material_override = SubResource("StandardMaterial3D_cardboard")
+
+[node name="CardboardBox3" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, -7, -11.6, 9)
+scale = Vector3(0.7, 0.7, 0.7)
+mesh = SubResource("BoxMesh_cardboard_box")
+material_override = SubResource("StandardMaterial3D_cardboard")
+
+[node name="CardboardBox5" type="MeshInstance3D" parent="."]
+transform = Transform3D(0.809, 0, -0.588, 0, 1, 0, 0.588, 0, 0.809, 8, -11.6, 11)
+scale = Vector3(0.8, 0.8, 1.0)
+mesh = SubResource("BoxMesh_cardboard_box")
+material_override = SubResource("StandardMaterial3D_cardboard")

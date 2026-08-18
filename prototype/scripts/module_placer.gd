@@ -29,6 +29,12 @@ const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 const HullFacetsScript = preload("res://scripts/hull_facets.gd")
 
 @export var hull_path: NodePath
+# Lifts the hull above the parent's ground plane by this many units.
+# Default 0 = hull bottom at y = 0 (the existing behaviour, which the
+# unit tests, blueprint restore and most callers still depend on).
+# MainLab sets this to the pedestal height so the hull sits on the
+# stand instead of clipping into the cutting mat.
+@export var stage_y_offset: float = 0.0
 var hull: Node3D
 
 var mirror_enabled: bool = true
@@ -120,17 +126,14 @@ func _reconstruct_from_snapshot(snapshot: Dictionary):
 	check_all_clipping()
 
 func _ready():
-	# Spawn some scale reference boxes (1x1x1 meters)
-	for x in [-8, 8]:
-		var mesh_inst = MeshInstance3D.new()
-		var box = BoxMesh.new()
-		box.size = Vector3(1, 1, 1)
-		mesh_inst.mesh = box
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color(0.8, 0.4, 0.2)
-		mesh_inst.material_override = mat
-		mesh_inst.position = Vector3(x, 0.5, -4)
-		add_child(mesh_inst)
+	# (Former: spawned two 1x1x1m orange scale-reference boxes at
+	# (-8, 0.5, -4) and (8, 0.5, -4). Removed 2026-08-18 with the
+	# Design Lab visual overhaul - the mat is now at y = -12 and
+	# the model floats at y = 2.5, so boxes anchored at y = 0.5
+	# hung in mid-air and read as floating crates. The Lab now
+	# gets its workshop dressing from the shared LabEnvironment
+	# (cutting mat + cardboard boxes), not from a debug pair of
+	# boxes the placer was making for itself.)
 	if has_node("Hull"):
 		hull = get_node("Hull")
 		if hull:
@@ -486,7 +489,7 @@ func delete_selected_module():
 				var base_hull_size: Vector3 = Vector3(ModuleCatalog.REFERENCE_HULL_SIZE)
 				if hull.has_meta("base_hull_size"):
 					base_hull_size = hull.get_meta("base_hull_size")
-				hull.position.y = (base_hull_size.y * hull_scale.y) / 2.0
+				hull.position.y = (base_hull_size.y * hull_scale.y) / 2.0 + stage_y_offset
 				hull.remove_meta("locomotion_type")
 				hull.remove_meta("locomotion_settings")
 		
@@ -529,7 +532,7 @@ func _place_hull_from_ui(type_id: String):
 	# above or sink into the ground on every hull whose actual silhouette is
 	# smaller than the catalog box.
 	var fitted_size: Vector3 = catalog_data.get("size", Vector3.ONE)
-	hull.position = Vector3(0, fitted_size.y / 2.0, 0)
+	hull.position = Vector3(0, fitted_size.y / 2.0 + stage_y_offset, 0)
 
 	hull.set_meta("base_hull_size", fitted_size)
 	hull.set_meta("hull_scale", Vector3(1, 1, 1))
@@ -554,7 +557,7 @@ func _place_hull_from_ui(type_id: String):
 		if fitted_aabb.size.length_squared() > 0.0:
 			fitted_size = fitted_aabb.size
 			hull.set_meta("base_hull_size", fitted_size)
-			hull.position.y = fitted_size.y / 2.0
+			hull.position.y = fitted_size.y / 2.0 + stage_y_offset
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.get("size", Vector3.ONE)
@@ -2231,6 +2234,8 @@ func _update_facet_highlight(pos: Vector3, normal: Vector3):
 		add_child(_facet_highlight)
 	
 	_facet_highlight.visible = true
+	# Default orientation from the raycast hit normal -- used only until
+	# _measure_hull_facet returns the facet's own frame, which replaces it.
 	var base_basis = _align_up_to(normal)
 	_facet_highlight.global_transform.basis = base_basis * Basis(Vector3.RIGHT, -PI/2.0)
 	_facet_highlight.global_position = pos + normal * 0.02
@@ -2244,8 +2249,17 @@ func _update_facet_highlight(pos: Vector3, normal: Vector3):
 			var facet_size = facet_info["size"]
 			if _facet_highlight.mesh is QuadMesh:
 				_facet_highlight.mesh.size = Vector2(max(0.1, facet_size.x), max(0.1, facet_size.z))
+			# Use the facet's OWN basis and normal for orientation and position,
+			# not the raycast hit normal. On curved hulls the hit normal and the
+			# facet mean normal diverge -- the size was measured in the facet's
+			# tangent frame, so the QuadMesh must be oriented in that same frame,
+			# otherwise the highlight is stretched and rotated relative to the
+			# actual facet surface.
+			var facet_normal: Vector3 = facet_info.get("normal", normal)
+			var facet_basis: Basis = facet_info.get("basis", _align_up_to(facet_normal))
+			_facet_highlight.global_transform.basis = facet_basis * Basis(Vector3.RIGHT, -PI/2.0)
 			var global_center = hull.to_global(facet_info["center"])
-			_facet_highlight.global_position = global_center + normal * 0.02
+			_facet_highlight.global_position = global_center + facet_normal * 0.02
 		else:
 			if _facet_highlight.mesh is QuadMesh:
 				_facet_highlight.mesh.size = Vector2(1, 1)

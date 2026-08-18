@@ -1245,8 +1245,12 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			pod_mount.position = Vector3(0, pm_box.size.y * 0.5, 0)
 		parent_node.add_child(pod_mount)
 
-		# 2. LAUNCHER HOUSING - the boxy multi-tube pod body
-		var pod_body_y: float = base_size.y * 0.55 * warhead
+		# 2. LAUNCHER HOUSING - the boxy multi-tube pod body.
+		# The housing GLB was reshaped so the trunnion brackets sit at Z=0
+		# (the mount trunnion height) and the main shell sits on top of the
+		# brackets. Park pod_body_y at the trunnion so the brackets meet
+		# the mount's trunnion pins and the shell clears the yoke arms.
+		var pod_body_y: float = 0.24 * warhead
 		var housing_mesh = _part("missile_pod_housing")
 		var pod_housing: MeshInstance3D
 		if housing_mesh:
@@ -1265,16 +1269,26 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			pod_housing.position = Vector3(0, pod_body_y, 0)
 		parent_node.add_child(pod_housing)
 
-		# 3. ROCKET GRID - grid x rows of tube muzzles across the pod's front face
+		# 3. ROCKET GRID - grid x rows of tube muzzles across the pod's front
+		# face plate. The plate is 0.48x0.38 in the housing GLB (X by Y) and
+		# sits at the shell's vertical centre; constrain the grid to fit
+		# inside it, leaving one missile-radius of margin on every edge so
+		# adjacent cells touch but never overlap. Centring on the plate
+		# (not on the trunnion) keeps the warheads visually emerging from
+		# the face instead of from the deck.
 		var rocket_mesh = _part("missile_pod_missile")
 		var rows: int = maxi(int(round(float(grid) * 0.66)), 2)
-		var cell_w: float = (base_size.x * 0.72 * warhead) / float(grid)
-		var cell_h: float = (base_size.y * 0.5 * warhead) / float(rows)
-		var grid_z: float = -base_size.z * 0.4 * motor
+		var face_plate_w: float = 0.48 * 0.92 * warhead
+		var face_plate_h: float = 0.38 * 0.90 * warhead
+		var rocket_r: float = 0.066 * warhead
+		var cell_w: float = (face_plate_w - 2.0 * rocket_r) / float(maxi(grid - 1, 1))
+		var cell_h: float = (face_plate_h - 2.0 * rocket_r) / float(maxi(rows - 1, 1))
+		var grid_center_y: float = pod_body_y + 0.19 * warhead
+		var grid_z: float = -0.42 * motor * warhead
 		for gx in range(grid):
 			for gy in range(rows):
 				var rx: float = (float(gx) - float(grid - 1) * 0.5) * cell_w
-				var ry: float = pod_body_y + (float(gy) - float(rows - 1) * 0.5) * cell_h
+				var ry: float = grid_center_y + (float(gy) - float(rows - 1) * 0.5) * cell_h
 				var rocket: MeshInstance3D
 				if rocket_mesh:
 					rocket = _mesh_inst(rocket_mesh, Color(0.75, 0.72, 0.66))

@@ -58,24 +58,36 @@ const SIDES := ["front", "back", "left", "right", "top", "bottom"]
 # --- The plan ---------------------------------------------------------------
 
 # Builds the plan from a list of assignment dictionaries (the blueprint's
-# `armor.assignments`) against a hull's baked facet table.
+# `armor.assignments`) against a hull's facet data.
+#
+# When `mesh` is provided (the common path), facets are computed live from the
+# mesh geometry via HullFacets.cached_segment(). When `mesh` is null (backward
+# compat for tests/tools that only have a hull_type string), falls back to the
+# baked sidecar.
 #
 # `xform` is the hull mesh instance's transform, and it matters for two separate
 # reasons: a non-uniform hull_scale changes each facet's AREA, and it can also
 # rotate a facet's normal far enough to move it between sides - a chine that
 # reads as `front` on the authored mesh can read as `top` once the hull is
-# stretched. Both are recomputed here from the ~18 baked facet normals rather
-# than by re-walking the mesh's hundreds of triangles.
+# stretched. Both are recomputed here from the facet normals rather than by
+# re-walking the mesh's hundreds of triangles.
 static func build_plan(hull_type_id: String, assignments: Array,
+		mesh: Mesh = null,
 		xform: Transform3D = Transform3D.IDENTITY, faction: String = "") -> Dictionary:
 	var plan := _empty_plan(hull_type_id)
-	var table := HullFacets.load_map(hull_type_id)
-	if table.is_empty() or int(table.get("facet_count", 0)) <= 0:
+
+	# Prefer live segment over baked sidecar.
+	var seg := {}
+	if mesh != null:
+		seg = HullFacets.cached_segment(mesh)
+	else:
+		seg = HullFacets.load_map(hull_type_id)
+	if seg.is_empty():
 		return plan
 
-	var normals: PackedVector3Array = table.get("normal", PackedVector3Array())
-	var areas: PackedFloat32Array = table.get("area", PackedFloat32Array())
-	var count := int(table["facet_count"])
+	var normals: PackedVector3Array = seg.get("normal", PackedVector3Array())
+	var areas: PackedFloat32Array = seg.get("area", PackedFloat32Array())
+	var count := int(seg.get("facet_count", seg.get("count", 0)))
 	if normals.size() < count or areas.size() < count:
 		return plan
 
@@ -174,6 +186,9 @@ static func build_plan(hull_type_id: String, assignments: Array,
 	plan["total_area"] = total_area
 	plan["empty"] = painted.is_empty()
 	plan["faction"] = faction if faction != "" else LiveryScript.NO_LIVERY
+	# The triangle-to-facet map lets the resolver look up which facet a hit
+	# triangle belongs to, without needing the mesh at resolve time.
+	plan["tri_map"] = seg.get("map", PackedInt32Array())
 	return plan
 
 
@@ -279,9 +294,12 @@ static func analyze(hull_node: Node3D = null) -> Dictionary:
 
 # --- Brush helpers ----------------------------------------------------------
 
-# The facet ids a side-brush stroke should paint. Reads the baked brush sets,
-# which already guarantee every side of every shipped hull is non-empty.
-static func facets_for_side(hull_type_id: String, side: String) -> PackedInt32Array:
+# The facet ids a side-brush stroke should paints. When a mesh is provided,
+# reads the live cached segment; otherwise falls back to the baked sidecar.
+static func facets_for_side(hull_type_id: String, side: String,
+		mesh: Mesh = null) -> PackedInt32Array:
+	if mesh != null:
+		return HullFacets.facets_for_side_mesh(mesh, side)
 	var out := PackedInt32Array()
 	var table := HullFacets.load_map(hull_type_id)
 	var sides = table.get("sides", {})
@@ -294,9 +312,14 @@ static func facets_for_side(hull_type_id: String, side: String) -> PackedInt32Ar
 
 # The facet a triangle belongs to, or -1. This is the exact-hit path: combat
 # hands in the `face_index` from the raycast it already fired.
-static func facet_for_triangle(hull_type_id: String, tri_index: int) -> int:
+# When a mesh is provided, uses the live cached segment; otherwise falls back
+# to the baked sidecar.
+static func facet_for_triangle(hull_type_id: String, tri_index: int,
+		mesh: Mesh = null) -> int:
 	if tri_index < 0:
 		return -1
+	if mesh != null:
+		return HullFacets.facet_for_tri(mesh, tri_index)
 	var table := HullFacets.load_map(hull_type_id)
 	if not table.has("map"):
 		return -1

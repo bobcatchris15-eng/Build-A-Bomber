@@ -35,6 +35,7 @@ const ArmorPaintVisual = preload("res://scripts/armor_paint_visual.gd")
 const HullFacets = preload("res://scripts/hull_facets.gd")
 const HullSurface = preload("res://scripts/hull_surface.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const NavigationScript = preload("res://scripts/core/navigation.gd")
 
 const TYPE_LABELS := {
@@ -423,6 +424,9 @@ func _load_design() -> void:
 	# assignments we start from are whatever the design already had - including
 	# a v2 design's plates, converted.
 	_rebuild_hull()
+	# Pre-warm the segment cache so all subsequent paint/readout calls hit it.
+	if _preview_mesh and _preview_mesh.mesh:
+		HullFacets.cached_segment(_preview_mesh.mesh)
 	if is_instance_valid(_preview_hull):
 		for a in _preview_hull.get_meta("armor_assignments", []):
 			if a is Dictionary:
@@ -464,8 +468,9 @@ func _apply_and_refresh(status: String = "") -> void:
 	_preview_hull.set_meta("armor_assignments", rows)
 	_preview_hull.set_meta("armor_plan", ArmorPaint.build_plan(
 		_hull_type, rows,
+		_preview_mesh.mesh if _preview_mesh else null,
 		_preview_mesh.transform if _preview_mesh else Transform3D.IDENTITY,
-		str(_blueprint.get("faction", ""))))
+		str(_blueprint.get("faction", LiveryScript.PLAYER_ID))))
 	if _preview_mesh:
 		ArmorPaintVisual.rebuild(_preview_hull, _preview_mesh)
 	_write_back()
@@ -477,14 +482,15 @@ func _apply_and_refresh(status: String = "") -> void:
 func _write_back() -> void:
 	if _bp_manager == null or _blueprint.is_empty():
 		return
-	var table := HullFacets.load_map(_hull_type)
+	var seg := HullFacets.cached_segment(_preview_mesh.mesh if _preview_mesh else null)
 	var rows := _assignments.values()
 	rows.sort_custom(func(x, y): return int(x["facet_id"]) < int(y["facet_id"]))
 	_blueprint["version"] = BlueprintManagerScript.CURRENT_BLUEPRINT_VERSION
 	_blueprint["armor"] = {
 		"hull_type": _hull_type,
-		"hull_tri_count": int(table.get("tri_count", 0)),
-		"facet_count": int(table.get("facet_count", 0)),
+		"hull_tri_count": int(seg.get("tri_count", 0)),
+		"tri_count": int(seg.get("tri_count", 0)),
+		"facet_count": int(seg.get("count", 0)),
 		"assignments": rows,
 	}
 	var f = FileAccess.open(BlueprintManagerScript.SCRATCH_PATH, FileAccess.WRITE)
@@ -518,8 +524,9 @@ func _set_status(msg: String) -> void:
 func _on_preset(name: String) -> void:
 	if _hull_type == "":
 		return
+	var mesh := _preview_mesh.mesh if _preview_mesh else null
 	for side in PRESETS.get(name, []):
-		for fid in ArmorPaint.facets_for_side(_hull_type, str(side)):
+		for fid in HullFacets.facets_for_side_mesh(mesh, str(side)):
 			_paint_facet(int(fid))
 	_apply_and_refresh("Applied the %s scheme." % name)
 
@@ -528,16 +535,18 @@ func _paint_facet(fid: int) -> void:
 	if _erase:
 		_assignments.erase(fid)
 		return
-	var table := HullFacets.load_map(_hull_type)
-	var normals: PackedVector3Array = table.get("normal", PackedVector3Array())
-	var centroids: PackedVector3Array = table.get("centroid", PackedVector3Array())
-	var areas: PackedFloat32Array = table.get("area", PackedFloat32Array())
-	var sides = table.get("side", [])
+	if _preview_mesh == null or _preview_mesh.mesh == null:
+		return
+	var seg := HullFacets.cached_segment(_preview_mesh.mesh)
+	var normals: PackedVector3Array = seg.get("normal", PackedVector3Array())
+	var centroids: PackedVector3Array = seg.get("centroid", PackedVector3Array())
+	var areas: PackedFloat32Array = seg.get("area", PackedFloat32Array())
+	var facet_sides = seg.get("facet_side", [])
 	if fid < 0 or fid >= normals.size():
 		return
 	_assignments[fid] = {
 		"facet_id": fid,
-		"side": str(sides[fid]) if fid < sides.size() else "",
+		"side": str(facet_sides[fid]) if fid < facet_sides.size() else "",
 		"type_id": _brush_type,
 		"material": _brush_material,
 		"thickness": _brush_thickness,
@@ -588,7 +597,10 @@ func _paint_at(pos: Vector2) -> void:
 	var hit := space.intersect_ray(q)
 	if hit.is_empty():
 		return
-	var fid := ArmorPaint.facet_for_triangle(_hull_type, int(hit.get("face_index", -1)))
+	var mesh := _preview_mesh.mesh if _preview_mesh else null
+	var tri_index := int(hit.get("face_index", -1))
+	# Live facet lookup via cached segment -- replaces the old baked map.
+	var fid := HullFacets.facet_for_tri(mesh, tri_index)
 	if fid < 0:
 		_set_status("Could not resolve a panel there.")
 		return
@@ -598,14 +610,12 @@ func _paint_at(pos: Vector2) -> void:
 		_apply_and_refresh("%s facet %d." % ["Stripped" if _erase else "Painted", fid])
 	else:
 		# Side brush: the facet's OWN side, then every facet grouped with it.
-		# Grouping is weighted, so a raked glacis belongs to both front and top
-		# and paints from either - see HullFacets.BRUSH_SIDE_MIN_WEIGHT.
-		var table := HullFacets.load_map(_hull_type)
-		var sides = table.get("side", [])
-		var side := str(sides[fid]) if fid < sides.size() else ""
+		var seg := HullFacets.cached_segment(mesh)
+		var facet_sides = seg.get("facet_side", [])
+		var side := str(facet_sides[fid]) if fid < facet_sides.size() else ""
 		if side == "":
 			return
-		for f in ArmorPaint.facets_for_side(_hull_type, side):
+		for f in HullFacets.facets_for_side_mesh(mesh, side):
 			_paint_facet(int(f))
 		_apply_and_refresh("%s the %s." % ["Stripped" if _erase else "Painted", side])
 

@@ -18,6 +18,7 @@
 const HullFacets = preload("res://scripts/hull_facets.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const PartMaterials = preload("res://scripts/part_materials.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 
 const HOLDER_NAME := "ArmorPaint"
 
@@ -57,6 +58,7 @@ static func rebuild(hull: Node3D, mesh_inst: MeshInstance3D) -> int:
 	if not is_instance_valid(hull):
 		return 0
 	clear(hull)
+	clear_material_cache()
 	if mesh_inst == null or mesh_inst.mesh == null:
 		return 0
 
@@ -72,16 +74,24 @@ static func rebuild(hull: Node3D, mesh_inst: MeshInstance3D) -> int:
 	holder.name = HOLDER_NAME
 	hull.add_child(holder)
 
-	# The hull's own albedo is the base every painted facet starts from, so armor
-	# reads as the same vehicle with a different surface rather than as a patch
-	# of somebody else's paint.
-	var hull_tint := _hull_albedo(mesh_inst)
+	# The player's livery colour is the base every painted facet starts from, so
+	# armor reads as the same vehicle with a different surface rather than as a
+	# patch of somebody else's paint. Read it directly from the Livery API via
+	# the plan's faction id — reverse-engineering it from shader parameters was
+	# fragile and gave the wrong colour (base_color is a darkening multiplier,
+	# not the livery).
+	var faction := str(plan.get("faction", LiveryScript.NO_LIVERY))
+	var hull_tint: Color
+	if faction != "":
+		hull_tint = LiveryScript.zone_color(faction, "hull_upper")
+	else:
+		hull_tint = _hull_albedo(mesh_inst)
 
 	var built := 0
 	for fid in facets.keys():
 		var entry: Dictionary = facets[fid]
 		var type_id := str(entry.get("type_id", ""))
-		var frame := HullFacets.facet_frame(hull_type, int(fid), mesh_inst.transform)
+		var frame := HullFacets.facet_frame(hull_type, int(fid), mesh_inst.transform, mesh_inst.mesh)
 		if not bool(frame.get("valid", false)):
 			continue
 		var cat: Dictionary = ModuleCatalog.get_module_data(type_id)
@@ -106,21 +116,31 @@ static func rebuild(hull: Node3D, mesh_inst: MeshInstance3D) -> int:
 	return built
 
 
-# The hull's rendered albedo, so armor can be derived from it. Checks the
-# override first (what the livery/faction shader path actually sets) and falls
-# back through the surface material, then to a neutral hull grey-green.
+# The hull's rendered livery colour, so armor paint reads as a surface
+# treatment on the same vehicle rather than a patch of somebody else's paint.
+#
+# The livery lives in the zone uniforms (zone_upper_color / zone_lower_color),
+# NOT in base_color (which is a darkening multiplier, typically 0.7 for the
+# structural material). Reading base_color gave a flat grey and made every
+# painted facet override the player's scheme.
 static func _hull_albedo(mesh_inst: MeshInstance3D) -> Color:
 	var mat: Material = mesh_inst.material_override
-	if mat == null and mesh_inst.mesh != null and mesh_inst.mesh.get_surface_count() > 0:
-		mat = mesh_inst.get_active_material(0)
+	if mat == null and mesh_inst.mesh != null:
+		var surf_count := mesh_inst.mesh.get_surface_count()
+		# Surface 1+ carries the undarkened livery; surface 0 is the
+		# structural (darkened to 0.7). Prefer the armour material so the
+		# tint starts from the player's actual chosen colour.
+		if surf_count > 1:
+			mat = mesh_inst.get_active_material(1)
+		elif surf_count > 0:
+			mat = mesh_inst.get_active_material(0)
+	if mat is ShaderMaterial:
+		for param in ["zone_upper_color", "zone_lower_color", "stripe_color"]:
+			var v = (mat as ShaderMaterial).get_shader_parameter(param)
+			if v is Color:
+				return v
 	if mat is StandardMaterial3D:
 		return (mat as StandardMaterial3D).albedo_color
-	if mat is ShaderMaterial:
-		var v = (mat as ShaderMaterial).get_shader_parameter("albedo_color")
-		if v == null:
-			v = (mat as ShaderMaterial).get_shader_parameter("base_color")
-		if v is Color:
-			return v
 	return FALLBACK_HULL_TINT
 
 

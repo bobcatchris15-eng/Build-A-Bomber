@@ -15,19 +15,23 @@ extends "res://tests/suite_base.gd"
 
 const ArmorPaint = preload("res://scripts/armor_paint.gd")
 const HullFacets = preload("res://scripts/hull_facets.gd")
-const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 
 const HULL := "brenntal_medium_a"
 
 
 func _paint(hull_type: String, side: String, type_id: String, material: String) -> Array:
 	var rows := []
-	var table := HullFacets.load_map(hull_type)
-	var normals: PackedVector3Array = table.get("normal", PackedVector3Array())
-	var centroids: PackedVector3Array = table.get("centroid", PackedVector3Array())
-	var areas: PackedFloat32Array = table.get("area", PackedFloat32Array())
-	for f in ArmorPaint.facets_for_side(hull_type, side):
+	var mesh := MeshAssetLoader.get_hull_mesh(hull_type)
+	if mesh != null:
+		# Warm the cache so facets_for_side_mesh works.
+		HullFacets.cached_segment(mesh)
+	var seg := HullFacets.cached_segment(mesh) if mesh else HullFacets.load_map(hull_type)
+	var normals: PackedVector3Array = seg.get("normal", PackedVector3Array())
+	var centroids: PackedVector3Array = seg.get("centroid", PackedVector3Array())
+	var areas: PackedFloat32Array = seg.get("area", PackedFloat32Array())
+	for f in ArmorPaint.facets_for_side(hull_type, side, mesh):
 		rows.append({
 			"facet_id": int(f),
 			"side": side,
@@ -44,21 +48,25 @@ func _paint(hull_type: String, side: String, type_id: String, material: String) 
 func test_paint_coverage_weight_and_round_trip() -> bool:
 	print("Running Test Suite: Armor paint - coverage, area-scaled weight, round trip...")
 
-	var table := HullFacets.load_map(HULL)
-	if int(table.get("facet_count", 0)) <= 0:
-		print("  [FAIL] %s has no baked facet table - run bake_hull_roster --facets-only" % HULL)
+	var mesh := MeshAssetLoader.get_hull_mesh(HULL)
+	if mesh == null:
+		print("  [FAIL] could not load hull mesh for %s" % HULL)
+		return false
+	var seg := HullFacets.cached_segment(mesh)
+	if seg.is_empty() or int(seg.get("count", 0)) <= 0:
+		print("  [FAIL] %s produced no facets from live segment" % HULL)
 		return false
 
 	# Every side must be paintable. Winner-take-all side classification left 15
 	# of the 94 hulls with no `front` at all, which is why membership is
 	# weighted - see HullFacets.BRUSH_SIDE_MIN_WEIGHT.
 	for side in ArmorPaint.SIDES:
-		if ArmorPaint.facets_for_side(HULL, side).is_empty():
+		if ArmorPaint.facets_for_side(HULL, side, mesh).is_empty():
 			print("  [FAIL] side '%s' has no paintable facets" % side)
 			return false
 
 	var front := _paint(HULL, "front", "armor_plating", "hardened_steel")
-	var plan := ArmorPaint.build_plan(HULL, front)
+	var plan := ArmorPaint.build_plan(HULL, front, mesh)
 	if bool(plan.get("empty", true)):
 		print("  [FAIL] a painted front produced an empty plan")
 		return false
@@ -90,7 +98,7 @@ func test_paint_coverage_weight_and_round_trip() -> bool:
 	var by_id := {}
 	for r in all_rows:
 		by_id[int(r["facet_id"])] = r
-	hull.set_meta("armor_plan", ArmorPaint.build_plan(HULL, by_id.values()))
+	hull.set_meta("armor_plan", ArmorPaint.build_plan(HULL, by_id.values(), mesh))
 	var all_round: Dictionary = ArmorPaint.analyze(hull)
 
 	if not (all_round["weight"] > frontal["weight"] * 1.5):
@@ -121,13 +129,13 @@ func test_paint_coverage_weight_and_round_trip() -> bool:
 		"hull_type": HULL,
 		"armor": {
 			"hull_type": HULL,
-			"hull_tri_count": int(table.get("tri_count", 0)),
-			"facet_count": int(table.get("facet_count", 0)),
+			"hull_tri_count": int(seg.get("tri_count", 0)),
+			"facet_count": int(seg.get("count", 0)),
 			"assignments": front,
 		},
 		"modules": [],
 	}
-	var restored: Array = bm._deserialize_armor(blueprint, HULL)
+	var restored: Array = bm._deserialize_armor(blueprint, HULL, mesh)
 	if restored.size() != front.size():
 		print("  [FAIL] round trip lost assignments: %d -> %d" % [front.size(), restored.size()])
 		bm.queue_free()
@@ -150,7 +158,7 @@ func test_paint_coverage_weight_and_round_trip() -> bool:
 func test_paint_reresolves_when_the_hull_mesh_changes() -> bool:
 	print("Running Test Suite: Armor paint - re-resolve against a changed hull mesh...")
 
-	var table := HullFacets.load_map(HULL)
+	var mesh := MeshAssetLoader.get_hull_mesh(HULL)
 	var front := _paint(HULL, "front", "slat_armor", "reactive_armor")
 	if front.is_empty():
 		print("  [FAIL] nothing painted")
@@ -162,18 +170,19 @@ func test_paint_reresolves_when_the_hull_mesh_changes() -> bool:
 	# A re-exported .glb: the triangle count no longer matches what the save was
 	# written against, so facet_id is meaningless and must NOT be trusted. The
 	# facets themselves are unchanged here, so every assignment should recover.
+	var seg := HullFacets.cached_segment(mesh) if mesh else {}
 	var blueprint := {
 		"version": BlueprintManagerScript.CURRENT_BLUEPRINT_VERSION,
 		"hull_type": HULL,
 		"armor": {
 			"hull_type": HULL,
-			"hull_tri_count": int(table.get("tri_count", 0)) + 137,
-			"facet_count": int(table.get("facet_count", 0)),
+			"hull_tri_count": int(seg.get("tri_count", 0)) + 137,
+			"facet_count": int(seg.get("count", 0)),
 			"assignments": front,
 		},
 		"modules": [],
 	}
-	var recovered: Array = bm._deserialize_armor(blueprint, HULL)
+	var recovered: Array = bm._deserialize_armor(blueprint, HULL, mesh)
 	if recovered.size() != front.size():
 		print("  [FAIL] re-resolve should recover every facet whose geometry is unchanged: %d of %d" % [
 			recovered.size(), front.size()])
@@ -192,12 +201,12 @@ func test_paint_reresolves_when_the_hull_mesh_changes() -> bool:
 	# quietly re-armored onto whatever surface now sits nearest.
 	var flipped := []
 	for r in front:
-		var f := r.duplicate(true)
+		var f: Dictionary = r.duplicate(true)
 		f["normal"] = {"x": -float(r["normal"]["x"]), "y": -float(r["normal"]["y"]), "z": -float(r["normal"]["z"])}
 		f["centroid"] = {"x": 999.0, "y": 999.0, "z": 999.0}
 		flipped.append(f)
 	blueprint["armor"]["assignments"] = flipped
-	var dropped: Array = bm._deserialize_armor(blueprint, HULL)
+	var dropped: Array = bm._deserialize_armor(blueprint, HULL, mesh)
 	if dropped.size() >= front.size():
 		print("  [FAIL] a facet rotated past the match cone should be dropped, kept %d of %d" % [
 			dropped.size(), front.size()])
@@ -213,6 +222,7 @@ func test_paint_reresolves_when_the_hull_mesh_changes() -> bool:
 func test_resolver_reads_the_painted_facet() -> bool:
 	print("Running Test Suite: Armor paint - the damage resolver reads the plan...")
 
+	var mesh := MeshAssetLoader.get_hull_mesh(HULL)
 	var holder := Node3D.new()
 	root.add_child(holder)
 	var hull := Node3D.new()
@@ -221,7 +231,7 @@ func test_resolver_reads_the_painted_facet() -> bool:
 	holder.add_child(hull)
 
 	var bare := DamageResolverScript.resolve(hull, [], "kinetic")
-	var plan := ArmorPaint.build_plan(HULL, _paint(HULL, "front", "spaced_composite", "reactive_armor"))
+	var plan := ArmorPaint.build_plan(HULL, _paint(HULL, "front", "spaced_composite", "reactive_armor"), mesh)
 	hull.set_meta("armor_plan", plan)
 	var painted := DamageResolverScript.resolve(hull, [], "kinetic")
 
@@ -234,7 +244,7 @@ func test_resolver_reads_the_painted_facet() -> bool:
 
 	# Module bias still applies and still discriminates: spaced_composite is
 	# the anti-kinetic answer, slat_armor is not.
-	var slat_plan := ArmorPaint.build_plan(HULL, _paint(HULL, "front", "slat_armor", "reactive_armor"))
+	var slat_plan := ArmorPaint.build_plan(HULL, _paint(HULL, "front", "slat_armor", "reactive_armor"), mesh)
 	hull.set_meta("armor_plan", slat_plan)
 	var slat := DamageResolverScript.resolve(hull, [], "kinetic")
 	if not (painted.x > slat.x):

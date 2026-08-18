@@ -1159,31 +1159,91 @@ BODIES = {
 # body's top or flank. They are separate lofts in one mesh.
 # ---------------------------------------------------------------------------
 
+def _local_top_at_z(bm, godot_z: float, tolerance: float = 0.5) -> float:
+    """Y coordinate of the highest TOP-facing facet near the given Godot-Z.
+
+    Elements that sit on the body deck (bolster / gantry / second_deck / flatbed
+    / trunk / barbette / well / bridge / mast / spine) used to be placed at
+    `hh + ...` (top of the body's bounding box). That worked for hulls with a
+    uniform top (block, slab) but on a tallow - which has a tall cab at the
+    nose and a low flatbed at the rear - it put the rear elements high in the
+    air. The screenshot in the floating-parts bug report showed exactly that:
+    the bolster posts floating 0.9 units above the flatbed.
+
+    The body's true top is whatever face is currently facing up. The face's
+    centroid Z is the height in Godot, and Blender Y maps to Godot -Z (see
+    mark_frontal_armour's coordinate note at line ~441), so we convert the
+    Godot-Z to a Blender-Y target and pick the highest up-facing face near it.
+    Fallback to 0.0 if no top face is in range - the element ends up exactly
+    where the old code put it, so the behaviour is never worse than before.
+
+    bmesh face.normal is unreliable on freshly created faces (the bmesh.ops
+    call may not have computed the winding yet), so we derive the normal
+    manually from two edge vectors and take the +Z component.
+    """
+    target_blender_y = -godot_z
+    best: float = -1e9
+    for f in bm.faces:
+        verts = f.verts
+        if len(verts) < 3:
+            continue
+        v0 = verts[0].co
+        v1 = verts[1].co
+        v2 = verts[2].co
+        e1 = v1 - v0
+        e2 = v2 - v0
+        n = e1.cross(e2)
+        if n.length < 1e-6:
+            continue
+        nz = n.z / n.length
+        if nz < 0.5:
+            continue
+        c = f.calc_center_median()
+        if abs(c.y - target_blender_y) > tolerance:
+            continue
+        if c.z > best:
+            best = c.z
+    return best if best > -1e8 else 0.0
+
+
 def el_mast(bm, w, h, l, p):
-    """Tall square-section sensor mast. The scout tell."""
-    hh, hl = h / 2.0, l / 2.0
+    """Tall square-section sensor mast. The scout tell.
+
+    Base anchored to the body's local top at the mast z, not the bbox top.
+    See _local_top_at_z() - same rationale as el_bolster. The -h*0.04
+    inset on the old code was a poor attempt at "slightly below the
+    bbox top"; with the real top in hand it just disappears.
+    """
+    hl = l / 2.0
     mh = h * p.get("mh", 1.05)
     base = w * p.get("base", 0.15)
     z = hl * p.get("z", 0.10)
     x = w * p.get("x", 0.0)
+    local_top = _local_top_at_z(bm, z)
+    base_y = local_top
     HF.add_solid(bm, [
         (z - base / 2.0, HF.oct_outline(base, mh, base * 0.26, mh * 0.05,
-                                        cy=hh + mh / 2.0 - h * 0.04, cx=x)),
+                                        cy=base_y + mh / 2.0, cx=x)),
         (z + base / 2.0, HF.oct_outline(base * 0.9, mh, base * 0.26, mh * 0.05,
-                                        cy=hh + mh / 2.0 - h * 0.04, cx=x)),
+                                        cy=base_y + mh / 2.0, cx=x)),
     ], cap_chamfer=base * 0.22)
-    HF.add_chamfered_box(bm, (x, hh + mh * 0.86 - h * 0.04, z),
+    HF.add_chamfered_box(bm, (x, base_y + mh * 0.86, z),
                          (w * p.get("vane", 0.46), h * 0.07, base * 0.7),
                          cut=h * 0.02)
 
 
 def el_barbette(bm, w, h, l, p):
-    """Low octagonal-PLAN turret plinth. The medium/heavy gun-platform tell."""
-    hh, hl = h / 2.0, l / 2.0
+    """Low octagonal-PLAN turret plinth. The medium/heavy gun-platform tell.
+
+    Base anchored to the body's local top at the barbette z. See
+    _local_top_at_z() - same rationale as el_bolster.
+    """
+    hl = l / 2.0
     r = w * p.get("r", 0.34)
     bh = h * p.get("bh", 0.22)
     z = hl * p.get("z", 0.0)
-    cy = hh - h * 0.03 + bh / 2.0
+    base_y = _local_top_at_z(bm, z)
+    cy = base_y + bh / 2.0
     wide = HF.oct_outline(r * 2.0, bh, r * 0.30, bh * 0.28, cy=cy)
     narrow = HF.oct_outline(r * 1.46, bh * 0.92, r * 0.24, bh * 0.26, cy=cy)
     HF.add_solid(bm, [
@@ -1195,14 +1255,18 @@ def el_barbette(bm, w, h, l, p):
 
 
 def el_bridge(bm, w, h, l, p):
-    """Stepped superstructure stack. The command-variant tell."""
-    hh, hl = h / 2.0, l / 2.0
+    """Stepped superstructure stack. The command-variant tell.
+
+    First step base anchored to the body's local top at the bridge z. See
+    _local_top_at_z() - same rationale as el_bolster.
+    """
+    hl = l / 2.0
     steps = p.get("steps", 3)
     z = hl * p.get("z", 0.10)
     total = h * p.get("total", 0.95)
     w0 = w * p.get("w", 0.62)
     l0 = l * p.get("l", 0.30)
-    y = hh - h * 0.03
+    y = _local_top_at_z(bm, z)
     for i in range(steps):
         f = 1.0 - i * (0.62 / max(1, steps))
         sh = total / steps
@@ -1212,61 +1276,89 @@ def el_bridge(bm, w, h, l, p):
 
 
 def el_spine(bm, w, h, l, p):
-    """Full-length dorsal ridge."""
-    hh, hl = h / 2.0, l / 2.0
-    HF.add_ridge(bm, hl * p.get("z0", -0.72), hl * p.get("z1", 0.86),
-                 hh - h * 0.02, hh + h * p.get("sh", 0.30),
+    """Full-length dorsal ridge.
+
+    Base anchored to the body's local top at the spine's mid z, not the
+    bbox top. See _local_top_at_z() - same rationale as el_bolster. The
+    spine runs the length of the hull, so the local top can vary along
+    its z range; we use the spine's mid-z as a representative sample.
+    """
+    hl = l / 2.0
+    z0 = hl * p.get("z0", -0.72)
+    z1 = hl * p.get("z1", 0.86)
+    mid_z = (z0 + z1) / 2.0
+    base_y = _local_top_at_z(bm, mid_z)
+    sh = h * p.get("sh", 0.30)
+    HF.add_ridge(bm, z0, z1,
+                 base_y, base_y + sh + h * 0.02,
                  w * p.get("w_bot", 0.24), w * p.get("w_top", 0.10),
                  cx=w * p.get("x", 0.0), cut=w * 0.035)
 
 
 def el_flatbed(bm, w, h, l, p):
-    """Open cargo deck with low perimeter rails. The transport tell."""
-    hh, hl = h / 2.0, l / 2.0
+    """Open cargo deck with low perimeter rails. The transport tell.
+
+    Deck base anchored to the body's local top across the deck's z range.
+    See _local_top_at_z() - same rationale as el_bolster. Use the lowest
+    local top so the deck doesn't clip through the hull.
+    """
+    hl = l / 2.0
     z0 = hl * p.get("z0", -0.10)
     z1 = hl * p.get("z1", 0.94)
     bw = w * p.get("w", 0.86)
-    deck_y = hh + h * 0.02
-    HF.add_chamfered_box(bm, (0.0, deck_y, (z0 + z1) / 2.0),
+    mid_z = (z0 + z1) / 2.0
+    base_y = _local_top_at_z(bm, mid_z)
+    deck_y = base_y + h * 0.02
+    HF.add_chamfered_box(bm, (0.0, deck_y, mid_z),
                          (bw, h * p.get("deck_h", 0.20), z1 - z0), cut=h * 0.04)
     rail_h = h * p.get("rail_h", 0.30)
     for xs in (-1, 1):
         HF.add_chamfered_box(
-            bm, (xs * (bw / 2.0 - w * 0.03), deck_y + rail_h / 2.0,
-                 (z0 + z1) / 2.0),
+            bm, (xs * (bw / 2.0 - w * 0.03), deck_y + rail_h / 2.0, mid_z),
             (w * 0.06, rail_h, z1 - z0), cut=w * 0.015)
     HF.add_chamfered_box(bm, (0.0, deck_y + rail_h / 2.0, z1 - w * 0.03),
                          (bw, rail_h, w * 0.06), cut=w * 0.015)
 
 
 def el_trunk(bm, w, h, l, p):
-    """Raised full-length trunk deck - the tanker/bulk-carrier read."""
-    hh, hl = h / 2.0, l / 2.0
+    """Raised full-length trunk deck - the tanker/bulk-carrier read.
+
+    Base anchored to the body's local top at the trunk's mid z. See
+    _local_top_at_z() - same rationale as el_bolster.
+    """
+    hl = l / 2.0
     th = h * p.get("th", 0.42)
     z0 = hl * p.get("z0", -0.62)
     z1 = hl * p.get("z1", 0.90)
     tw = w * p.get("w", 0.66)
+    mid_z = (z0 + z1) / 2.0
+    base_y = _local_top_at_z(bm, mid_z)
     outline = HF.oct_outline(tw, th, tw * 0.22, th * 0.30,
-                             cy=hh + th / 2.0 - h * 0.03)
+                             cy=base_y + th / 2.0)
     HF.add_solid(bm, [(z0, outline), (z1, outline)], cap_chamfer=th * 0.24)
 
 
 def el_well(bm, w, h, l, p):
-    """Open cargo well: two tall side walls and a rear gate, nothing between."""
-    hh, hl = h / 2.0, l / 2.0
+    """Open cargo well: two tall side walls and a rear gate, nothing between.
+
+    Wall bases anchored to the body's local top across the well's z range.
+    See _local_top_at_z() - same rationale as el_bolster.
+    """
+    hl = l / 2.0
     z0 = hl * p.get("z0", -0.20)
     z1 = hl * p.get("z1", 0.94)
     ww = w * p.get("w", 0.88)
     wall_h = h * p.get("wall_h", 0.52)
     t = w * 0.09
+    base_y = _local_top_at_z(bm, (z0 + z1) / 2.0)
     for xs in (-1, 1):
         HF.add_chamfered_box(
-            bm, (xs * (ww / 2.0 - t / 2.0), hh + wall_h / 2.0 - h * 0.02,
+            bm, (xs * (ww / 2.0 - t / 2.0), base_y + wall_h / 2.0,
                  (z0 + z1) / 2.0),
             (t, wall_h, z1 - z0), cut=t * 0.26)
-    HF.add_chamfered_box(bm, (0.0, hh + wall_h / 2.0 - h * 0.02, z1 - t / 2.0),
+    HF.add_chamfered_box(bm, (0.0, base_y + wall_h / 2.0, z1 - t / 2.0),
                          (ww, wall_h, t), cut=t * 0.26)
-    HF.add_chamfered_box(bm, (0.0, hh + wall_h * 0.30, z0 + t / 2.0),
+    HF.add_chamfered_box(bm, (0.0, base_y + wall_h * 0.30, z0 + t / 2.0),
                          (ww * 0.9, wall_h * 0.7, t), cut=t * 0.26)
 
 
@@ -1303,45 +1395,80 @@ def el_ballast(bm, w, h, l, p):
 
 
 def el_gantry(bm, w, h, l, p):
-    """Portal-frame arch straddling the deck. Two legs and a beam."""
-    hw, hh, hl = w / 2.0, h / 2.0, l / 2.0
+    """Portal-frame arch straddling the deck. Two legs and a beam.
+
+    Leg base anchored to the body's local top at the gantry z, not the
+    bounding-box top. See _local_top_at_z() - same rationale as el_bolster.
+    """
+    hw, hl = w / 2.0, l / 2.0
     gh = h * p.get("gh", 0.86)
     t = w * p.get("t", 0.11)
     z = hl * p.get("z", 0.24)
     beam_h = h * p.get("beam_h", 0.13)
+    local_top = _local_top_at_z(bm, z)
+    leg_center_y = local_top + gh / 2.0
+    beam_center_y = local_top + gh - beam_h / 2.0
     for xs in (-1, 1):
-        HF.add_chamfered_box(bm, (xs * (hw - t * 0.8), hh + gh / 2.0, z),
+        HF.add_chamfered_box(bm, (xs * (hw - t * 0.8), leg_center_y, z),
                              (t, gh, t * 1.2), cut=t * 0.24)
-    HF.add_chamfered_box(bm, (0.0, hh + gh - beam_h / 2.0, z),
+    HF.add_chamfered_box(bm, (0.0, beam_center_y, z),
                          (w * 0.96, beam_h, t * 1.2), cut=min(beam_h, t) * 0.24)
 
 
 def el_bolster(bm, w, h, l, p):
-    """Tall transverse bolsters - the log/pipe hauler read."""
-    hh, hl = h / 2.0, l / 2.0
+    """Tall transverse bolsters - the log/pipe hauler read.
+
+    The post base is now anchored to the body's actual top at the bolster's
+    z position, not the bounding-box top. Old code used `hh + bh / 2.0`
+    which is `h/2 + bh/2` - the top of the hull's bbox, which on a tallow
+    hull is the cab roof. The bolster at z = -0.06 and z = 0.60 is in the
+    flatbed area, where the body is much lower, so the old code put the
+    whole structure 0.9 units in the air. See _local_top_at_z().
+    """
+    hl = l / 2.0
     bh = h * p.get("bh", 0.62)
     for zf in p.get("z", (-0.12, 0.66)):
-        HF.add_chamfered_box(bm, (0.0, hh + bh / 2.0, hl * zf),
+        z_actual = hl * zf
+        local_top = _local_top_at_z(bm, z_actual)
+        # Post center: bottom at local_top, so the post sits on the body.
+        post_y = local_top + bh / 2.0
+        # Beam center: same Y as the post center - the beam is a cross-brace
+        # in the middle of the post pair, like a sawhorse rail. Old code
+        # shared this Y with the post (and the bug was that Y was bbox-top,
+        # not flatbed-top).
+        beam_y = post_y
+        HF.add_chamfered_box(bm, (0.0, beam_y, z_actual),
                              (w * 0.90, bh * 0.24, l * 0.05), cut=h * 0.03)
         for xs in (-1, 1):
             HF.add_chamfered_box(
-                bm, (xs * (w * 0.44), hh + bh / 2.0, hl * zf),
+                bm, (xs * (w * 0.44), post_y, z_actual),
                 (w * 0.07, bh, l * 0.05), cut=w * 0.018)
 
 
 def el_second_deck(bm, w, h, l, p):
-    """A whole second open deck on posts above the first."""
-    hh, hl = h / 2.0, l / 2.0
+    """A whole second open deck on posts above the first.
+
+    Post bases anchored to the body's local top across the deck's z range,
+    not the bounding-box top. See _local_top_at_z() - same rationale as
+    el_bolster. We sample the local top at each post's z so the deck sits
+    flat even when the hull under it is not.
+    """
+    hl = l / 2.0
     lift = h * p.get("lift", 0.62)
     z0 = hl * p.get("z0", -0.30)
     z1 = hl * p.get("z1", 0.92)
     dw = w * 0.88
+    sample_zs = [z0 + l * 0.04, (z0 + z1) / 2.0, z1 - l * 0.04]
+    # Use the LOWEST local top across the deck's z range so every post sits
+    # on the body. If we used the highest, the posts on the lower side of
+    # the deck would float again.
+    base_y = min(_local_top_at_z(bm, z) for z in sample_zs)
     for xs in (-1, 1):
-        for zf in (z0 + l * 0.04, (z0 + z1) / 2.0, z1 - l * 0.04):
+        for zf in sample_zs:
             HF.add_chamfered_box(bm, (xs * (dw / 2.0 - w * 0.05),
-                                      hh + lift / 2.0, zf),
+                                      base_y + lift / 2.0, zf),
                                  (w * 0.08, lift, w * 0.08), cut=w * 0.02)
-    HF.add_chamfered_box(bm, (0.0, hh + lift + h * 0.05, (z0 + z1) / 2.0),
+    HF.add_chamfered_box(bm, (0.0, base_y + lift + h * 0.05, (z0 + z1) / 2.0),
                          (dw, h * 0.11, z1 - z0),
                          cut=h * 0.026)
 

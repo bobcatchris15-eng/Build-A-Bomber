@@ -1,12 +1,42 @@
-[gd_scene load_steps=14 format=3 uid="uid://cxabmain1234"]
+[gd_scene load_steps=13 format=3 uid="uid://cxabmain1234"]
+
+; WHAT THIS IS, AND WHY
+;
+; The Design Lab - the screen where the player assembles a unit from a
+; hull + module parts. The active model is FLOATING, unsupported, at
+; y = 2.5. Far below it the shared LabEnvironment draws a cutting mat
+; and a few kraft-cardboard model-kit boxes for context. The camera's
+; DOF eats the mat and the boxes heavily; the player mostly sees the
+; model sharp and the lower half of the frame as a green-and-white
+; blur that reads as "workshop below".
+;
+; Why y = 2.5 for the hull:
+;   * The placer's lift site (hull.position.y = fitted_size.y/2 +
+;     stage_y_offset) puts the hull's bottom at y = stage_y_offset,
+;     so stage_y_offset = 2.0 places the bottom at 2.0 and the centre
+;     at 2.5 (for a 1u-tall hull). Anything 0.5+ would work; 2.0
+;     reads as "clearly elevated, not on the floor" without the
+;     pedestal-on-pedestal look.
+;   * There's no longer a clipping constraint - the mat is at y = -20,
+;     well below the worst-case camera dip of 4.76u below the pivot
+;     at min_zoom + max_pitch. The model height is now a design
+;     choice (how high should the floating model sit?) rather than a
+;     math one.
+;
+; DOF notes:
+;   * CameraAttributesPractical is wired in below; designer_camera.gd
+;     updates dof_blur_far_distance on zoom so the focal point tracks
+;     the model. dof_blur_amount is set high (0.25) for the heavy
+;     floor-blur the design wants.
 
 [ext_resource type="Script" path="res://scripts/module_placer.gd" id="1_placer"]
 [ext_resource type="Script" path="res://scripts/designer_camera.gd" id="2_camera"]
-[ext_resource type="PackedScene" uid="uid://cxabstat123" path="res://scenes/UI_StatBlock.tscn" id="3_ui"]
-[ext_resource type="PackedScene" uid="uid://bro62gj1p12oc" path="res://scenes/UI_PartsMenu.tscn" id="4_parts"]
-[ext_resource type="Script" path="res://scripts/drag_drop_manager.gd" id="5_drop"]
-[ext_resource type="Script" path="res://scripts/blueprint_manager.gd" id="6_blueprint"]
-[ext_resource type="Script" path="res://scripts/part_thumbnail.gd" id="7_thumbs"]
+[ext_resource type="PackedScene" uid="uid://cxablabenv01" path="res://scenes/LabEnvironment.tscn" id="3_lab_env"]
+[ext_resource type="PackedScene" uid="uid://cxabstat123" path="res://scenes/UI_StatBlock.tscn" id="4_ui"]
+[ext_resource type="PackedScene" uid="uid://bro62gj1p12oc" path="res://scenes/UI_PartsMenu.tscn" id="5_parts"]
+[ext_resource type="Script" path="res://scripts/drag_drop_manager.gd" id="6_drop"]
+[ext_resource type="Script" path="res://scripts/blueprint_manager.gd" id="7_blueprint"]
+[ext_resource type="Script" path="res://scripts/part_thumbnail.gd" id="8_thumbs"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_x3k"]
 sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
@@ -30,8 +60,15 @@ adjustment_enabled = true
 adjustment_saturation = 1.18
 adjustment_contrast = 1.06
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crate"]
-albedo_color = Color(0.6, 0.4, 0.2, 1)
+[sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_lab"]
+; Placeholder values; designer_camera.gd rewrites dof_blur_far_distance
+; on every zoom event to track the model's distance from the camera.
+; dof_blur_amount is the heavy "kill the floor" setting - higher than
+; Battle's 0.06 because here the floor IS the subject to be blurred,
+; not just a distant landscape band.
+dof_blur_far_distance = 20.0
+dof_blur_far_transition = 3.0
+dof_blur_amount = 0.25
 
 [sub_resource type="BoxMesh" id="BoxMesh_hull"]
 size = Vector3(4, 1, 6)
@@ -42,6 +79,8 @@ size = Vector3(4, 1, 6)
 [node name="MainLab" type="Node3D"]
 script = ExtResource("1_placer")
 hull_path = NodePath("Hull")
+; Hull bottom lands at y = 2.0, centre at 2.5 (for a 1u-tall hull).
+stage_y_offset = 2.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_x3k")
@@ -50,37 +89,25 @@ environment = SubResource("Environment_x3k")
 transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 0, 0)
 shadow_enabled = true
 
-[node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5, 10)
-script = ExtResource("2_camera")
-
-[node name="Crate1" type="CSGBox3D" parent="."]
-transform = Transform3D(0.866, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866, -10, -0.5, -5)
-size = Vector3(2, 2, 2)
-material = SubResource("StandardMaterial3D_crate")
-
-[node name="Crate2" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, -0.5, 8)
-size = Vector3(2, 2, 4)
-material = SubResource("StandardMaterial3D_crate")
-
-[node name="Crate3" type="CSGBox3D" parent="."]
-transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, -8, -0.75, 12)
-size = Vector3(1.5, 1.5, 1.5)
-material = SubResource("StandardMaterial3D_crate")
-
-[node name="Crate4" type="CSGBox3D" parent="."]
-transform = Transform3D(0.965, 0, 0.258, 0, 1, 0, -0.258, 0, 0.965, 15, 0, -10)
-size = Vector3(3, 3, 3)
-material = SubResource("StandardMaterial3D_crate")
+[node name="LabEnvironment" parent="." instance=ExtResource("3_lab_env")]
 
 [node name="Hull" type="StaticBody3D" parent="."]
+; Visual hint only; the placer overwrites hull.position.y at runtime
+; from stage_y_offset, snapping the centre to (0, 2.5, 0).
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Hull"]
 mesh = SubResource("BoxMesh_hull")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Hull"]
 shape = SubResource("BoxShape3D_hull")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5, 10)
+attributes = SubResource("CameraAttributesPractical_lab")
+script = ExtResource("2_camera")
+; Orbit centre at the floating hull's centre, not the world origin.
+pivot_offset = Vector3(0, 2.5, 0)
 
 [node name="DragDropOverlay" type="Control" parent="."]
 layout_mode = 3
@@ -90,14 +117,14 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
-script = ExtResource("5_drop")
+script = ExtResource("6_drop")
 
-[node name="UI_StatBlock" parent="." instance=ExtResource("3_ui")]
+[node name="UI_StatBlock" parent="." instance=ExtResource("4_ui")]
 
-[node name="UI_PartsMenu" parent="." instance=ExtResource("4_parts")]
+[node name="UI_PartsMenu" parent="." instance=ExtResource("5_parts")]
 
 [node name="BlueprintManager" type="Node" parent="."]
-script = ExtResource("6_blueprint")
+script = ExtResource("7_blueprint")
 
 [node name="PartThumbnailCache" type="Node" parent="."]
-script = ExtResource("7_thumbs")
+script = ExtResource("8_thumbs")

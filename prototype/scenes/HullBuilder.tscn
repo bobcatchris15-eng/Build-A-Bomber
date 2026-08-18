@@ -1,7 +1,8 @@
-[gd_scene load_steps=7 format=3 uid="uid://dinuwrwp4f80k"]
+[gd_scene load_steps=8 format=3 uid="uid://dinuwrwp4f80k"]
 
 [ext_resource type="Script" path="res://scripts/hull_builder.gd" id="1_hb"]
 [ext_resource type="Script" path="res://scripts/designer_camera.gd" id="2_cam"]
+[ext_resource type="PackedScene" uid="uid://cxablabenv01" path="res://scenes/LabEnvironment.tscn" id="3_lab_env"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
 sky_horizon_color = Color(0.55, 0.6, 0.65, 1)
@@ -25,8 +26,14 @@ adjustment_enabled = true
 adjustment_saturation = 1.18
 adjustment_contrast = 1.06
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crate"]
-albedo_color = Color(0.6, 0.4, 0.2, 1)
+[sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_hb"]
+; Same far-blur strategy as MainLab - model sharp, workshop floor
+; blurred out. designer_camera.gd rewrites dof_blur_far_distance
+; on every wheel event to keep the focal point on whatever the
+; player is orbiting (a primitive in this case, dropped at y=0).
+dof_blur_far_distance = 20.0
+dof_blur_far_transition = 3.0
+dof_blur_amount = 0.25
 
 [node name="HullBuilder" type="Node3D"]
 script = ExtResource("1_hb")
@@ -38,31 +45,14 @@ environment = SubResource("Environment_env")
 transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 0, 0)
 shadow_enabled = true
 
+[node name="LabEnvironment" parent="." instance=ExtResource("3_lab_env")]
+
 [node name="HullContainer" type="Node3D" parent="."]
-
-[node name="Crate1" type="CSGBox3D" parent="."]
-transform = Transform3D(0.866, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866, -10, -0.5, -5)
-size = Vector3(2, 2, 2)
-material = SubResource("StandardMaterial3D_crate")
-
-[node name="Crate2" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, -0.5, 8)
-size = Vector3(2, 2, 4)
-material = SubResource("StandardMaterial3D_crate")
-
-[node name="Crate3" type="CSGBox3D" parent="."]
-transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, -8, -0.75, 12)
-size = Vector3(1.5, 1.5, 1.5)
-material = SubResource("StandardMaterial3D_crate")
-
-[node name="Crate4" type="CSGBox3D" parent="."]
-transform = Transform3D(0.965, 0, 0.258, 0, 1, 0, -0.258, 0, 0.965, 15, 0, -10)
-size = Vector3(3, 3, 3)
-material = SubResource("StandardMaterial3D_crate")
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5, 10)
 current = true
+attributes = SubResource("CameraAttributesPractical_hb")
 script = ExtResource("2_cam")
 orbit_speed = 0.008
 zoom_speed = 2.0

@@ -460,10 +460,13 @@ static func clear_cache() -> void:
 	_map_cache.clear()
 
 
-# The facet measurement, from the baked map. Returns the same shape
+# The facet measurement. Returns the same shape
 # module_placer._measure_hull_facet always has - {"size", "center", "outline",
 # "valid"} - so callers cannot tell which path produced it, and an empty result
 # means "fall back to the live measurement".
+#
+# Prefers the live cached segment (no bake required) and falls back to the
+# baked sidecar for hulls not yet segmented.
 #
 # `local_pos`/`local_normal` are in HULL-local space, and the mesh instance's
 # own transform is applied to the baked triangles here, so hull_scale, the fit
@@ -475,12 +478,15 @@ static func measure(mesh_inst: MeshInstance3D, hull_type_id: String, local_pos: 
 	var empty := {"size": Vector3.ZERO, "center": local_pos, "outline": PackedVector2Array(), "valid": false}
 	if mesh_inst == null or mesh_inst.mesh == null:
 		return empty
-	var baked := load_map(hull_type_id)
-	if baked.is_empty():
+	# Prefer the live segment -- no baked sidecar needed.
+	var seg := cached_segment(mesh_inst.mesh)
+	if seg.is_empty():
+		seg = load_map(hull_type_id)
+	if seg.is_empty():
 		return empty
 	var faces := mesh_inst.mesh.get_faces()
 	var tri_count := faces.size() / 3
-	var map: PackedInt32Array = baked["map"]
+	var map: PackedInt32Array = seg.get("map", PackedInt32Array())
 	# GUARD. The map is indexed by triangle, so it is only meaningful against
 	# the exact mesh it was baked from. A re-exported or re-imported .glb with a
 	# different triangle count must fall back to the live measurement rather
@@ -567,7 +573,7 @@ static func measure(mesh_inst: MeshInstance3D, hull_type_id: String, local_pos: 
 	var det_sign := signf(xform.basis.determinant())
 	if det_sign == 0.0:
 		det_sign = 1.0
-	var outward: float = float(baked.get("winding", 1.0)) * det_sign
+	var outward: float = float(seg.get("winding", 1.0)) * det_sign
 	if outward < 0.0:
 		mean_n = -mean_n
 
@@ -915,12 +921,14 @@ static func _emit_poly(st: SurfaceTool, poly: Array, lift: float, bounds: Rect2)
 # crease-split corner normals, and the tangential bounds used for UVs.
 static func _facet_surface(mesh_inst: MeshInstance3D, hull_type_id: String, facet_id: int,
 		center: Vector3, frame: Basis) -> Dictionary:
-	var baked := load_map(hull_type_id)
-	if baked.is_empty():
+	var seg := cached_segment(mesh_inst.mesh) if mesh_inst and mesh_inst.mesh else {}
+	if seg.is_empty():
+		seg = load_map(hull_type_id)
+	if seg.is_empty():
 		return {}
 	var faces := mesh_inst.mesh.get_faces()
 	var tri_count := faces.size() / 3
-	var map: PackedInt32Array = baked["map"]
+	var map: PackedInt32Array = seg.get("map", PackedInt32Array())
 	if map.size() != tri_count:
 		return {}
 	var xform := mesh_inst.transform
@@ -1009,16 +1017,26 @@ static func _shell_uv(p: Vector3, bounds: Rect2) -> Vector2:
 # were both stable. Since it reproduces module_placer._align_up_to() exactly,
 # the module's own +Y still lands on the surface normal and every downstream
 # convention (mirror flip, bottom-facet flip, yaw_offset) is unaffected.
-# The centre and orientation of a baked facet, in HULL space - i.e. exactly the
+# The centre and orientation of a facet, in HULL space - i.e. exactly the
 # `center`/`frame` pair build_plate() wants, so a painted facet can be skinned
 # from its id alone with no click and no measurement.
 #
+# When `mesh` is provided, uses the live cached segment; otherwise falls back
+# to the baked sidecar.
+#
 # measure() cannot serve this: it exists to answer "which facet did the player
 # just point at" and needs a ray to do it. Painting already knows the answer.
-static func facet_frame(hull_type_id: String, facet_id: int, xform: Transform3D) -> Dictionary:
-	var baked := load_map(hull_type_id)
-	var normals: PackedVector3Array = baked.get("normal", PackedVector3Array())
-	var centroids: PackedVector3Array = baked.get("centroid", PackedVector3Array())
+static func facet_frame(hull_type_id: String, facet_id: int, xform: Transform3D,
+		mesh: Mesh = null) -> Dictionary:
+	var seg := {}
+	if mesh != null:
+		seg = cached_segment(mesh)
+	else:
+		seg = load_map(hull_type_id)
+	if seg.is_empty():
+		return {"valid": false}
+	var normals: PackedVector3Array = seg.get("normal", PackedVector3Array())
+	var centroids: PackedVector3Array = seg.get("centroid", PackedVector3Array())
 	if facet_id < 0 or facet_id >= normals.size() or facet_id >= centroids.size():
 		return {"valid": false}
 	# Normals take the inverse transpose, positions the transform itself.
@@ -1044,3 +1062,250 @@ static func _tangent_frame(n: Vector3) -> Basis:
 	if d < -1.0 + 0.000001:
 		return Basis(Vector3.RIGHT, PI)
 	return Basis(Quaternion(Vector3.UP, target))
+
+
+# ---------------------------------------------------------------------------
+# Live facet computation -- replaces the baked sidecar for UI paths.
+# ---------------------------------------------------------------------------
+
+# Cached per-mesh adjacency + normals + areas.  Keyed by RID (unique per mesh
+# resource within a session).  Built once, reused by every find_facet() call on
+# that mesh -- the adjacency build is O(n) and not something we want on every
+# mouse-move or paint click.
+static var _facet_cache: Dictionary = {}  # RID -> _FCache
+
+class _FCache:
+	var adjacency: Array = []
+	var normals: PackedVector3Array = PackedVector3Array()
+	var areas: PackedFloat32Array = PackedFloat32Array()
+	var tri_count: int = 0
+
+
+static func _ensure_facet_cache(mesh: Mesh) -> _FCache:
+	if mesh == null:
+		return null
+	var rid: RID = mesh.get_rid()
+	if _facet_cache.has(rid):
+		return _facet_cache[rid] as _FCache
+	var faces := mesh.get_faces()
+	var tc := faces.size() / 3
+	var c := _FCache.new()
+	c.tri_count = tc
+	c.normals.resize(tc)
+	c.areas.resize(tc)
+	for i in range(tc):
+		var v0: Vector3 = faces[i * 3]
+		var v1: Vector3 = faces[i * 3 + 1]
+		var v2: Vector3 = faces[i * 3 + 2]
+		var cr: Vector3 = (v1 - v0).cross(v2 - v0)
+		var l := cr.length()
+		c.normals[i] = cr / l if l > 1e-12 else Vector3.UP
+		c.areas[i] = l * 0.5
+	c.adjacency = _build_adjacency(faces, tc)
+	_facet_cache[rid] = c
+	return c
+
+
+static func invalidate_facet_cache() -> void:
+	_facet_cache.clear()
+
+
+# Computes a facet by flood-filling from `tri_index`. Returns a dictionary:
+#   { "tris": PackedInt32Array, "centroid": Vector3, "normal": Vector3,
+#     "area": float, "valid": bool }
+#
+# Uses the same dual-check drift cap as segment() (FACET_CONE_DEG for the
+# running mean, FACET_SEED_CONE_DEG for the hard seed cap).  This exploits the
+# hard creases already present in the geometry: chine/deck/flank transitions
+# create 38-52 degree dihedrals, which exceed both thresholds.
+#
+# Adjacency and per-triangle normals are cached per Mesh resource so the O(n)
+# build happens once per hull type.
+static func find_facet(mesh: Mesh, tri_index: int) -> Dictionary:
+	var empty := {"tris": PackedInt32Array(), "centroid": Vector3.ZERO,
+		"normal": Vector3.ZERO, "area": 0.0, "valid": false}
+	if mesh == null or tri_index < 0:
+		return empty
+	var c := _ensure_facet_cache(mesh)
+	if c == null or tri_index >= c.tri_count:
+		return empty
+	var faces := mesh.get_faces()
+	var step_cos := cos(deg_to_rad(FACET_CONE_DEG))
+	var seed_cos := cos(deg_to_rad(FACET_SEED_CONE_DEG))
+	var seed_n: Vector3 = c.normals[tri_index]
+	var mean := seed_n * c.areas[tri_index]
+	var mean_n := seed_n
+	var visited := {}
+	var queue: Array = [tri_index]
+	visited[tri_index] = true
+	while queue.size() > 0:
+		var cur: int = queue.pop_back()
+		for nb in c.adjacency[cur]:
+			if visited.has(nb):
+				continue
+			if c.areas[nb] <= 0.0:
+				continue
+			var nn: Vector3 = c.normals[nb]
+			if nn.dot(mean_n) < step_cos or nn.dot(seed_n) < seed_cos:
+				continue
+			visited[nb] = true
+			mean += nn * c.areas[nb]
+			if mean.length_squared() > 1e-12:
+				mean_n = mean.normalized()
+			queue.append(nb)
+	# Collect results.
+	var tris := PackedInt32Array()
+	tris.resize(visited.size())
+	var idx := 0
+	var centroid := Vector3.ZERO
+	var total_area := 0.0
+	var vert_count := 0
+	for t in visited:
+		tris[idx] = t
+		idx += 1
+		var v0: Vector3 = faces[t * 3]
+		var v1: Vector3 = faces[t * 3 + 1]
+		var v2: Vector3 = faces[t * 3 + 2]
+		centroid += v0 + v1 + v2
+		vert_count += 3
+		total_area += c.areas[t]
+	if vert_count < 3 or total_area < 1e-12:
+		return empty
+	centroid /= float(vert_count)
+	# Orient the mean normal outward using the mesh's winding sign.
+	# The flood fill is sign-invariant (dot products are unaffected by a global
+	# flip), but the RETURNED normal must face outward for side classification.
+	var flip := winding_sign(mesh)
+	var n_len := mean.length()
+	var out_n := mean / n_len if n_len > 1e-12 else seed_n
+	if flip < 0.0:
+		out_n = -out_n
+	return {
+		"tris": tris,
+		"centroid": centroid,
+		"normal": out_n,
+		"area": total_area,
+		"valid": true,
+	}
+
+
+# Finds the triangle nearest to `local_pos` whose normal agrees with
+# `local_normal`.  Returns the triangle index, or -1.  Used by the highlight
+# and by re-finding a facet after save/load (centroid proximity).
+static func find_nearest_tri(mesh: Mesh, local_pos: Vector3,
+		local_normal: Vector3) -> int:
+	if mesh == null:
+		return -1
+	var c := _ensure_facet_cache(mesh)
+	if c == null or c.tri_count <= 0:
+		return -1
+	var faces := mesh.get_faces()
+	var norm := local_normal.normalized()
+	var best_idx := -1
+	var best_dist := INF
+	for i in range(c.tri_count):
+		if c.areas[i] <= 0.0:
+			continue
+		var nn: Vector3 = c.normals[i]
+		if absf(nn.dot(norm)) < 0.5:
+			continue
+		var v0: Vector3 = faces[i * 3]
+		var v1: Vector3 = faces[i * 3 + 1]
+		var v2: Vector3 = faces[i * 3 + 2]
+		var d: float = (((v0 + v1 + v2) / 3.0) - local_pos).length_squared()
+		if d < best_dist:
+			best_dist = d
+			best_idx = i
+	return best_idx
+
+
+# Cached full-mesh segmentation.  Runs segment() once per Mesh and caches the
+# result.  Used by the side-brush (needs all facets grouped by side) and by
+# build_plan() (needs the tri_to_facet map).  The cache is keyed by RID, same
+# as the facet cache.
+static var _seg_cache: Dictionary = {}  # RID -> Dictionary (segment() output + sides)
+
+static func cached_segment(mesh: Mesh) -> Dictionary:
+	if mesh == null:
+		return {}
+	var rid: RID = mesh.get_rid()
+	if _seg_cache.has(rid):
+		return _seg_cache[rid] as Dictionary
+	var result := segment(mesh)
+	if result.is_empty() or int(result.get("count", 0)) <= 0:
+		_seg_cache[rid] = {}
+		return {}
+	# Classify each facet into a side from its area-weighted normal.
+	var count := int(result["count"])
+	var facet_normals: PackedVector3Array = result.get("normal", PackedVector3Array())
+	var side_arr := []
+	side_arr.resize(count)
+	var sides_map: Dictionary = {}  # side_name -> Array[int]
+	for s in SIDE_AXES.keys():
+		sides_map[s] = []
+	for f in range(count):
+		var n: Vector3 = facet_normals[f] if f < facet_normals.size() else Vector3.UP
+		var best_side := ""
+		var best_dot := -INF
+		for s_name in SIDE_AXES.keys():
+			var d: float = n.dot(SIDE_AXES[s_name])
+			if d > best_dot:
+				best_dot = d
+				best_side = s_name
+		side_arr[f] = best_side
+		if best_side != "":
+			(sides_map[best_side] as Array).append(f)
+	result["facet_side"] = side_arr
+	result["sides"] = sides_map
+	_seg_cache[rid] = result
+	return result
+
+
+# Looks up which facet a triangle belongs to, using the cached segmentation.
+# Returns the facet id, or -1.  This is the fast path for the resolver --
+# direct PackedInt32Array index into the cached map.
+static func facet_for_tri(mesh: Mesh, tri_index: int) -> int:
+	if tri_index < 0:
+		return -1
+	var seg := cached_segment(mesh)
+	if seg.is_empty():
+		return -1
+	var m: PackedInt32Array = seg.get("map", PackedInt32Array())
+	if tri_index >= m.size():
+		return -1
+	return m[tri_index]
+
+
+# Returns all facet ids belonging to `side` (e.g. "front", "top"), or [].
+# Used by the side-brush.
+static func facets_for_side_mesh(mesh: Mesh, side: String) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	var seg := cached_segment(mesh)
+	if seg.is_empty():
+		return out
+	var sides_map: Dictionary = seg.get("sides", {})
+	var arr = sides_map.get(side, [])
+	for v in arr:
+		out.append(int(v))
+	return out
+
+
+# Builds a reverse map { triangle_index: facet_id } from the cached
+# segmentation.  Used by build_plan() and the resolver.
+static func build_tri_to_facet(mesh: Mesh) -> Dictionary:
+	var seg := cached_segment(mesh)
+	if seg.is_empty():
+		return {}
+	var m: PackedInt32Array = seg.get("map", PackedInt32Array())
+	# Note: the previous version did `var result := {}; result.resize(m.size())`
+	# but `{}` infers as Dictionary in GDScript, and Dictionary has no resize().
+	# The pre-allocation was a no-op for a Dictionary anyway (you can write
+	# `result[i] = v` without sizing), so the fix is just to drop the resize.
+	var result: Dictionary = {}
+	for i in range(m.size()):
+		result[i] = m[i]
+	return result
+
+
+static func invalidate_seg_cache() -> void:
+	_seg_cache.clear()
