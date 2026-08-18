@@ -260,20 +260,27 @@ func _build_right_rail() -> void:
 
 
 func _build_command_card() -> void:
-	command_card = CommandCardScript.new()
-	command_card.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	command_card.offset_right = -Tokens.SPACE_MD
-	command_card.offset_bottom = -Tokens.SPACE_MD
-	add_child(command_card)
-	command_card.setup(_director)
-	
+	# PR2: the command card and spec placard used to anchor to
+	# PRESET_BOTTOM_RIGHT, where the rightmost production toolbox
+	# overlapped them on any 1920 viewport (production_hud.gd layout
+	# centres the 5-toolbox row, and the rightmost box ends ~280px
+	# from the screen edge - exactly where the placard and command
+	# card used to live). They now live in the right rail, stacked
+	# top-to-bottom by the rail's VBoxContainer. Vertical order:
+	# SpecPlacard on top (only visible on selection), CommandCard on
+	# the bottom (always visible). SelectionPanel will land above
+	# both in PR3, which is the natural "what do I have -> what is
+	# this -> what can I do" reading order.
+	var body: VBoxContainer = right_rail.body()
+
 	placard = SpecPlacardScript.new()
 	placard.level = SpecPlacardScript.Level.BATTLE
-	placard.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	placard.offset_right = -Tokens.SPACE_MD - 180 # adjacent to command card
-	placard.offset_bottom = -Tokens.SPACE_MD
-	add_child(placard)
-	
+	body.add_child(placard)
+
+	command_card = CommandCardScript.new()
+	body.add_child(command_card)
+	command_card.setup(_director)
+
 	_director.selection.selection_changed.connect(_on_selection_changed)
 
 func _on_selection_changed(selected: Array) -> void:

@@ -150,30 +150,3 @@ func _build() -> void:
 	_body_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_body_host.add_theme_constant_override("separation", Tokens.SPACE_SM)
 	scroll.add_child(_body_host)
-
-	# PR1 placeholder. Removed by PR2 when the real chrome lands. A
-	# faint bezel with no content reads as a missing panel; a labelled
-	# empty bezel reads as "in progress, geometry is correct".
-	_attach_placeholder()
-
-
-# A single faint "TACTICAL" label so the bezel is visibly there in
-# PR1 and a playtest can confirm the position before PR2 moves real
-# chrome into it. HintLabel is the theme variation for hint text
-# (ui_style_guide.md §4.1); TEXT_SECONDARY is its colour, and the
-# label is the documented convention for "this is here, not the
-# important thing".
-func _attach_placeholder() -> void:
-	var label := Label.new()
-	label.name = "RailPlaceholder"
-	label.text = "TACTICAL"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	# theme_type_variation drives the font + colour from the theme.
-	# Inlining either here would beat the theme and force every
-	# future placeholder to be redefined (UI_IMPLEMENTATION_PLAN.md
-	# Priority 5: "No theme overrides inline in screen scripts").
-	label.theme_type_variation = "HintLabel"
-	# Padding around the placeholder so the bezel reads as a panel
-	# with content, not as a panel whose content is the border.
-	label.custom_minimum_size = Vector2(0, 80)
-	_body_host.add_child(label)
