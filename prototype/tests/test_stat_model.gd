@@ -15,17 +15,19 @@ extends "res://tests/suite_base.gd"
 #      check against the two spec dictionaries and as a behavioural check
 #      through ModuleData itself.
 #
-#   2. protectedness ("Armor Level") bought HP more cheaply per kilogram than
-#      it charged for it, making the slider strictly dominant. Fixed by raising
-#      the weight coefficient above the HP coefficient in module_data.gd;
-#      guarded here by asserting HP-per-kilogram strictly falls as armor rises.
-#
-#   3. The "tuned for the unit" pass (Chris, 2026-08-16). Locomotion
+#   2. The "tuned for the unit" pass (Chris, 2026-08-16). Locomotion
 #      auto-scales visually to the hull, and the drivetrain's load and
 #      speed math is off `carried_weight` (everything except hull + loco).
 #      These pin the two halves: locomotion_layout's node_scale_for /
 #      scale_multiplier_for honour the hull-relative factors, and a
 #      bare hull on a chassis is load_ratio 0 / not overloaded.
+#
+# What the suite USED to guard: protectedness ("Armor Level") being
+# strictly dominant at +25% hp / +15% weight per level, fixed on 2026-08-11
+# by raising the weight coefficient to +35%. The slider and its test were
+# both retired on 2026-08-17 with the protectedness stat: armor is
+# paint-by-facet on the hull now, not a per-weapon slider, so the "more
+# armor is a free win" failure mode cannot reappear at this layer.
 
 const LabDocumentScript = preload("res://scripts/lab_document.gd")
 const DrivetrainForStatModel = preload("res://scripts/drivetrain.gd")
@@ -214,60 +216,6 @@ func test_count_tweaks_scale_linearly_from_their_default() -> bool:
 			print("         ", b)
 		return false
 	print("  [PASS] Doubling any count doubles the module's mass.")
-	return true
-
-
-func test_armor_level_costs_more_mass_than_it_buys() -> bool:
-	print("Running Test Suite: Armor Level Costs More Mass Than It Buys...")
-	# protectedness used to be strictly dominant: +25% hp against +15% weight
-	# per level meant every level made a module both tougher AND lighter for
-	# what it carried, so there was never a reason to take less. The fix put
-	# the weight coefficient above the HP coefficient (module_data.gd), and
-	# this is the property that must never invert again.
-	#
-	# Both halves are asserted, because "worse per kilogram" is trivially
-	# satisfiable by armor that does nothing at all:
-	#   - HP must strictly RISE with the level, or the slider is not armor.
-	#   - HP per kilogram must strictly FALL, or the slider is not a trade.
-	# Checked across every module that declares protectedness rather than one
-	# sample, because the two stats round independently (round_to_half) and a
-	# light module is where a shallow curve would first flatten into a tie.
-	var inversions := []
-	var modules_checked := 0
-	for type_id in LabDocumentScript.TWEAK_SPECS:
-		for spec in LabDocumentScript.TWEAK_SPECS[type_id]:
-			if spec.get("name", "") != "protectedness":
-				continue
-			modules_checked += 1
-			var step := float(spec.get("step", 1.0))
-			var p := float(spec.get("min", 0.0))
-			var prev_hp := -1.0
-			var prev_ratio := -1.0
-			while p <= float(spec.get("max", 0.0)) + 0.0001:
-				var data := _module(type_id, {"protectedness": p})
-				var hp := data.get_hp()
-				var weight := data.get_weight()
-				if weight <= 0.0:
-					inversions.append("%s has no weight to charge armor against" % type_id)
-					break
-				var ratio := hp / weight
-				if prev_hp >= 0.0 and hp <= prev_hp:
-					inversions.append("%s armor level %s did not increase HP (%s -> %s)" % [type_id, p, prev_hp, hp])
-				if prev_ratio >= 0.0 and ratio >= prev_ratio:
-					inversions.append("%s armor level %s is not worse per kg (%.4f -> %.4f)" % [type_id, p, prev_ratio, ratio])
-				prev_hp = hp
-				prev_ratio = ratio
-				p += step
-
-	if not inversions.is_empty():
-		print("  [FAIL] Armor Level is still a free win somewhere:")
-		for i in inversions:
-			print("         ", i)
-		return false
-	if modules_checked == 0:
-		print("  [FAIL] No module in TWEAK_SPECS declares protectedness - the tweak was renamed or dropped")
-		return false
-	print("  [PASS] Across %d modules, armor always adds HP and always costs mass efficiency." % modules_checked)
 	return true
 
 

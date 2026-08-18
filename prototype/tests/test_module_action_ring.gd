@@ -107,29 +107,6 @@ func test_tweak_station_angle_is_identity_of_name_not_index() -> bool:
 		print("  [FAIL] Same tweak name resolved to different angles: %.3f vs %.3f" % [caliber_angle_a, caliber_angle_b])
 		return false
 
-	# A module class with 3 tweaks and one with 5 tweaks must still each
-	# resolve "protectedness" to the same station.
-	var spec_short: Array = LabDocument.TWEAK_SPECS.get("gauss_railgun", [])
-	var spec_long: Array = LabDocument.TWEAK_SPECS.get("flak_cannon", [])
-	if spec_short.is_empty() or spec_long.is_empty():
-		print("  [FAIL] Expected fixture specs missing from LabDocument.TWEAK_SPECS")
-		return false
-	var idx_short := -1
-	for i in spec_short.size():
-		if spec_short[i]["name"] == "protectedness":
-			idx_short = i
-	var idx_long := -1
-	for i in spec_long.size():
-		if spec_long[i]["name"] == "protectedness":
-			idx_long = i
-	if idx_short == idx_long:
-		print("  [SKIP-CHECK] fixture specs happened to place 'protectedness' at the same index; angle identity still verified above")
-	var angle_short := TweakStations.angle_for("protectedness")
-	var angle_long := TweakStations.angle_for("protectedness")
-	if not is_equal_approx(angle_short, angle_long):
-		print("  [FAIL] 'protectedness' angle differs between differently-sized specs")
-		return false
-
 	print("  [PASS] Station angle is keyed by tweak name, independent of a module's tweak count or list position.")
 	return true
 

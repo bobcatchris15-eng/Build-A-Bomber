@@ -97,7 +97,6 @@ const SUITE_ORDER := [
 	["stat_model", "test_count_tweak_normalizer_matches_declared_defaults"],
 	["stat_model", "test_count_tweaks_are_neutral_at_their_declared_default"],
 	["stat_model", "test_count_tweaks_scale_linearly_from_their_default"],
-	["stat_model", "test_armor_level_costs_more_mass_than_it_buys"],
 	# 2026-08-16: the "tuned for the unit" pass. Locomotion auto-scales to
 	# the hull (HULL_RELATIVE is the new default in locomotion_layout.gd),
 	# and the drivetrain's load/speed math is off `carried_weight` (=

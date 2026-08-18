@@ -20,7 +20,7 @@ def make_weapon(name, type_id, facet, pos, rot=(0,0,0), scale=1.0, yaw=0.0):
         "type_id": type_id,
         "yaw_offset": yaw,
         "stats": {"cost_crystal": 10, "cost_metal": 100, "dps": 10.0, "hp": 100.0, "weight": 100.0},
-        "tweaks": {"barrel_count": 1.0, "barrel_length": 1.0, "caliber": 1.0, "protectedness": 0.0}
+        "tweaks": {"barrel_count": 1.0, "barrel_length": 1.0, "caliber": 1.0}
     }
 
 units = [

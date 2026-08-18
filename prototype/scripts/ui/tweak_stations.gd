@@ -132,7 +132,6 @@ const TWEAK_ANGLES := {
 	"pressure_valve": CLOCK_8,
 	"projector_diameter": CLOCK_10,
 	"prop_count": CLOCK_11,
-	"protectedness": CLOCK_1,
 	"radar_dish": CLOCK_2,
 	"radar_size": CLOCK_4,
 	"rail_length": CLOCK_5,

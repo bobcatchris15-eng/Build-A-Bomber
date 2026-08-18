@@ -62,13 +62,6 @@ func get_hp() -> float:
 	var hp = base_hp + (base_hp * (vol - 1.0) * GlobalConfig.hp_scale_factor)
 	if tweaks.has("cooling_jacket"):
 		hp *= tweaks["cooling_jacket"]
-	if tweaks.has("protectedness"):
-		var p = tweaks["protectedness"]
-		if typeof(p) == TYPE_FLOAT or typeof(p) == TYPE_INT:
-			# +25% per level, UNCHANGED. What Armor Level buys was never the
-			# problem; what it charged was. See the weight branch in
-			# get_weight() for the full trade and the reasoning behind it.
-			hp *= 1.0 + (p * 0.25)
 	return GlobalConfig.round_to_half(hp)
 
 func get_weight() -> float:
@@ -108,48 +101,6 @@ func get_weight() -> float:
 			# fitted bipod is real mass whether or not it's down.
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight += base_weight * 0.06 * float(val)
-		elif tweak_name == "protectedness":
-			# ARMOR LEVEL'S PRICE IS MASS, and until 2026-08-11 it was not
-			# charged. At the old +15%/level the slider was strictly dominant:
-			# level 4 gave 2.00x hp for 1.60x weight, which is 1.25x HP PER
-			# KILOGRAM, so bolting plate onto a module made it tougher AND more
-			# mass-efficient at the same time. There was no design, no hull and
-			# no drivetrain for which taking less armor was the right answer,
-			# so every optimised build simply maxed every Armor Level in it. A
-			# slider that presents as a trade and resolves as a free win is the
-			# Forged Battalion trap docs/design/DESIGN_VISION.md warns about,
-			# one tweak down from the whole-part level it usually describes.
-			#
-			# At +35%/level the two curves cross the right way round: more armor
-			# is always tougher and always worse per kilogram.
-			#
-			#   p    hp     weight   hp/kg    metal   hp/metal
-			#   0    1.00   1.00     1.000    1.00    1.000
-			#   1    1.25   1.35     0.926    1.20    1.042
-			#   2    1.50   1.70     0.882    1.40    1.071
-			#   3    1.75   2.05     0.854    1.60    1.094
-			#   4    2.00   2.40     0.833    1.80    1.111
-			#
-			# Whether losing a sixth of your mass efficiency matters is then the
-			# actual decision, and it is settled by the drivetrain rather than
-			# here: weight sits inside the thrust/weight term AND is charged
-			# again past capacity at OVERLOAD_EXPONENT 1.8 (drivetrain.gd), so
-			# a design with headroom pays almost nothing for full armor while
-			# one already at its limit pays for it twice. Same slider, opposite
-			# answer per chassis - which is the point.
-			#
-			# COST is deliberately left at +20%/level (get_cost() below), so hp
-			# per credit still IMPROVES with armor. Armor is meant to stay an
-			# attractive thing to buy; the pressure this introduces should be
-			# felt in the speed readout, not in the metal counter.
-			#
-			# Linear, not quadratic. A curve like p*0.15 + p*p*0.05 reaches the
-			# same 2.40 at level 4 and reads better in isolation, but it makes
-			# level 1 mass-efficient (1.042 hp/kg) before it turns punitive,
-			# which restores exactly the "one free level" dominance this is
-			# fixing. Monotonic is the property that matters.
-			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
-				weight *= 1.0 + (val * 0.35)
 
 	# Ammo stowage mass - AP penetrators and HE filler weigh more than a
 	# plain service round, obscurant canisters slightly less.
@@ -198,14 +149,6 @@ func get_cost() -> Vector2i:
 		elif tweak_name == "launch_catapult":
 			m = int(m * val)
 			c = int(c * val)
-		elif tweak_name == "protectedness":
-			# +20% per level, held where it was on purpose while the weight
-			# coefficient moved. See get_weight()'s protectedness branch: armor
-			# is supposed to stay cheap in credits and expensive in mass, so
-			# the choice is made against the drivetrain and not the economy.
-			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
-				m = int(m * (1.0 + (val * 0.20)))
-				c = int(c * (1.0 + (val * 0.20)))
 
 	# Per-round payload cost. EMP shells are the crystal sink of the set
 	# (1.7x), obscurants the cheapest - deliberately so that loading smoke

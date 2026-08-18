@@ -328,7 +328,7 @@ const LOADOUT := [
 			# Every tweak is inside artillery's own range in lab_document.gd's
 			# TWEAK_SPECS, so the design is reproducible on the Lab's sliders.
 			{"type": "artillery", "x": 0.0, "z": 0.6,
-				"tweaks": {"caliber": 1.2, "barrel_length": 1.4, "protectedness": 1.0}},
+				"tweaks": {"caliber": 1.2, "barrel_length": 1.4}},
 			# Off the centreline: artillery's envelope is 6.4 deep and owns it.
 			{"type": "ciws", "x": 1.2, "z": 1.0},
 		],
