@@ -44,15 +44,12 @@ const OFFSET_MIN: float = 0.002
 
 # Containers whose own geometry must never be treated as hull surface -
 # otherwise a rebuild would project the new decals onto the previous pass's
-# decal quads.
-# "ArmorGreebles" added when armor_greebles.gd landed: it runs BEFORE
-# hull_decals in both call sites, so without the exclusion every decal
-# projected onto the energy shield's ellipsoid (a big mesh enclosing the whole
-# hull) and onto the rivet field, instead of onto the hull skin.
-# "RunningGear" joins the list now that the chassis actually has geometry: it is
-# a structural frame bolted UNDER the hull, not hull skin, so rivets should not
-# grow out of its cross-members and unit markings should not project onto its
-# belly plate - the same reasoning that excludes placed modules.
+# decal quads. "HullGreebles" runs alongside hull_decals and would otherwise
+# pull the decal projection onto its own greeble meshes. "RunningGear" joins
+# the list now that the chassis actually has geometry: it is a structural
+# frame bolted UNDER the hull, not hull skin, so rivets should not grow out
+# of its cross-members and unit markings should not project onto its belly
+# plate - the same reasoning that excludes placed modules.
 const EXCLUDED_NODES := ["HullDecals", "HullGreebles", "RunningGear"]
 
 # The meta every PLACED MODULE carries (set by module_placer.gd and

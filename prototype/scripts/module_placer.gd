@@ -13,7 +13,7 @@ const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const AutoWeaponScript = preload("res://scripts/auto_weapon.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const UITokens = preload("res://scripts/ui_tokens.gd")
-const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
+const ArmorPaintScript = preload("res://scripts/armor_paint.gd")
 # hull_decals.gd is deliberately NOT preloaded any more - the Lab draws no
 # faction insignia. Battle spawns still get theirs via blueprint_manager.
 const LiveryScript = preload("res://scripts/livery.gd")
@@ -27,7 +27,6 @@ const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
 # already applied.
 const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 const HullFacetsScript = preload("res://scripts/hull_facets.gd")
-const ArmorPaintScript = preload("res://scripts/armor_paint.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -149,10 +148,6 @@ func _ready():
 				hull.set_meta("hull_scale", Vector3(1.0, 1.0, 1.0))
 			if not hull.has_meta("type_id"):
 				hull.set_meta("type_id", "brenntal_medium_a")
-			if not hull.has_meta("armor_material"):
-				hull.set_meta("armor_material", "hardened_steel")
-			if not hull.has_meta("armor_thickness"):
-				hull.set_meta("armor_thickness", 1.0)
 			update_hull_appearance()
 
 	# Coming back from the Test Range: rebuild whatever the player was
@@ -1312,7 +1307,6 @@ func update_hull_appearance():
 	# any faction-independent greeble is added.
 	var body_size: Vector3 = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
 	HullGreeblesScript.apply_greebles(hull, LiveryScript.NO_LIVERY, body_size)
-	ArmorGreeblesScript.apply(hull, "", body_size)
 
 	var kit_mat := HullMaterialBuilderScript.build_scale_model_material()
 	HullMaterialBuilderScript.apply_scale_model_finish(mesh_inst, kit_mat)

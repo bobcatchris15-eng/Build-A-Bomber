@@ -32,7 +32,6 @@ const CURRENT_BLUEPRINT_VERSION: float = 3.0
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
-const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const LiveryScript = preload("res://scripts/livery.gd")
 const PartMaterialsScript = preload("res://scripts/part_materials.gd")
@@ -896,8 +895,6 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	# clear_livery() is at the single return point at the end.
 	PartMaterialsScript.set_livery(faction_name)
 	var nose_taper = blueprint_data.get("nose_taper", 1.0)
-	hull.set_meta("armor_thickness", armor_thick)
-	hull.set_meta("armor_material", armor_mat_name)
 	hull.set_meta("faction", faction_name)
 	hull.set_meta("nose_taper", nose_taper)
 	hull.set_meta("blueprint_id", blueprint_data.get("id", ""))
@@ -972,7 +969,6 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	hull.add_child(mesh_inst)
 
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	ArmorGreeblesScript.apply(hull, "", catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	if is_designer:
 		# Unpainted kit finish, matching module_placer's update_hull_appearance()
 		# - see the long comment there for why the Lab shows no livery. Decals
