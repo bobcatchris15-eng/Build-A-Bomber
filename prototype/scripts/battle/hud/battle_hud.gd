@@ -27,6 +27,7 @@ const SpecPlacardScript = preload("res://scripts/ui/spec_placard.gd")
 const EdgeMarkerScript = preload("res://scripts/ui/edge_marker.gd")
 const RightRailScript = preload("res://scripts/battle/hud/right_rail.gd")
 const SelectionPanelScript = preload("res://scripts/battle/hud/selection_panel.gd")
+const UIDockScript = preload("res://scripts/ui_dock.gd")
 
 # Coarser than the fog grid on purpose: a minimap needs a recognisable
 # silhouette, not per-vision-tick precision.
@@ -103,6 +104,7 @@ var placard: Control = null
 var edge_marker: Control = null
 var right_rail: Control = null
 var selection_panel: Control = null
+var selection_dock: Control = null
 
 
 func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
@@ -136,6 +138,13 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	# before the placard and command card.
 	_build_selection_panel()
 	_build_command_card()
+	# PR3b: the SelectionPanel moves from the right rail to a
+	# minimizable left-side UIDock. Must come AFTER _build_selection_panel
+	# so the panel exists to reparent. Default state is EXPANDED so
+	# the player starts with the panel visible; clicking the header
+	# toggles to RAILED (a 40px strip with a hull icon), the same
+	# toggle the Design Lab's docks use (ui_dock.gd:228-232).
+	_build_selection_dock()
 	
 	edge_marker = EdgeMarkerScript.new()
 	add_child(edge_marker)
@@ -296,6 +305,69 @@ func _build_selection_panel() -> void:
 	selection_panel.name = "SelectionPanel"
 	selection_panel.bind_selection_service(_director.selection)
 	right_rail.body().add_child(selection_panel)
+
+
+# PR 3b. The SelectionPanel is moved from the right rail into a
+# minimizable UIDock on the left edge. The dock gives the player a
+# way to get the panel out of the way when they need a clean view of
+# the world (the whole reason it's not pinned to the rail like the
+# placard and command card, which the player always wants visible).
+#
+# WHY A LEFT DOCK, NOT A LEFT RAIL. The dock is the existing widget
+# (ui_dock.gd) the Design Lab already uses for its two side panels
+# - the same EXPANDED / RAILED / HIDDEN state machine, the same
+# auto-reveal-off rule (ui_dock.gd:30-34, "Skirmish must leave it
+# off"), the same expand-on-click header. Reusing the dock means
+# the player's muscle memory for the Lab's panels carries over to
+# the match; a new widget would be one more thing to learn.
+#
+# auto_reveal is OFF. ui_dock.gd's header is explicit: "A dock that
+# vanishes on its own mid-fight costs the player the fight". The
+# player clicks the header to collapse it; it stays collapsed until
+# they click again.
+#
+# dock_icon = "hull" is a stand-in: there is no "selection" icon in
+# the registry today. A tank silhouette reads as 'this is about
+# your units' even if it is not perfectly named. The right answer
+# is an authored icon, which is content work this PR is not
+# touching - flagged in the commit message.
+#
+# PERSISTENCE is OFF (empty persist_key). The state resets to
+# EXPANDED every match. Persisting would carry a player who
+# collapsed the dock last match into a collapsed dock this match,
+# which is the kind of silent behaviour change that erodes trust;
+# a player who wants it collapsed can collapse it on the first
+# frame of any match.
+#
+# REPARENTING. The SelectionPanel was added to the right rail body
+# by _build_selection_panel. We remove it from there and re-add it
+# to the dock body. Godot preserves the node's state across the
+# reparent (the panel's bind_selection_service connection, its
+# _groups dict, its _primary_design_id, and the visible state are
+# all on the node, not the parent).
+func _build_selection_dock() -> void:
+	selection_dock = UIDockScript.new()
+	selection_dock.dock_title = "SELECTION"
+	selection_dock.dock_icon = "hull"
+	selection_dock.side = UIDockScript.Side.LEFT
+	selection_dock.expanded_size = 240.0
+	selection_dock.auto_reveal = false
+	selection_dock.default_state = UIDockScript.State.EXPANDED
+	selection_dock.persist_key = ""
+	# The dock's _ready calls _apply_state which writes the EDGE_INSET
+	# offsets but never touches offset_top (ui_dock.gd:393-394: "the
+	# caller sets offset_top to clear the toolbar and that inset has
+	# to survive"). Set it BEFORE add_child so the first frame
+	# already sits below the top strip.
+	selection_dock.offset_top = Tokens.SPACE_SM + TOP_STRIP_HEIGHT + Tokens.SPACE_SM
+	add_child(selection_dock)
+
+	# Reparent the panel from the right rail body into the dock body.
+	if selection_panel != null and is_instance_valid(selection_panel):
+		var old_parent := selection_panel.get_parent()
+		if old_parent != null:
+			old_parent.remove_child(selection_panel)
+		selection_dock.body().add_child(selection_panel)
 
 
 func _build_command_card() -> void:
