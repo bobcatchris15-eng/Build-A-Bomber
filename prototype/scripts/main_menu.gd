@@ -28,6 +28,7 @@ const DesignStatsScript = preload("res://scripts/design_stats.gd")
 # boots with. The card data declares a `launcher` field; the destination card's
 # pressed handler routes through it instead of the legacy scene path.
 const TestRangeLauncherScript = preload("res://scripts/test_range_launcher.gd")
+const TwoPhaseTutorialManagerScript = preload("res://scripts/tutorial_two_phase/two_phase_tutorial_manager.gd")
 
 const TITLE := "KITBASH COMMAND"
 const TAGLINE := "Design bureau and proving ground"
@@ -106,15 +107,24 @@ const GROUPS := [
 			},
 		],
 	},
+	{
+		"section": "TRAINING",
+		"items": [
+			{
+				"title": "TUTORIAL",
+				"desc": "Experience defeat with weak units, then build one that wins. Two phases.",
+				"scene": "res://scenes/MainLab.tscn",
+				"badge": "SYS // TRAINING",
+				"tutorial": true
+			},
+		],
+	},
 ]
 
-# First-run card, shown INSTEAD of GROUPS until the player has completed (or
-# skipped) the tutorial once - "no seven-door problem when there is one door".
-# Routes to the Lab like any other card; the only difference is arming
-# TutorialManager on the way, and the Lab is where the guided loop starts.
+# Tutorial card for the TRAINING section - always visible
 const TUTORIAL_CARD := {
-	"title": "BUILD YOUR FIRST VEHICLE",
-	"desc": "Fifteen guided steps, then field it under fire.",
+	"title": "TUTORIAL",
+	"desc": "Experience defeat with weak units, then build one that wins. Two phases.",
 	"scene": "res://scenes/MainLab.tscn",
 	"badge": "SYS // TRAINING",
 	"tutorial": true
@@ -466,29 +476,17 @@ func _build_left_column(parent: Control) -> void:
 	nav.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	col.add_child(nav)
 
-	var tutorial_manager = get_node_or_null("/root/TutorialManager")
-	var first_run: bool = tutorial_manager == null or not tutorial_manager.has_been_seen()
-
-	if first_run:
-		# "No seven-door problem when there is one door" - a returning player
-		# who explicitly wants the full menu can still reach it via SYSTEM ->
-		# Replay training once that exists (Phase 7); until then, finishing or
-		# skipping the tutorial is what unlocks GROUPS below.
-		var single := VBoxContainer.new()
-		single.add_theme_constant_override("separation", Tokens.SPACE_SM)
-		nav.add_child(single)
-		_add_destination_card(single, TUTORIAL_CARD["title"], TUTORIAL_CARD["desc"],
-			TUTORIAL_CARD["scene"], TUTORIAL_CARD["badge"], true, "")
-	else:
-		for group in GROUPS:
-			_add_section_header(nav, group["section"])
-			var section := VBoxContainer.new()
-			section.add_theme_constant_override("separation", Tokens.SPACE_SM)
-			nav.add_child(section)
-			for item in group["items"]:
-				_add_destination_card(section, item["title"], item["desc"],
-					item["scene"], item["badge"], item.get("tutorial", false),
-					item.get("launcher", ""))
+	var tutorial_manager = get_node_or_null("/root/TwoPhaseTutorialManager")
+	# Always show full menu with tutorial card in TRAINING section
+	for group in GROUPS:
+		_add_section_header(nav, group["section"])
+		var section := VBoxContainer.new()
+		section.add_theme_constant_override("separation", Tokens.SPACE_SM)
+		nav.add_child(section)
+		for item in group["items"]:
+			_add_destination_card(section, item["title"], item["desc"],
+				item["scene"], item["badge"], item.get("tutorial", false),
+				item.get("launcher", ""))
 
 	var gap_bottom = Control.new()
 	gap_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -637,7 +635,7 @@ func _add_destination_card(parent: Control, title_text: String, description: Str
 		# Armed BEFORE the route, so the Lab's own first-run check sees an active
 		# run and stands down rather than stacking its offer on top of it.
 		if is_tutorial:
-			var tutorial = get_node_or_null("/root/TutorialManager")
+			var tutorial = get_node_or_null("/root/TwoPhaseTutorialManager")
 			if tutorial:
 				tutorial.begin()
 		# LAUNCHER WINS OVER SCENE PATH. The PROVING GROUND card declares a

@@ -1,0 +1,188 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.2,
+	"faction": "technocrats",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 4.5,
+		"y": 2.0,
+		"z": 6.5
+	},
+	"hull_type": "brenntal_medium_a",
+	"id": "tutorial_enemy_striker",
+	"locomotion": {
+		"settings": {
+			"drive_sprocket": true,
+			"tread_width": 1.3
+		},
+		"type_id": "tracked_treads"
+	},
+	"modules": [
+		{
+			"facet": "",
+			"facet_size": {},
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Tracked Treads",
+			"position": {
+				"x": -2.2,
+				"y": -1.2,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 52,
+				"dps": 0.0,
+				"hp": 160.0,
+				"weight": 150.0
+			},
+			"tweaks": {
+				"tread_width": 1.3
+			},
+			"type_id": "tracked_treads",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"facet_size": {},
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Tracked Treads",
+			"position": {
+				"x": 2.2,
+				"y": -1.2,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 52,
+				"dps": 0.0,
+				"hp": 160.0,
+				"weight": 150.0
+			},
+			"tweaks": {
+				"tread_width": 1.3
+			},
+			"type_id": "tracked_treads",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"facet_size": {},
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "turret",
+			"name": "Basic Cannon",
+			"position": {
+				"x": 0.0,
+				"y": 1.2,
+				"z": -0.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 54,
+				"dps": 73.0,
+				"hp": 100.0,
+				"weight": 145.5
+			},
+			"tweaks": {
+				"caliber": 1.2,
+				"barrel_length": 1.3
+			},
+			"type_id": "basic_cannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"facet_size": {},
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.98,
+				"z": 0.15
+			},
+			"mount_style": "pintle",
+			"name": "Heavy Machine Gun",
+			"position": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"rotation": {
+				"x": 0.15,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 15,
+				"dps": 32.5,
+				"hp": 60.0,
+				"weight": 40.0
+			},
+			"tweaks": {},
+			"type_id": "heavy_machine_gun",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "Tutorial Enemy Striker",
+	"nose_taper": 1.0,
+	"version": 3.0
+}

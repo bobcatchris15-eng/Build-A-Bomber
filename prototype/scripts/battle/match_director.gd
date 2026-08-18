@@ -968,13 +968,15 @@ func _load_roster() -> void:
 	# and the duplication is the price of not promoting `rs` to a member
 	# just for the test_range gate.
 	if not is_test_range:
-		for path in _bundled_loadout_paths():
-			_append_design(roster, bp_manager.load_blueprint(path))
-		if roster.size() > ROSTER_LIMIT:
-			roster = roster.slice(0, ROSTER_LIMIT)
+		# Tutorial override: don't add bundled loadouts if tutorial flag is set
+		if not (rs != null and rs.has_meta("tutorial_phase")):
+			for path in _bundled_loadout_paths():
+				_append_design(roster, bp_manager.load_blueprint(path))
+			if roster.size() > ROSTER_LIMIT:
+				roster = roster.slice(0, ROSTER_LIMIT)
 
-		if _harvester_in(roster).is_empty():
-			_append_design(roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+			if _harvester_in(roster).is_empty():
+				_append_design(roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
 
 	# Factions: the pre-match choice wins; otherwise the roster's own lead design
 	# decides, which is the old behaviour and keeps a hand-built roster feeling
@@ -1016,13 +1018,23 @@ func _load_roster() -> void:
 	# harvester fallback. `is_test_range` is the function-top local declared
 	# above - not redeclared here, to keep the test-range gate one source.
 	elif rs == null or rs.mode != MatchRuleSetScript.Mode.TEST_RANGE:
-		enemy_roster.clear()
-		for path in _bundled_loadout_paths():
-			_append_design(enemy_roster, bp_manager.load_blueprint(path))
-		if enemy_roster.size() > ROSTER_LIMIT:
-			enemy_roster = enemy_roster.slice(0, ROSTER_LIMIT)
-		if _harvester_in(enemy_roster).is_empty():
-			_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+		# Tutorial override: use custom enemy roster if provided via rule set meta
+		if rs != null and rs.has_meta("tutorial_enemy_roster"):
+			var tutorial_enemy_roster = rs.get_meta("tutorial_enemy_roster")
+			if tutorial_enemy_roster is Array:
+				enemy_roster.clear()
+				for path in tutorial_enemy_roster:
+					_append_design(enemy_roster, bp_manager.load_blueprint(path))
+				if _harvester_in(enemy_roster).is_empty():
+					_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+		else:
+			enemy_roster.clear()
+			for path in _bundled_loadout_paths():
+				_append_design(enemy_roster, bp_manager.load_blueprint(path))
+			if enemy_roster.size() > ROSTER_LIMIT:
+				enemy_roster = enemy_roster.slice(0, ROSTER_LIMIT)
+			if _harvester_in(enemy_roster).is_empty():
+				_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
 
 	# COUNTER-DRAFTING. In an operation the AI reorders its pool against what the
 	# player has actually fielded in engagements already fought - which is what
