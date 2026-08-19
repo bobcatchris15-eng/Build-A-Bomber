@@ -143,13 +143,15 @@ var ai_difficulty: String = "normal"
 var physics_ticks_per_second: int = 60
 
 # PR6 (2026-08-15). Enable the structured per-match JSONL log +
-# the in-memory section profiler. Default OFF for the shipping game
-# (the BattleLogger file handle is process-global and the section
-# timers add a static-bool read per call site, however cheap); ON
-# for playtests. The match_setup.gd / operations_draft.gd /
-# test_range_launcher.gd factories can flip it for their mode, or
-# the engine can set it via an env var (KITBASH_LOG_PROFILING=1).
-var log_profiling: bool = false
+# the in-memory section profiler. Default ON (2026-08-18): the
+# perf-investigation loop kept hitting "no log file written"
+# because the rule set was false by default and the env var
+# rarely survived across editor launches. Forcing the default on
+# means every playtest produces a file; the env var
+# (KITBASH_LOG_PROFILING=0) opts out for shipping. The match_setup /
+# operations_draft / test_range_launcher factories can still flip
+# it for their mode if a particular flow wants silence.
+var log_profiling: bool = true
 
 # --- Simulation seed ----------------------------------------------------------
 #

@@ -37,6 +37,12 @@ const HullFacetsScript = preload("res://scripts/hull_facets.gd")
 @export var stage_y_offset: float = 0.0
 var hull: Node3D
 
+# Set by UI_ArmorStationPanel on enter()/exit() to gate the placer's
+# _unhandled_input. When true, the placer ignores mouse input - the
+# panel is doing paint input instead and we don't want both fighting
+# over the same click.
+var paint_mode_active: bool = false
+
 var mirror_enabled: bool = true
 var selected_module: Node3D = null
 
@@ -222,6 +228,13 @@ func _async_write_log(msg: String):
 		log_mutex.unlock()
 
 func _unhandled_input(event):
+	# Paint mode is owned by UI_ArmorStationPanel while it's active.
+	# The panel raycasts clicks into the hull; if the placer also
+	# processed the same click, the two would race on the now-stripped
+	# hull (no modules to select, but the placer would still try to
+	# drag-or-rotate against an empty selection). One line guard.
+	if paint_mode_active:
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		# Actions, not keycodes - see InputService's header for why this file's
 		# raw comparisons had to go. REDO IS TESTED BEFORE UNDO: its Ctrl+Shift+Z
@@ -512,6 +525,79 @@ func clear_hull():
 	hull = null
 	clipping_detected = false
 	get_tree().call_group("stat_ui", "update_stats", null)
+
+
+# --- Armor station (paint workspace) bridge --------------------------------
+#
+# The Armor Station is a sub-mode of the Design Lab, not a separate scene
+# (see UI_ArmorStationPanel.gd's header for the rationale). When the
+# player clicks "PAINT STATION" in the toolbar, three things swap behind a
+# pan_blur sweep: the parts bin hides, the armor toolkit panel shows, the
+# cutting mat hides, the wood-desktop workbench shows, and the hull's
+# modules are stripped so the player can paint bare facets. On exit, all
+# three reverse. The strip/restore is the placer's job because the placer
+# owns the live module list - the panel only knows about the paint data.
+#
+# The strip REPARENTS rather than frees. The panel's exit() calls
+# restore_modules() which re-parents the same instances back. No
+# queue_free, no re-instantiation, no state loss in the modules
+# themselves (selection, sub-meshes, firing arc visualisations all
+# survive the round trip). This is the cheapest possible round trip and
+# matches the "no scene change" intent of the redesign.
+#
+# Capture order matters. The panel keeps the returned array across its
+# lifetime and re-adds in the same order. The placer's bookkeeping
+# (selected_module, undo_stack) tracks by reference, so re-adding
+# the same Node3D instances is identity-preserving.
+func capture_modules_for_paint() -> Array:
+	# Returns the live module children of the hull, in their current
+	# scene-tree order. The caller (the panel) owns the lifetime across
+	# the paint session and re-parents them on exit.
+	if not is_instance_valid(hull):
+		return []
+	var captured: Array = []
+	for child in hull.get_children():
+		# Skip non-modules: the chassis mesh instance, the physics
+		# mesh, and any other decoration. A module is anything that
+		# carries the placer's `module_data` meta (set in
+		# _place_weapon() / _place_hull_from_ui()).
+		if not child.has_meta("module_data"):
+			continue
+		captured.append(child)
+	return captured
+
+func strip_modules_for_paint(captured: Array) -> void:
+	# Detach the captured modules from the hull so the player can paint
+	# bare facets. The caller still holds the references and is
+	# expected to re-parent them on exit. Selection must be cleared so
+	# the placer's _unhandled_input doesn't try to operate on a
+	# reparented module.
+	if captured.is_empty():
+		return
+	if selected_module and captured.has(selected_module):
+		_select_module(null)
+	for m in captured:
+		if is_instance_valid(m) and m.get_parent() != null:
+			m.get_parent().remove_child(m)
+	clipping_detected = false
+	get_tree().call_group("stat_ui", "update_stats", hull)
+
+func restore_modules_after_paint(captured: Array) -> void:
+	# Re-parent the captured modules back to the hull. The order
+	# matches what capture_modules_for_paint() returned; the placer
+	# treats this as a full module-set change and re-runs its
+	# bookkeeping.
+	if captured.is_empty() or not is_instance_valid(hull):
+		return
+	for m in captured:
+		if is_instance_valid(m):
+			hull.add_child(m)
+	# Re-evaluate the live state. The previous selection (if any) is
+	# re-applied by index; if the player had a module selected and we
+	# cleared it, they have to re-click. Acceptable: paint mode implies
+	# a brief context switch anyway.
+	clipping_detected = false
+	get_tree().call_group("stat_ui", "update_stats", hull)
 
 func _place_hull_from_ui(type_id: String):
 	if hull:

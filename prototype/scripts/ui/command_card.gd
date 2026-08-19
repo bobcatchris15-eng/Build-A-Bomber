@@ -134,13 +134,22 @@ func _resolve_registry() -> Node:
 # StampedLabel is at FULL_RECT and only draws text, so the mesh shows
 # through the gaps.
 func _build_cell() -> Control:
-	var cell := StampedButtonScript.new()
-	# Override the 132x44 minimum: command cells are 64x64. The
-	# StampedButton's natural_size is calibrated for 132x44, so the
-	# mesh is stretched slightly at this aspect ratio; see the file
-	# header. A future "command_button" prop_id with a square
-	# natural_size would make this cleaner, deferred to Phase 2.
-	cell.custom_minimum_size = Vector2(64, 64)
+	# DIAGNOSTIC SWAP 2026-08-18. Was StampedButtonScript.new() -
+	# the StampedButton's fallback (no UIPropStage) path was supposed
+	# to keep the theme stylebox, but the cells rendered blank in the
+	# battle HUD. Plain Button renders the theme stylebox directly;
+	# if a plain Button shows up and a StampedButton did not, the
+	# StampedButton's _ready is the bug. If both are blank, the bug
+	# is upstream (rail/scroll/cell-size layout).
+	var cell := Button.new()
+	# DIAGNOSTIC 2026-08-18. Forced to 200x200 + bright red so the
+	# user can see if the cells are even being drawn. If red squares
+	# appear in the right rail, the cells are rendering but the
+	# GridContainer is collapsing their size to 0 (cell size issue).
+	# If no red squares, the cells aren't being drawn at all (z-order
+	# / modulate / not-in-tree issue). Revert once we know which.
+	cell.custom_minimum_size = Vector2(200, 200)
+	cell.modulate = Color(1, 0, 0, 1)
 	cell.focus_mode = Control.FOCUS_ALL
 
 	# Icon at the top. Anchored to top-center, 24x24. The cell is 64

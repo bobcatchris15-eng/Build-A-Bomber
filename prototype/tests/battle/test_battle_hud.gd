@@ -296,3 +296,215 @@ func test_idle_toolboxes_retreat_and_busy_ones_do_not() -> bool:
 	print("  [PASS] idle retreats, busy holds, open auto-collapses")
 	director.queue_free()
 	return true
+
+
+# --- BattleHUD chrome: right rail, placard, command card, selection dock -----
+#
+# WHY A SEPARATE BLOCK. The ProductionHUD above is a different widget mounted
+# by the same scene - this block exercises the BattleHUD's selection chrome
+# (right rail, spec placard, command card, selection dock). A separate stub
+# director is needed because BattleHUD.setup() reads director.selection (a
+# RefCounted, NOT a Node child) and a handful of optional services that the
+# ProductionHUD stub does not declare.
+
+const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
+const SelectionServiceScript = preload("res://scripts/battle/orders/selection_service.gd")
+const RightRailScript = preload("res://scripts/battle/hud/right_rail.gd")
+const UIDockScript = preload("res://scripts/ui_dock.gd")
+
+
+# The narrow surface BattleHUD.setup() reads. vision / economy / camera are
+# optional - _refresh_*() guards on null. selection is required.
+class ChromeStubDirector:
+	extends Node
+
+	var selection: RefCounted = null
+	var camera: Camera3D = null
+	var vision: RefCounted = null
+	var economy: RefCounted = null
+	var alerts: RefCounted = null
+
+
+func _chrome_hud() -> Array:
+	var director := ChromeStubDirector.new()
+	var selection := SelectionServiceScript.new()
+	director.selection = selection
+	# Same CanvasLayer mount as match_director._build_hud() - the layout
+	# under test only resolves correctly when the HUD is under a layer,
+	# not a plain Node.
+	var layer := CanvasLayer.new()
+	director.add_child(layer)
+	var hud = BattleHUDScript.new()
+	layer.add_child(hud)
+	hud.setup(director, 0, {"map_half_extents": 80.0})
+	return [director, hud]
+
+
+func _right_rail(hud: Node) -> Control:
+	for c in hud.get_children():
+		if c is RightRailScript:
+			return c
+	return null
+
+
+func _selection_dock(hud: Node) -> Control:
+	for c in hud.get_children():
+		if c is UIDockScript and c.dock_title == "SELECTION":
+			return c
+	return null
+
+
+# THE REGRESSION THIS BLOCK EXISTS FOR. BattleHUD.setup() calls
+# right_rail.body().add_child(...) IMMEDIATELY after add_child(right_rail).
+# Godot 4 does NOT call _ready() synchronously inside add_child() - it
+# defers to the next idle frame - so a widget that builds its body in
+# _ready returns null from body() at the call site. The add_child
+# crashes with "Cannot call method 'add_child' on a null value", the
+# function aborts, and the placard/command_card silently orphan.
+#
+# Concretely: before the fix, hud.placard had parent=null, hud.command_card
+# was null (the assignment line never ran), and the user saw an empty
+# right rail with no command card. Selection did nothing visible because
+# the selection panel was also orphaned (and the dock body was empty).
+#
+# The fix is in right_rail.gd / ui_dock.gd: build the body in _init(),
+# not _ready(), so body() works synchronously the moment the widget is
+# constructed. This test fails on the old code and passes on the new.
+func test_battle_hud_chrome_parents_into_their_containers() -> bool:
+	print("Running Test Suite: BattleHUD Chrome - right rail + dock bodies hold their children...")
+	var pair := _chrome_hud()
+	var director: Node = pair[0]
+	var hud: Node = pair[1]
+
+	var rail := _right_rail(hud)
+	if rail == null:
+		print("  [FAIL] no RightRail child on the HUD")
+		director.queue_free()
+		return false
+	var body: VBoxContainer = rail.body()
+	if body == null:
+		print("  [FAIL] right_rail.body() returned null after add_child() - body not built synchronously")
+		director.queue_free()
+		return false
+
+	# Placard: created in _build_command_card and added to the rail body.
+	# Before the fix, body.add_child(placard) failed, then the function
+	# aborted, so placard ended up parented to null. The HUD's typed
+	# member still pointed at it, but it was orphaned and invisible.
+	var placard: Control = hud.placard
+	if placard == null:
+		print("  [FAIL] hud.placard is null - _build_command_card aborted before assigning it")
+		director.queue_free()
+		return false
+	if placard.get_parent() != body:
+		print("  [FAIL] placard.parent is %s, expected the right_rail body" % placard.get_parent())
+		director.queue_free()
+		return false
+
+	# Command card: the line that assigns hud.command_card runs AFTER
+	# body.add_child(placard). On the old code the prior line errored
+	# and aborted the function, so this assignment never happened and
+	# hud.command_card stayed at its initial null. The user saw no
+	# command card at all.
+	var card: Control = hud.command_card
+	if card == null:
+		print("  [FAIL] hud.command_card is null - the assignment never ran")
+		director.queue_free()
+		return false
+	if card.get_parent() != body:
+		print("  [FAIL] command_card.parent is %s, expected the right_rail body" % card.get_parent())
+		director.queue_free()
+		return false
+
+	# Selection dock (LEFT side, post PR 3b). Same body()-timing failure
+	# in the dock widget if the body is built in _ready. The panel
+	# was reparented into the dock body in _build_selection_dock.
+	var dock := _selection_dock(hud)
+	if dock == null:
+		print("  [FAIL] no Selection dock child on the HUD")
+		director.queue_free()
+		return false
+	var dock_body: VBoxContainer = dock.body()
+	if dock_body == null:
+		print("  [FAIL] selection_dock.body() returned null after add_child()")
+		director.queue_free()
+		return false
+	if dock_body.get_child_count() < 1:
+		print("  [FAIL] selection_dock body is empty - panel was not reparented into it")
+		director.queue_free()
+		return false
+
+	# The rail must have a real height, not the 8px the panel padding
+	# leaves when a ScrollContainer's zero minimum collapses the
+	# content-driven extent. This was the second half of the user-
+	# visible bug: the placard and command card were being added to
+	# the tree, but the rail itself was 8px tall so they rendered
+	# inside a window nobody could see.
+	var viewport_size: Vector2 = hud.get_viewport().get_visible_rect().size
+	# Two frames: the rail's bottom anchor resolves on the next
+	# process, so reading size before that gives the unanchored
+	# 8px from when only the panel padding was on the layout.
+	await tree.process_frame
+	await tree.process_frame
+	if rail.size.y < 200.0:
+		print("  [FAIL] right_rail collapsed to %s - the rail must be bottom-anchored so the ScrollContainer has room" % str(rail.size))
+		director.queue_free()
+		return false
+
+	print("  [PASS] placard, command_card, and selection_panel parented; rail is %s tall" % str(rail.size))
+	director.queue_free()
+	return true
+
+
+# A focused unit test for the right_rail widget's "body() works the moment
+# after add_child" contract. Catches the same bug at the widget boundary,
+# which is the level the actual fix lives at (right_rail.gd: _init, not
+# _ready). Suite runs much faster than the full BattleHUD build above and
+# fails with a tighter stack trace.
+func test_right_rail_body_is_synchronous_after_add_child() -> bool:
+	print("Running Test Suite: RightRail - body() is non-null the moment add_child returns...")
+	var rail := RightRailScript.new()
+	var host := Node.new()
+	root.add_child(host)
+	host.add_child(rail)
+	var body: VBoxContainer = rail.body()
+	if body == null:
+		print("  [FAIL] right_rail.body() returned null immediately after add_child()")
+		host.queue_free()
+		return false
+	# A child added through body() lands inside the rail, not orphaned.
+	var probe := Control.new()
+	body.add_child(probe)
+	if probe.get_parent() != body:
+		print("  [FAIL] child added to body() did not end up parented to the body")
+		host.queue_free()
+		return false
+	print("  [PASS] body() is live, children add cleanly")
+	host.queue_free()
+	return true
+
+
+# Same contract for the UIDock widget, where the failure mode was
+# selection_dock.body().add_child(selection_panel) returning null
+# in _build_selection_dock.
+func test_ui_dock_body_is_synchronous_after_add_child() -> bool:
+	print("Running Test Suite: UIDock - body() is non-null the moment add_child returns...")
+	var dock := UIDockScript.new()
+	dock.dock_title = "PROBE"
+	var host := Node.new()
+	root.add_child(host)
+	host.add_child(dock)
+	var body: VBoxContainer = dock.body()
+	if body == null:
+		print("  [FAIL] ui_dock.body() returned null immediately after add_child()")
+		host.queue_free()
+		return false
+	var probe := Control.new()
+	body.add_child(probe)
+	if probe.get_parent() != body:
+		print("  [FAIL] child added to dock body() did not end up parented to the body")
+		host.queue_free()
+		return false
+	print("  [PASS] dock body() is live, children add cleanly")
+	host.queue_free()
+	return true

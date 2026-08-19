@@ -58,6 +58,7 @@ const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # before instantiating Battle.tscn.
 const BattleLogger = preload("res://scripts/battle/battle_logger.gd")
 const UnitAssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
+const VFXEffectsScript = preload("res://scripts/vfx_effects.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const ResourceFieldScript = preload("res://scripts/battle/economy/resource_field.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
@@ -332,6 +333,20 @@ func _ready() -> void:
 	# _file being null.
 	BattleLogger.end_match()
 
+	# Resolve the rule set FIRST, before anything that might read it
+	# (notably _evaluate_logging_flags below and the camera-mode gate
+	# further down). The previous design assigned _match_rule_set inside
+	# the unification block lower in _ready, but _evaluate_logging_flags
+	# runs earlier than that, so the rule set's log_profiling field was
+	# never read by the logging gate. This was the silent cause of the
+	# "no log file written" reports on Skirmish playtests where the
+	# rule set had log_profiling = true. The Skirmish factory was
+	# writing the right value; the director was reading it before it
+	# existed. Loading the rule set up front closes the timing gap.
+	var match_config := get_node_or_null("/root/MatchConfig")
+	if match_config != null and "rule_set" in match_config:
+		_match_rule_set = match_config.rule_set
+
 	# 2026-08-16: open the log at the START of the build, not the end. The
 	# previous design opened the log when world_ready fired, which left a
 	# 0-byte file if _ready() hung somewhere between deploy-gate appearance
@@ -359,21 +374,23 @@ func _ready() -> void:
 
 	camera = get_node_or_null("Camera3D")
 	chase_camera = get_node_or_null("ChaseCamera")
-	# MatchConfig is the source of truth for both the camera-mode gate below
-	# AND the per-mode rule set the rest of this function reads. Resolve it
-	# ONCE at the top so the camera pick and the rule set lookup cannot
-	# disagree about whether the autoload is mounted.
-	var match_config := get_node_or_null("/root/MatchConfig")
+	# match_config and _match_rule_set are both resolved at the top of
+	# _ready (see the block above _evaluate_logging_flags), so the
+	# camera-mode gate, the tick_rate read, and the unification block
+	# below all see the same source. The previous design had
+	# match_config declared here as a local and _match_rule_set
+	# assigned in two places lower in this function; that worked
+	# because nothing in _ready above this point needed the rule set.
+	# The 2026-08-18 logging fix moved both resolutions to the top, so
+	# the local declaration and the duplicate assignments are gone.
 
 	# PERF_TESTING_RIG.md Fix A. Applied before any physics work, so all
 	# subsequent await physics_frame calls in this scene inherit the rate.
 	# Skirmish/Operations set 30; Test Range stays at 60 (rule-set default).
-	# Resolved from match_config.rule_set directly because _match_rule_set
-	# (the member) is not assigned until the blocks below.
-	var tick_rate := 60
-	if match_config != null and "rule_set" in match_config \
-			and match_config.rule_set != null:
-		tick_rate = match_config.rule_set.physics_ticks_per_second
+	# The rule set is now loaded by the time we get here, so the
+	# workaround that read match_config.rule_set directly is no longer
+	# needed - we read _match_rule_set like everything else does.
+	var tick_rate: int = _match_rule_set.physics_ticks_per_second if _match_rule_set != null else 60
 	Engine.physics_ticks_per_second = tick_rate
 	if tick_rate != 60:
 		print("[match_director] physics_ticks_per_second = %d" % tick_rate)
@@ -384,9 +401,8 @@ func _ready() -> void:
 	# leave the RTS camera active (the chase camera is null-defended
 	# so a Test Range launcher that forgets to set focus_unit is
 	# harmless - the camera sits at the world origin and waits).
-	if match_config and "rule_set" in match_config and match_config.rule_set != null \
+	if _match_rule_set != null \
 			and chase_camera != null and is_instance_valid(chase_camera):
-		_match_rule_set = match_config.rule_set
 		if _match_rule_set.camera_mode == MatchRuleSetScript.CameraMode.CHASE:
 			chase_camera.current = true
 			if camera != null and is_instance_valid(camera):
@@ -407,8 +423,9 @@ func _ready() -> void:
 	# instantiates Battle.tscn without the autoload at all still gets a
 	# null match_config and falls through to the hardcoded director
 	# defaults - the same posture every prior phase preserved.
-	if match_config and "rule_set" in match_config:
-		_match_rule_set = match_config.rule_set
+	# _match_rule_set was already assigned at the top of _ready (see the
+	# block above _evaluate_logging_flags), so the previous re-assignment
+	# here is gone; the field reads below use the up-front value.
 	if _match_rule_set != null:
 		if _match_rule_set.map_id != "":
 			map_id = _match_rule_set.map_id
@@ -1289,6 +1306,16 @@ func get_team_units(for_team: int) -> Array:
 # reworked into spread out fields around the central node that spawns the
 # collectible resource objects".
 func _spawn_resource_nodes() -> void:
+	# PR10 perf (2026-08-18). Wrapped in Profiler to find the 75s
+	# first-frame stall the 8/18 log couldn't attribute. The
+	# resource_field.gd scatter (its setup) is the prime suspect -
+	# if it does scene scattering work synchronously here, the
+	# 75s is the cost of spawning all 36 fields + their inner
+	# collectibles at the world origin in one frame. After the
+	# wrap, any hitch on this path shows up under
+	# "resource_field_spawn" instead of being lumped into the
+	# "production" bucket.
+	var _t := Profiler.start()
 	for entry in current_map.get("resource_nodes", []):
 		var field := Node3D.new()
 		field.set_script(ResourceFieldScript)
@@ -1296,6 +1323,7 @@ func _spawn_resource_nodes() -> void:
 		var pos: Vector3 = entry.get("position", Vector3.ZERO)
 		field.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
 		field.setup(entry.get("type", "metal"), entry.get("amount", 1000), self)
+	Profiler.stop("resource_field_spawn", _t)
 
 
 func _spawn_bases() -> void:
@@ -1437,6 +1465,18 @@ func _place_structure(kind: String, structure_team: int, at: Vector3, under_cons
 	s.position = Vector3(at.x, terrain_height_at(at), at.z)
 	s.setup(kind, structure_team)
 	s.died.connect(_on_structure_died)
+	# Dust cloud masks terrain intersection at the building's edges.
+	var foot: Vector2 = Vector2(s.footprint.x, s.footprint.z)
+	VFXEffectsScript.dust_cloud(self, s.position, foot * 0.5)
+	# Displace overlapping terrain props (greebles, grass, rocks).
+	_displace_terrain_props(at, foot * 0.5)
+	# Dock bays (refinery harvest pads) extend well past the core footprint.
+	# Displace terrain props under each bay so pads don't sit on grass.
+	var bays: Array = BuildingCatalogScript.dock_bays_for(kind)
+	if not bays.is_empty():
+		var bay_half := Vector2(4.0, 5.0)
+		for bay_off in bays:
+			_displace_terrain_props(at + Vector3(bay_off.x, bay_off.y, bay_off.z), bay_half)
 	# structure_built is logged on both paths (under construction and
 	# finished) so the post-match report can correlate structure deaths
 	# with the spawn that made them. The HUD's signal listener is still
@@ -1491,6 +1531,73 @@ func _apply_structure_visibility_range(node: Node) -> void:
 		gi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	for child in node.get_children():
 		_apply_structure_visibility_range(child)
+
+
+# Displace terrain props (greebles, grass, rocks) AND ambient trees that
+# overlap with a newly placed building. Per-instance debris is freed with a
+# dust cloud. Ambient trees are batched into a MultiMesh by ambient_scatter.gd
+# for draw-call perf (1000+ trees would otherwise be 1000+ draw calls), so
+# we cannot free the node - the slot is still owned by the scatter system.
+# Instead, scale the instance to zero via the scatter's set_node_transform API.
+# This is the same pattern resource_node.gd uses for the depletion shrink
+# (line 442: scaled_local to Vector3(pct, pct, pct)), repurposed to make a
+# tree invisible rather than to fade its depletion.
+func _displace_terrain_props(at: Vector3, half: Vector2) -> void:
+	var radius_sq: float = (maxf(half.x, half.y) + 1.5) * (maxf(half.x, half.y) + 1.5)
+	# Per-instance debris (rocks, grass tufts, greebles). Free them.
+	var debris: Array[Node] = get_tree().get_nodes_in_group("terrain_debris")
+	for node in debris:
+		if not is_instance_valid(node):
+			continue
+		var d_sq: float = Vector2(node.global_position.x - at.x, node.global_position.z - at.z).length_squared()
+		if d_sq > radius_sq:
+			continue
+		VFXEffectsScript.dust_cloud(self, node.global_position, Vector2(0.8, 0.8))
+		node.queue_free()
+	# Ambient trees (MultiMesh-batched). Scale to zero so the building's
+	# footprint is clean. Walked via "resource_nodes" group with is_ambient
+	# true; the existing pre-filter in placement_service.gd was a perf
+	# optimization for the same data.
+	var resource_nodes: Array = get_tree().get_nodes_in_group("resource_nodes")
+	for node in resource_nodes:
+		if not is_instance_valid(node):
+			continue
+		if not node.get("is_ambient"):
+			continue
+		var d_sq2: float = Vector2(node.global_position.x - at.x, node.global_position.z - at.z).length_squared()
+		if d_sq2 > radius_sq:
+			continue
+		# The tree is _scatter-batched. Use the scatter API to scale its slot
+		# to zero. The node itself stays in the tree (it owns the slot's
+		# bookkeeping) so the scatter system doesn't break. scaled_local keeps
+		# the shrink about the tree's own origin rather than dragging toward
+		# the map origin - the same fix resource_node.gd applies for the
+		# depletion shrink.
+		var handle = node.get("_scatter_handle")
+		var scatter = node.get("_scatter")
+		if handle != null and is_instance_valid(scatter) and scatter.has_method("set_node_transform"):
+			scatter.set_node_transform(handle, node.global_transform.scaled_local(Vector3.ZERO))
+			VFXEffectsScript.dust_cloud(self, node.global_position, Vector2(1.2, 1.2))
+	# Visual scatter (pure-visual MultiMesh trees, shrubs, grass). Each
+	# MultiMeshInstance3D may hold hundreds of instances; iterate and
+	# hide any whose position falls inside the building footprint.
+	var scatter_nodes: Array[Node] = get_tree().get_nodes_in_group("visual_scatter")
+	for mm_node in scatter_nodes:
+		if not is_instance_valid(mm_node):
+			continue
+		if not mm_node is MultiMeshInstance3D:
+			continue
+		var mm: MultiMesh = mm_node.multimesh
+		if mm == null:
+			continue
+		var count: int = mm.instance_count
+		var hide_xform := Transform3D(Basis.IDENTITY, Vector3(0, -9999.0, 0))
+		for i in range(count):
+			var ix: Transform3D = mm.get_instance_transform(i)
+			var d_sq3: float = Vector2(ix.origin.x - at.x, ix.origin.z - at.z).length_squared()
+			if d_sq3 > radius_sq:
+				continue
+			mm.set_instance_transform(i, hide_xform)
 
 
 # How far past its own footprint a building's navmesh hole extends.
@@ -1678,11 +1785,23 @@ func _rebake_navmesh() -> void:
 	#
 	# Chunk 21: rebakes every tile, not just the one(s) the change touched -
 	# selective per-tile rebake (Chunk 22) is a further optimization on top
-	# of an already-async, already-non-blocking path, not a correctness
-	# requirement (see rebake_ground_amphibious_tiles_async()'s own comment).
+	#
+	# PR10 perf (2026-08-18). Wrapped in Profiler so the 8/16-log's
+	# "dominant=production, dominant_ms=0" hitches get a real owner.
+	# The previous design started the async call and returned; the
+	# worker-thread bake + callback were untimed, and the 3940ms
+	# worst-case and 60s+ first-frame stalls showed up as "production"
+	# only because that was the last named section. After the wrap,
+	# any hitch on the rebake dispatch goes to "navmesh_dispatch"
+	# and any hitch on the worker completing (flow_fields.invalidate
+	# + the per-unit repath walk in the callback) goes to
+	# "navmesh_callback". The two together are the candidates that
+	# the 8/16 log couldn't name.
+	var _t := Profiler.start()
 	TerrainBuilder.rebake_ground_amphibious_tiles_async(
 		current_map, _building_holes(), _ground_nav_regions, _amphibious_nav_regions, _nav_tile_rects,
 		_on_navmesh_rebaked)
+	Profiler.stop("navmesh_dispatch", _t)
 
 
 # Runs when both surfaces have finished baking. Every cached field was sampled
@@ -1691,10 +1810,18 @@ func _rebake_navmesh() -> void:
 func _on_navmesh_rebaked() -> void:
 	if not is_inside_tree():
 		return
+	# PR10 perf (2026-08-18). Wrapped in Profiler so the worker
+	# callback's cost (flow_fields.invalidate + the per-unit
+	# request_repath walk) shows up under a real section name.
+	# The 8/16 log couldn't attribute the 6s/60s stalls to
+	# anything; this is one of the two likely owners (the
+	# other being the dispatch above; both wrapped now).
+	var _t := Profiler.start()
 	flow_fields.invalidate()
 	for u in get_tree().get_nodes_in_group("units"):
 		if is_instance_valid(u) and not u.is_dead and u.has_method("request_repath"):
 			u.request_repath()
+	Profiler.stop("navmesh_callback", _t)
 
 
 func _on_structure_died(structure) -> void:
@@ -2467,7 +2594,7 @@ func _end_placement(placed: bool) -> void:
 # different about pre-game clicks is which commit function runs at the end.
 var placing_hq: bool = false
 var hq_ghost: MeshInstance3D = null
-var hq_zone_outline: MeshInstance3D = null
+var hq_zone_highlight: MeshInstance3D = null
 var hq_ghost_pos: Vector3 = Vector3.ZERO  # last valid (clamped) position; survives raycast misses
 
 # A pre-game HQ placement lifecycle signal. The BattleHUD listens to
@@ -2497,7 +2624,7 @@ func _enter_hq_placement() -> void:
 	if _match_rule_set != null and _match_rule_set.mode == MatchRuleSetScript.Mode.TEST_RANGE:
 		return
 	placing_hq = true
-	_build_hq_zone_outline()
+	_build_hq_zone_highlight()
 	_build_hq_ghost()
 	hq_placement_started.emit()
 	_flash("PLACE YOUR HQ  -  CLICK IN THE HIGHLIGHTED ZONE")
@@ -2559,23 +2686,83 @@ func confirm_hq_placement() -> bool:
 # last thing the player sees in the pre-game phase, so it's freed last
 # (queue_free order is LIFO, so the wireframe at the bottom of this
 # function is actually freed first - on the next frame, the HQ ghost
-# disappears, then the zone outline).
+# disappears, then the zone highlight).
 func _exit_hq_placement(placed: bool) -> void:
 	placing_hq = false
 	if is_instance_valid(hq_ghost):
 		hq_ghost.queue_free()
 	hq_ghost = null
-	if is_instance_valid(hq_zone_outline):
-		hq_zone_outline.queue_free()
-	hq_zone_outline = null
+	if is_instance_valid(hq_zone_highlight):
+		hq_zone_highlight.queue_free()
+	hq_zone_highlight = null
 	hq_placement_finished.emit(placed)
 
 
-# The zone visual: a thin hollow box outline at the player's base zone.
-# Hollow is critical - a solid box would HIDE the ground under the zone,
-# which is the worst possible affordance for a "drop your HQ here" hint.
-# An outline draws on top of the ground without occluding it.
-func _build_hq_zone_outline() -> void:
+# The zone visual: a screen-space green highlight that conforms to terrain.
+# Same depth-buffer technique as the fog shroud - reads each pixel's world
+# position and tints it green if within the zone bounds, with a soft edge
+# fade. A ground-height lookup texture filters out trees, rocks, and other
+# objects that sit above the terrain surface, so the highlight only paints
+# the ground itself.
+const ZONE_SHADER := """
+shader_type spatial;
+render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, depth_test_disabled, shadows_disabled, fog_disabled;
+
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
+uniform sampler2D ground_height_tex : filter_nearest, repeat_disable;
+uniform vec3 zone_center = vec3(0.0, 0.0, 0.0);
+uniform vec2 zone_half = vec2(20.0, 20.0);
+uniform vec2 zone_xz_min = vec2(-20.0, -20.0);
+uniform vec2 zone_xz_max = vec2(20.0, 20.0);
+uniform vec2 height_range = vec2(0.0, 10.0);
+uniform float map_half = 80.0;
+uniform vec3 zone_color = vec3(0.25, 1.0, 0.35);
+uniform float edge_feather = 0.15;
+uniform float ground_tolerance = 1.8;
+
+void vertex() {
+	POSITION = vec4(VERTEX.xy * 2.0, 1.0, 1.0);
+}
+
+void fragment() {
+	float d = texture(depth_tex, SCREEN_UV).r;
+	if (d <= 0.000001 || d >= 0.999999) {
+		discard;
+	}
+	vec3 ndc = vec3(SCREEN_UV * 2.0 - 1.0, d);
+	vec4 view = INV_PROJECTION_MATRIX * vec4(ndc, 1.0);
+	view.xyz /= view.w;
+	vec3 world = (INV_VIEW_MATRIX * vec4(view.xyz, 1.0)).xyz;
+	// Off the edge of the map there is no zone to highlight.
+	vec2 map_uv = (world.xz + vec2(map_half)) / (2.0 * map_half);
+	if (map_uv.x < 0.0 || map_uv.x > 1.0 || map_uv.y < 0.0 || map_uv.y > 1.0) {
+		discard;
+	}
+	// Distance from zone edge as a 0..1 fraction of half_extents.
+	vec2 d_zone = abs(world.xz - zone_center.xz) - zone_half;
+	float outside = max(d_zone.x, d_zone.y);
+	float inside = -outside;
+	if (inside < 0.0) {
+		discard;
+	}
+	// Ground-height filter: look up expected terrain Y at this world XZ and
+	// reject pixels that are significantly above it (trees, rocks, buildings).
+	vec2 guv = (world.xz - zone_xz_min) / max(zone_xz_max - zone_xz_min, vec2(0.01));
+	if (guv.x >= 0.0 && guv.x <= 1.0 && guv.y >= 0.0 && guv.y <= 1.0) {
+		float encoded = texture(ground_height_tex, guv).r;
+		float ground_y = mix(height_range.x, height_range.y, encoded);
+		if (abs(world.y - ground_y) > ground_tolerance) {
+			discard;
+		}
+	}
+	// Feather the last edge_feather fraction of the zone as soft edge.
+	float alpha = smoothstep(0.0, zone_half.x * edge_feather, inside);
+	ALBEDO = zone_color;
+	ALPHA = alpha * 0.45;
+}
+"""
+
+func _build_hq_zone_highlight() -> void:
 	var zone_id: String = _team_base_zone.get(PLAYER_TEAM, "")
 	if zone_id == "":
 		return
@@ -2584,20 +2771,55 @@ func _build_hq_zone_outline() -> void:
 		return
 	var center: Vector3 = zone.get("center", Vector3.ZERO)
 	var half: Vector2 = zone.get("half_extents", Vector2.ZERO)
-	# Box mesh with size = 2 * half + a little Y so the box is thin (flat
-	# on the ground, not a 30m tall column).
-	var outline := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = Vector3(half.x * 2.0, 0.05, half.y * 2.0)
-	outline.mesh = box
-	var mat := StandardMaterial3D.new()
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0.35, 0.85, 0.45, 0.25)  # green tint, transparent
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	outline.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(outline)
-	outline.global_position = Vector3(center.x, terrain_height_at(center) + 0.03, center.z)
-	hq_zone_outline = outline
+	# Build a ground-height lookup texture covering the zone area. Each pixel
+	# encodes the terrain Y at that XZ position, normalised to 0..1 within
+	# the zone's height range. The shader uses this to skip pixels that are
+	# above ground level (trees, rocks, buildings).
+	const TEX_SIZE := 64
+	var x_min: float = center.x - half.x
+	var x_max: float = center.x + half.x
+	var z_min: float = center.z - half.y
+	var z_max: float = center.z + half.y
+	var min_y := INF
+	var max_y := -INF
+	var heights: PackedFloat32Array = []
+	heights.resize(TEX_SIZE * TEX_SIZE)
+	for tz in range(TEX_SIZE):
+		for tx in range(TEX_SIZE):
+			var wx: float = lerpf(x_min, x_max, float(tx) / float(TEX_SIZE - 1))
+			var wz: float = lerpf(z_min, z_max, float(tz) / float(TEX_SIZE - 1))
+			var h: float = terrain_height_at(Vector3(wx, 0.0, wz))
+			heights[tz * TEX_SIZE + tx] = h
+			min_y = minf(min_y, h)
+			max_y = maxf(max_y, h)
+	# Encode as RGBA8 (R = normalised height) for maximum compatibility.
+	var img := Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
+	var y_range: float = maxf(max_y - min_y, 0.01)
+	for tz in range(TEX_SIZE):
+		for tx in range(TEX_SIZE):
+			var norm: float = clampf((heights[tz * TEX_SIZE + tx] - min_y) / y_range, 0.0, 1.0)
+			var v: int = int(norm * 255.0)
+			img.set_pixel(tx, tz, Color(v / 255.0, 0.0, 0.0, 1.0))
+	var tex := ImageTexture.create_from_image(img)
+	var highlight := MeshInstance3D.new()
+	highlight.mesh = QuadMesh.new()
+	highlight.custom_aabb = AABB(Vector3(-1e6, -1e6, -1e6), Vector3(2e6, 2e6, 2e6))
+	highlight.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var shader := Shader.new()
+	shader.code = ZONE_SHADER
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("ground_height_tex", tex)
+	mat.set_shader_parameter("zone_center", Vector3(center.x, 0.0, center.z))
+	mat.set_shader_parameter("zone_half", Vector2(half.x, half.y))
+	mat.set_shader_parameter("zone_xz_min", Vector2(x_min, z_min))
+	mat.set_shader_parameter("zone_xz_max", Vector2(x_max, z_max))
+	mat.set_shader_parameter("height_range", Vector2(min_y, max_y))
+	mat.set_shader_parameter("map_half", current_map.get("map_half_extents", 80.0))
+	mat.render_priority = 126
+	highlight.material_override = mat
+	add_child(highlight)
+	hq_zone_highlight = highlight
 
 
 # The HQ ghost itself: a flat box sized to the HQ's footprint, follows
@@ -2668,6 +2890,11 @@ func _place_defence(blueprint: Dictionary, structure_team: int, at: Vector3, und
 		s.queue_free()
 		return null
 	s.died.connect(_on_structure_died)
+	# Dust cloud masks terrain intersection at the building's edges.
+	var foot: Vector2 = Vector2(s.footprint.x, s.footprint.z)
+	VFXEffectsScript.dust_cloud(self, s.position, foot * 0.5)
+	# Displace overlapping terrain props (greebles, grass, rocks).
+	_displace_terrain_props(at, foot * 0.5)
 	if not under_construction:
 		structure_built.emit(structure_team, "defense")
 	return s
@@ -3339,16 +3566,26 @@ func _show_perf_toast(text: String) -> void:
 
 # Resolves the log_profiling flag and opens the BattleLogger file at the
 # start of the world build (2026-08-16). Two paths to the same answer:
-#   - the rule set's log_profiling field (default false; the Skirmish
-#     factory sets it true so a playtest always produces a log)
-#   - the KITBASH_LOG_PROFILING=1 / =true env var (kill switch for ad-hoc
-#     investigation without changing the rule set)
+#   - the rule set's log_profiling field (default true as of 2026-08-18;
+#     a playtester expects a log file, the opt-out is the env var)
+#   - the KITBASH_LOG_PROFILING=0 / =false env var (kill switch for
+#     shipping / harness control runs without changing the rule set)
 # The result is also written to the static BattleLogger so subsequent
 # _emit_progress calls can be filtered cheaply.
 func _evaluate_logging_flags() -> void:
+	# Default ON (rule set's log_profiling defaults to true as of 2026-08-18).
+	# Opt-out paths, in priority order:
+	#   1. _match_rule_set.log_profiling = false (set by test_range factory,
+	#      harness control runs, anyone who wants silence for one match)
+	#   2. env var KITBASH_LOG_PROFILING=0 or =false (shipping / ad-hoc)
+	# Anything else (env var unset, "1", "true", "yes", whatever) leaves
+	# profiling on. The old "opt-in" model asked the playtester to remember
+	# to set the env var; the new "opt-out" model lets the playtester forget
+	# the env var entirely and still get a log.
 	var env_flag := OS.get_environment("KITBASH_LOG_PROFILING")
-	var profiling_on: bool = (_match_rule_set != null and _match_rule_set.log_profiling) \
-			or env_flag == "1" or env_flag == "true"
+	var profiling_on: bool = env_flag != "0" and env_flag != "false"
+	if _match_rule_set != null and not _match_rule_set.log_profiling:
+		profiling_on = false
 	Profiler.enabled = profiling_on
 	BattleLogger.enabled = profiling_on
 	if profiling_on:

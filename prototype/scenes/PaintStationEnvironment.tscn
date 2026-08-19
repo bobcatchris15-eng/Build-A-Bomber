@@ -1,0 +1,20 @@
+[gd_scene format=3 uid="uid://cdwoo7i1s55lg"]
+
+[ext_resource type="Script" path="res://scripts/paint_station_environment.gd" id="1_paint_station"]
+
+; Paint station environment for the Armor Bay.
+;
+; What replaces LabEnvironment.tscn here. The Armor Bay was reframed as a
+; paint station (armor is really just paint), so the floor and props have
+; to change from "model-builder's cutting mat with kraft boxes" to "dark
+; stained wood desktop with paint supplies".
+;
+; This scene is loaded BY armor_bay_screen.gd as a sub-scene of the
+; preview_root, NOT instanced into ArmorBay.tscn directly. The reason is
+; that armor_bay_screen.gd already has a SubViewport containing the
+; preview_hull; the desktop + props belong in that same viewport so they
+; DOF-blur together with the hull. Instancing this scene as a child of
+; ArmorBay (a Control) would have put the desktop in the wrong viewport.
+
+[node name="PaintStation" type="Node3D"]
+script = ExtResource("1_paint_station")

@@ -19,6 +19,7 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const LiveryScript = preload("res://scripts/livery.gd")
 const BuildingMeshScript = preload("res://scripts/battle/buildings/building_mesh.gd")
 const BattleFinishScript = preload("res://scripts/battle/battle_finish.gd")
+const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 
 signal died(structure)
 
@@ -224,6 +225,10 @@ func _add_dock_pads() -> void:
 		_pad_material = StandardMaterial3D.new()
 		_pad_material.albedo_color = Color(0.17, 0.17, 0.19)
 		_pad_material.roughness = 0.98
+	# Sampled once: the current_map dictionary lives on the match director,
+	# which is the parent of this StaticBody3D at setup time. Caching
+	# avoids four tree-walks per refinery (4 bays).
+	var world_map: Dictionary = _resolve_world_map()
 	for offset in _bay_offsets:
 		var bay: Vector3 = offset
 		# The pad's long axis points at the building, so it reads as a bay you
@@ -233,12 +238,29 @@ func _add_dock_pads() -> void:
 		if facing_x:
 			pad_size = Vector3(DOCK_PAD_SIZE.z, DOCK_PAD_SIZE.y, DOCK_PAD_SIZE.x)
 
+		# CONFORM TO TERRAIN. The pad's world XZ is the building's footprint
+		# centre plus the bay's local offset. The terrain height there is
+		# rarely the same as the building's centre height on a sloped map -
+		# placing the pad at fixed local Y=0.07 made it float above (or sink
+		# into) the slope. We sample terrain_height_at() at the bay's world
+		# XZ and offset the pad's local Y to match.
+		#
+		# If the world map can't be resolved (e.g. building instantiated in
+		# a test fixture without a match director), fall back to the
+		# previous fixed local Y so a pad always renders, just maybe
+		# slightly sunken / floating on a slope.
+		var pad_y: float = 0.07
+		if not world_map.is_empty():
+			var bay_world := global_position + Vector3(bay.x, 0.0, bay.z)
+			var bay_terrain_y: float = TerrainBuilder.terrain_height_at(world_map, bay_world)
+			pad_y = bay_terrain_y - global_position.y + 0.07
+
 		var kerb := MeshInstance3D.new()
 		var kerb_mesh := BoxMesh.new()
 		kerb_mesh.size = pad_size + Vector3(DOCK_PAD_KERB * 2.0, -0.02, DOCK_PAD_KERB * 2.0)
 		kerb.mesh = kerb_mesh
 		kerb.material_override = _kerb_material
-		kerb.position = Vector3(bay.x, 0.03, bay.z)
+		kerb.position = Vector3(bay.x, pad_y - 0.04, bay.z)
 		add_child(kerb)
 
 		var pad := MeshInstance3D.new()
@@ -246,8 +268,24 @@ func _add_dock_pads() -> void:
 		pad_mesh.size = pad_size
 		pad.mesh = pad_mesh
 		pad.material_override = _pad_material
-		pad.position = Vector3(bay.x, 0.07, bay.z)
+		pad.position = Vector3(bay.x, pad_y, bay.z)
 		add_child(pad)
+
+
+# Find the match director's current_map so _add_dock_pads can sample terrain
+# height at each bay's world XZ. Walks the tree to the first node with a
+# `current_map` member (the director is the only one in a live match).
+# Returns an empty dict if none found - callers fall back to fixed Y offsets.
+func _resolve_world_map() -> Dictionary:
+	if not is_inside_tree():
+		return {}
+	var root: Window = get_tree().root
+	if root == null:
+		return {}
+	for child in root.get_children():
+		if "current_map" in child and child.current_map is Dictionary:
+			return child.current_map
+	return {}
 
 
 # mechanism - a proxy on the selection layer carrying a back-reference. Clicking

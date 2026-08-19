@@ -72,7 +72,17 @@ static func validity(world, team: int, at: Vector3, kind: String,
 		if structures.is_empty():
 			structures = tree.get_nodes_in_group("structures")
 		if resource_nodes.is_empty():
-			resource_nodes = tree.get_nodes_in_group("resource_nodes")
+			# PR10 perf (2026-08-18). The default-fetch path now
+			# also drops ambient trees up front, so the per-
+			# candidate loop never sees them. find_site() pre-
+			# filters even further, but every other caller (the
+			# player's ghost, the placement tests) goes through
+			# here and benefits from the same shrink.
+			var all_nodes: Array = tree.get_nodes_in_group("resource_nodes")
+			resource_nodes = []
+			for n in all_nodes:
+				if is_instance_valid(n) and not n.get("is_ambient"):
+					resource_nodes.append(n)
 	var footprint := footprint_for(kind, blueprint)
 	var half: float = maxf(footprint.x, footprint.z) * 0.5
 
@@ -103,10 +113,17 @@ static func validity(world, team: int, at: Vector3, kind: String,
 	# A scattered tree is scenery you clear to build, not a deposit you
 	# must not bury - so it is skipped here. It stays fully harvestable;
 	# only its veto over construction goes away.
+	#
+	# PR10 perf (2026-08-18). The ambient filter (n.get("is_ambient"))
+	# used to run inside this loop, once per candidate, against a list
+	# that contains 1000+ ambient trees plus ~36 real deposits. The
+	# per-candidate walk was 192 * 1000+ is_instance_valid + get calls
+	# per AI build attempt. The pre-filter of resource_nodes to
+	# non-ambient (in find_site() below) moves the is_ambient check out
+	# of this loop - by the time we get here, every node in this list
+	# is a real deposit.
 	for n in resource_nodes:
 		if not is_instance_valid(n):
-			continue
-		if n.get("is_ambient"):
 			continue
 		if at.distance_to(n.global_position) < half + NODE_EXCLUSION:
 			return _no(ON_RESOURCE)
@@ -195,9 +212,22 @@ static func find_site(world, team: int, home: Vector3, kind: String,
 	# ~200K node-iterations per AI build. A 1120ms worst frame in the
 	# commander section was this loop on a busy match; the unit cost
 	# is now amortised to a single fetch per build attempt.
+	#
+	# PR10 perf (2026-08-18). resource_nodes is now pre-filtered to
+	# non-ambient on top of the get_nodes_in_group hoist. The ambient
+	# filter used to run inside validity() once per candidate; with
+	# 1000+ ambient trees on the map and 192 candidates per attempt,
+	# that was 192,000 is_instance_valid + get() calls per AI build.
+	# Filtering once here drops the per-candidate walk from 1000+ to
+	# ~36. validity() also drops its own ambient check, so the pre-
+	# filtered list is what the per-candidate loop sees.
 	var tree: SceneTree = world.get_tree()
 	var structures: Array = tree.get_nodes_in_group("structures")
-	var resource_nodes: Array = tree.get_nodes_in_group("resource_nodes")
+	var all_resource_nodes: Array = tree.get_nodes_in_group("resource_nodes")
+	var resource_nodes: Array = []
+	for n in all_resource_nodes:
+		if is_instance_valid(n) and not n.get("is_ambient"):
+			resource_nodes.append(n)
 	for ring in range(1, RINGS + 1):
 		var radius := RING_STEP * float(ring)
 		for i in range(SAMPLES):

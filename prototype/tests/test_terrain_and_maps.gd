@@ -2392,7 +2392,7 @@ func test_place_hq_for_human_refuses_outside_zone_and_double_place() -> bool:
 # What this exercises, end-to-end:
 #   - _spawn_bases() in a 2-zone map enters the mode (the player has no
 #     auto-placed HQ on a zoned map; the AI does);
-#   - the ghost and zone outline are live MeshInstance3D children;
+#   - the ghost and zone highlight are live MeshInstance3D children;
 #   - _clamp_to_player_zone drags a point outside the half_extents
 #     rectangle to the closest point inside it;
 #   - confirm_hq_placement with a valid in-zone ghost commits and exits;
@@ -2481,8 +2481,8 @@ func test_pre_game_hq_placement_mode_lifecycle() -> bool:
 		return false
 
 	# Ghosts are live MeshInstance3D children of the director.
-	if not is_instance_valid(director.hq_ghost) or not is_instance_valid(director.hq_zone_outline):
-		print("  [FAIL] hq_ghost or hq_zone_outline is not a live MeshInstance3D")
+	if not is_instance_valid(director.hq_ghost) or not is_instance_valid(director.hq_zone_highlight):
+		print("  [FAIL] hq_ghost or hq_zone_highlight is not a live MeshInstance3D")
 		director.queue_free()
 		return false
 	# Ghosts do not cast shadows (decoration, not gameplay element).
@@ -2490,8 +2490,8 @@ func test_pre_game_hq_placement_mode_lifecycle() -> bool:
 		print("  [FAIL] hq_ghost should not cast shadows (decorative, not gameplay)")
 		director.queue_free()
 		return false
-	if director.hq_zone_outline.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
-		print("  [FAIL] hq_zone_outline should not cast shadows (UI affordance)")
+	if director.hq_zone_highlight.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+		print("  [FAIL] hq_zone_highlight should not cast shadows (UI affordance)")
 		director.queue_free()
 		return false
 
@@ -2536,8 +2536,8 @@ func test_pre_game_hq_placement_mode_lifecycle() -> bool:
 		print("  [FAIL] pre-game mode should be exited after a successful commit")
 		director.queue_free()
 		return false
-	if director.hq_ghost != null or director.hq_zone_outline != null:
-		print("  [FAIL] ghost / zone outline should be null after exit")
+	if director.hq_ghost != null or director.hq_zone_highlight != null:
+		print("  [FAIL] ghost / zone highlight should be null after exit")
 		director.queue_free()
 		return false
 	# The committed player HQ is now in the structures group.

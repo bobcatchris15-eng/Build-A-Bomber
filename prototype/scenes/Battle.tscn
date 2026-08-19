@@ -37,8 +37,8 @@ ssao_enabled = true
 ssao_radius = 0.8
 ssao_intensity = 1.8
 glow_enabled = true
-glow_intensity = 0.85
-glow_bloom = 0.06
+glow_intensity = 0.4
+glow_bloom = 0.04
 sdfgi_enabled = true
 sdfgi_cell_size = 1.0
 sdfgi_cascades = 4
@@ -50,8 +50,8 @@ ssil_samples = 4
 ssil_buffer_width = 0.5
 ssil_buffer_height = 0.5
 adjustment_enabled = true
-adjustment_saturation = 1.18
-adjustment_contrast = 1.06
+adjustment_saturation = 1.0
+adjustment_contrast = 1.0
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
 size = Vector3(1200, 1, 1200)

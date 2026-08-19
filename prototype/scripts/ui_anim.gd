@@ -210,3 +210,36 @@ static func fade(node: CanvasItem, target_alpha: float, duration: float = DURATI
 	var tween = node.create_tween()
 	tween.tween_property(node, "modulate:a", target_alpha, duration)
 	return tween
+
+
+# A looping spotlight ring pulse for tutorial coaching. Oscillates a float
+# property between `low` and `high` using CUBIC ease - a breathing ring that
+# draws the eye without being garish. Returns the tween so the caller can kill
+# it on step change.
+#
+# TRANS_CUBIC + EASE_OUT on the bright half, TRANS_CUBIC + EASE_IN on the dim
+# half - the same mechanical language the rest of the UI uses. No overshoot,
+# no bounce. The total period is `duration` (default DURATION_NORMAL = 220ms),
+# but the default is overridden per call site since tutorial pulse periods
+# are typically 600-800ms.
+static func spotlight_pulse(node: Node, property: String, low: float, high: float,
+		duration: float = 0.6) -> Tween:
+	var half := duration * 0.5
+	var tw := node.create_tween().set_loops()
+	tw.tween_property(node, property, high, half) \
+		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_property(node, property, low, half) \
+		.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
+	return tw
+
+
+# Slides a card from its current position to `target_pos` without touching
+# opacity. Used by the tutorial overlay to reposition the coach card smoothly
+# when the step's target changes. 220ms, TRANS_CUBIC, EASE_OUT - the same
+# timing as slide_in().
+static func card_slide_to(card: Control, target_pos: Vector2,
+		duration: float = DURATION_NORMAL) -> Tween:
+	var tw := card.create_tween()
+	tw.set_trans(TRANS_STANDARD).set_ease(EASE_STANDARD)
+	tw.tween_property(card, "position", target_pos, duration)
+	return tw

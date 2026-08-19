@@ -101,13 +101,21 @@ var _dragging_splitter := false
 func _init() -> void:
 	theme_type_variation = "DockPanel"
 	clip_contents = false
+	# Build the body in _init, not _ready, so body() returns a usable
+	# VBoxContainer the moment the dock is constructed. The BattleHUD
+	# does `add_child(dock); dock.body().add_child(child)` and Godot 4
+	# does NOT call _ready synchronously inside add_child() - so
+	# building in _ready would leave body() null at the call site and
+	# the child would silently orphan. The body is pure layout (header
+	# button + clip wrapper + VBoxContainer + rail button) and does
+	# not need the tree; _ready() still runs for the state-loading work
+	# below, which legitimately needs to be in the tree.
+	_build()
 
 
 func _ready() -> void:
-	_build()
-	# The default goes in BEFORE _load_state(), which uses `_state` as its own
-	# fallback. Setting it afterwards would silently overrule whatever the player
-	# last left the dock as, which is the opposite of what persistence is for.
+	# Body was built in _init so body() works synchronously. The
+	# state-load + apply below legitimately need to be in the tree.
 	_state = default_state
 	_load_state()
 	_apply_state(false)

@@ -20,7 +20,6 @@ const FRONT_DESK := "front_desk"
 const LAB := "lab"
 const LIBRARY := "library"
 const HULL_BUILDER := "hull_builder"
-const ARMOR_BAY := "armor_bay"
 const MATCH_SETUP := "match_setup"
 const OPERATIONS_SETUP := "operations_setup"
 const OPERATIONS_DRAFT := "operations_draft"
@@ -57,14 +56,11 @@ const ROUTES := {
 	# than the Front Desk - you are mid-design, the same reasoning that puts the
 	# Operations draft under its setup. Deliberately IS in this table, unlike the
 	# Livery workshop, which is reached from a hardwired main-menu button and so
-	# hardcodes its own way home and gets no breadcrumb: livery is a profile you
-	# own across the whole force, armor belongs to one blueprint.
-	ARMOR_BAY: {
-		"scene": "res://scenes/ArmorBay.tscn",
-		"title": "ARMOR BAY",
-		"parent": LAB,
-		"links": [LAB, LIBRARY],
-	},
+	# armor belongs to one blueprint.
+	# 2026-08-18: Armor Station is now an IN-SCENE sub-mode of the Lab
+	# (see lab_toolbar.gd's _on_paint_station_pressed and
+	# UI_ArmorStationPanel.gd). It is not a routable destination
+	# anymore, so the ARMOR_BAY route is removed.
 	HULL_BUILDER: {
 		"scene": "res://scenes/HullBuilder.tscn",
 		"title": "HULL AUTHORING",

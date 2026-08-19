@@ -28,7 +28,7 @@ const PHASE_1_STEPS := [
 		"scene": SCENE_BATTLE,
 		"title": "PLACE YOUR HQ",
 		"body": "Every skirmish starts by placing your Headquarters. "
-			+ "A green zone outline marks your assigned base area. "
+			+ "A green highlight marks your assigned base area. "
 			+ "Click anywhere inside it to drop your HQ.\n\n"
 			+ "The HQ is free - it doesn't cost credits. Everything else "
 			+ "(refinery, factories, harvester) you'll build with your starting bank.",

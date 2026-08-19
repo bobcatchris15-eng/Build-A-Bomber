@@ -1449,6 +1449,12 @@ static func bake_pending_entry_async(entry: Dictionary, cell_size: float, on_don
 # --- Visuals ---
 
 static func spawn_visuals(map_def: Dictionary, parent: Node3D):
+	# Snapshot children before scatter so we can tag new terrain props with
+	# the "terrain_debris" group. Buildings use this group to find and
+	# displace overlapping props when placed.
+	var _pre_ids: Dictionary = {}
+	for _c in parent.get_children():
+		_pre_ids[_c.get_instance_id()] = true
 	var prop_scale = WorldScaleScript.for_map(map_def)
 	_spawn_merged_water(map_def, parent, prop_scale)
 	for o in map_def.get("obstacles", []):
@@ -1485,6 +1491,13 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	if visual_scatter != null:
 		visual_scatter.scatter_all(map_def, prop_scale)
 	_spawn_slope_rocks(map_def, parent)
+	# Tag all new MeshInstance3D children (greebles, grass, slope rocks)
+	# so buildings can displace them on placement.
+	for c in parent.get_children():
+		if _pre_ids.has(c.get_instance_id()):
+			continue
+		if c is MeshInstance3D and not c.is_in_group("terrain_debris"):
+			c.add_to_group("terrain_debris")
 
 # Real baked ground textures (see tools/generate_terrain_textures.gd) tiled
 # across each surface_zone's real-world footprint, replacing the old flat

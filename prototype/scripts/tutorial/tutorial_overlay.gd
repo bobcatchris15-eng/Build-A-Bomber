@@ -18,17 +18,30 @@ extends Control
 # is NOT auto-sized, because a CanvasLayer has no rect to inherit - hence the
 # explicit PRESET_TOP_LEFT plus _fit_to_viewport(), re-run on size_changed. Same
 # trap production_hud.gd hit.
+#
+# Hand-hold mode: the spotlight ring breathes (pulsing width), a directional
+# chevron arrow points from the coach card toward the target, and the card
+# slides smoothly to its new position on step change. The NEXT/FINISH button
+# also pulses to draw the eye when it is the step's advance condition.
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const TutorialSteps = preload("res://scripts/tutorial/tutorial_steps.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const UIAnimScript = preload("res://scripts/ui_anim.gd")
 
 const SCRIM_COLOR := Color(0.03, 0.03, 0.028, 0.62)
 const SPOTLIGHT_PAD := 10.0
 const RING_WIDTH := 2.0
+const RING_PULSE_AMPLITUDE := 1.5
+const RING_PULSE_PERIOD := 0.8
 const CARD_WIDTH := 420.0
 const CARD_GAP := 18.0
 const EDGE_MARGIN := 24.0
+const ARROW_LEN := 12.0
+const ARROW_HEAD := 8.0
+const ARROW_PAD_OUTER := 12.0
+const ARROW_PAD_INNER := 8.0
+const SETTLE_DELAY := 0.15
 
 # A step whose target cannot be resolved this frame (the dock is still animating
 # open, the hull is behind the camera) draws no hole at all rather than a hole in
@@ -53,6 +66,19 @@ var _step: Dictionary = {}
 # closing simply makes the card invisible and the spotlight quietly goes away.
 var _card_target: Button = null
 
+# --- Hand-hold animation state -----------------------------------------------
+var _pulse_time: float = 0.0
+var _pulse_amplitude: float = 0.0
+var _pulse_tween: Tween = null
+var _button_pulse_tween: Tween = null
+var _card_slide_tween: Tween = null
+var _settle_timer: float = 0.0
+var _previous_step_key: String = ""
+var _arrow_from: Vector2 = Vector2.ZERO
+var _arrow_to: Vector2 = Vector2.ZERO
+var _show_arrow: bool = false
+var _arrow_alpha: float = 0.0
+
 
 func _init() -> void:
 	# See the header: the overlay must never eat a click meant for the Lab.
@@ -69,6 +95,15 @@ func _ready() -> void:
 func _fit_to_viewport() -> void:
 	position = Vector2.ZERO
 	size = get_viewport_rect().size
+
+
+func _exit_tree() -> void:
+	if _pulse_tween and _pulse_tween.is_valid():
+		_pulse_tween.kill()
+	if _button_pulse_tween and _button_pulse_tween.is_valid():
+		_button_pulse_tween.kill()
+	if _card_slide_tween and _card_slide_tween.is_valid():
+		_card_slide_tween.kill()
 
 
 # --- Step presentation ------------------------------------------------------
@@ -88,14 +123,33 @@ func show_step(index: int, step: Dictionary) -> void:
 	# Open whichever dock owns this step's target BEFORE the first resolve, or
 	# the card spends its opening frames pointing at a 40px collapsed rail.
 	_reveal_target_host(str(step.get("target", "")))
+
+	var step_key := "%d:%s" % [index, str(step.get("target", ""))]
+	var is_step_change := step_key != _previous_step_key
+	_previous_step_key = step_key
+
+	_pulse_time = 0.0
+	_settle_timer = SETTLE_DELAY if is_step_change else 0.0
+	var has_target := str(step.get("target", "")) != ""
+	_pulse_amplitude = RING_PULSE_AMPLITUDE if has_target else 0.0
+	_start_button_pulse(advance)
 	queue_redraw()
+
+	_place_card_animated(is_step_change)
 
 
 func _process(_delta: float) -> void:
 	if _step.is_empty():
 		return
+
+	if _settle_timer > 0.0:
+		_settle_timer = maxf(_settle_timer - _delta, 0.0)
+
+	_pulse_time += _delta
+
 	var previous := _spot
 	_spot = _resolve_target(str(_step.get("target", "")))
+	_update_arrow()
 	_place_card()
 	if _spot != previous:
 		queue_redraw()
@@ -234,6 +288,87 @@ func _stat_member(member: String):
 	return ui.get(member)
 
 
+# --- Arrow ------------------------------------------------------------------
+
+func _update_arrow() -> void:
+	var target := str(_step.get("target", ""))
+	if _spot.size.x <= 0.0 or _spot.size.y <= 0.0 or target == "":
+		_show_arrow = false
+		_arrow_alpha = 0.0
+		queue_redraw()
+		return
+
+	if target in ["hull", "arena_dummy", ""]:
+		_show_arrow = false
+		_arrow_alpha = 0.0
+		queue_redraw()
+		return
+
+	var card_rect := Rect2(_card.position, _card.size)
+	var target_center := _spot.get_center()
+	var card_center := card_rect.get_center()
+
+	var from := Vector2.ZERO
+	if absf(card_center.x - target_center.x) > absf(card_center.y - target_center.y):
+		if card_center.x < target_center.x:
+			from = Vector2(card_rect.end.x, card_rect.get_center().y)
+		else:
+			from = Vector2(card_rect.position.x, card_rect.get_center().y)
+	else:
+		if card_center.y < target_center.y:
+			from = Vector2(card_rect.get_center().x, card_rect.end.y)
+		else:
+			from = Vector2(card_rect.get_center().x, card_rect.position.y)
+
+	var dir := (target_center - from).normalized()
+	if dir.length() < 0.01:
+		_show_arrow = false
+		_arrow_alpha = 0.0
+		queue_redraw()
+		return
+
+	_arrow_from = from + dir * ARROW_PAD_OUTER
+	_arrow_to = target_center - dir * ARROW_PAD_INNER
+	_show_arrow = true
+
+	var pulse_cycle := fmod(_pulse_time, RING_PULSE_PERIOD) / RING_PULSE_PERIOD
+	_arrow_alpha = 0.55 + 0.45 * sin(pulse_cycle * TAU)
+	queue_redraw()
+
+
+func _draw_arrow() -> void:
+	if not _show_arrow or _arrow_alpha <= 0.01:
+		return
+
+	var col := Color(Tokens.SIGNAL_HAZARD.r, Tokens.SIGNAL_HAZARD.g, Tokens.SIGNAL_HAZARD.b, _arrow_alpha)
+	var dir := (_arrow_to - _arrow_from).normalized()
+	var perp := Vector2(-dir.y, dir.x)
+	var shaft_end := _arrow_to - dir * ARROW_HEAD
+
+	draw_line(_arrow_from, shaft_end, col, 2.0, true)
+	draw_line(shaft_end + perp * (ARROW_HEAD * 0.5), _arrow_to, col, 2.0, true)
+	draw_line(shaft_end - perp * (ARROW_HEAD * 0.5), _arrow_to, col, 2.0, true)
+
+
+# --- Button pulse -----------------------------------------------------------
+
+func _start_button_pulse(advance: String) -> void:
+	if _button_pulse_tween and _button_pulse_tween.is_valid():
+		_button_pulse_tween.kill()
+		_button_pulse_tween = null
+
+	if advance in ["next_button", "finish_button"] and _action_button.visible:
+		_action_button.modulate.a = 0.7
+		var tw := _action_button.create_tween().set_loops()
+		tw.tween_property(_action_button, "modulate:a", 1.0, RING_PULSE_PERIOD * 0.5) \
+			.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		tw.tween_property(_action_button, "modulate:a", 0.7, RING_PULSE_PERIOD * 0.5) \
+			.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_CUBIC)
+		_button_pulse_tween = tw
+	else:
+		_action_button.modulate.a = 1.0
+
+
 # --- Drawing ----------------------------------------------------------------
 
 func _draw() -> void:
@@ -254,7 +389,14 @@ func _draw() -> void:
 	draw_rect(Rect2(hole.end.x, hole.position.y, size.x - hole.end.x, hole.size.y),
 		SCRIM_COLOR)
 
-	draw_rect(hole, Tokens.SIGNAL_HAZARD, false, RING_WIDTH)
+	# Pulsing spotlight ring.
+	var ring_w := RING_WIDTH
+	if _settle_timer <= 0.0 and _pulse_amplitude > 0.0:
+		var phase := fmod(_pulse_time, RING_PULSE_PERIOD) / RING_PULSE_PERIOD
+		ring_w = RING_WIDTH + _pulse_amplitude * sin(phase * TAU)
+	draw_rect(hole, Tokens.SIGNAL_HAZARD, false, ring_w)
+
+	_draw_arrow()
 
 
 # --- The coach card ---------------------------------------------------------
@@ -330,11 +472,14 @@ func _build_card() -> void:
 func _place_card() -> void:
 	var card_size := _card.get_combined_minimum_size()
 	card_size.x = maxf(card_size.x, CARD_WIDTH)
+	var pos := _compute_card_pos(card_size)
+	_card.position = pos
+	_card.size = card_size
 
+
+func _compute_card_pos(card_size: Vector2) -> Vector2:
 	if _spot.size.x <= 0.0:
-		_card.position = (size - card_size) * 0.5
-		_card.size = card_size
-		return
+		return (size - card_size) * 0.5
 
 	var pos := Vector2.ZERO
 	var right_edge := _spot.end.x + CARD_GAP
@@ -343,19 +488,29 @@ func _place_card() -> void:
 	elif _spot.position.x - CARD_GAP - card_size.x >= EDGE_MARGIN:
 		pos.x = _spot.position.x - CARD_GAP - card_size.x
 	else:
-		# Neither side fits - sit under the spotlight instead, or over it if the
-		# target is near the bottom of the screen.
 		pos.x = clampf(_spot.get_center().x - card_size.x * 0.5,
 			EDGE_MARGIN, size.x - card_size.x - EDGE_MARGIN)
 		if _spot.end.y + CARD_GAP + card_size.y + EDGE_MARGIN <= size.y:
 			pos.y = _spot.end.y + CARD_GAP
 		else:
 			pos.y = maxf(_spot.position.y - CARD_GAP - card_size.y, EDGE_MARGIN)
-		_card.position = pos
-		_card.size = card_size
-		return
+		return pos
 
 	pos.y = clampf(_spot.get_center().y - card_size.y * 0.5,
 		EDGE_MARGIN, maxf(size.y - card_size.y - EDGE_MARGIN, EDGE_MARGIN))
-	_card.position = pos
+	return pos
+
+
+func _place_card_animated(is_step_change: bool) -> void:
+	var card_size := _card.get_combined_minimum_size()
+	card_size.x = maxf(card_size.x, CARD_WIDTH)
+	var new_pos := _compute_card_pos(card_size)
 	_card.size = card_size
+
+	if not is_step_change or _card.position == Vector2.ZERO:
+		_card.position = new_pos
+		return
+
+	if _card_slide_tween and _card_slide_tween.is_valid():
+		_card_slide_tween.kill()
+	_card_slide_tween = UIAnimScript.card_slide_to(_card, new_pos)

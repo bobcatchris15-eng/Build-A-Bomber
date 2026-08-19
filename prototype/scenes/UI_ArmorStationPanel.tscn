@@ -1,0 +1,26 @@
+[gd_scene format=3 uid="uid://cxabarmstat01"]
+
+[ext_resource type="Script" path="res://scripts/armor_station_panel.gd" id="1_armor_station"]
+
+; The Armor Station's left-side toolkit panel. A full-rect Control that
+; builds its own docking layout in _ready(); the .tscn just hosts the
+; script. Same pattern as UI_PartsMenu - which is intentional, so the
+; swap from parts-bin to armor-toolkit is shape-identical to the player
+; and reads as "the same dock, different contents".
+;
+; Placer entry points the panel expects (called from enter()/exit()):
+;   - capture_modules_for_paint() -> Array: returns the live module
+;     nodes so the panel can re-add them on exit.
+;   - strip_modules_for_paint(): removes modules from the hull.
+;   - restore_modules_after_paint(): re-adds the captured modules.
+;   - load_scratch() / save_scratch_from(dict): scratch read/write.
+
+[node name="UI_ArmorStationPanel" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("1_armor_station")

@@ -34,6 +34,7 @@ extends RefCounted
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const LiveryScript = preload("res://scripts/livery.gd")
+const ArmorPaint = preload("res://scripts/armor_paint.gd")
 
 ## Thrust every unit gets before any locomotion module contributes. Keeps a
 ## barely-powered design from dividing by ~nothing and reading as immobile.
@@ -363,6 +364,26 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	# cost nothing in combat.
 	var armor_wt_mult: float = 1.0
 	var weight: float = ModuleCatalog.compute_hull_weight(hull_type, thickness, material, hull_scale, armor_wt_mult)
+	# Add the painted armor plan's weight on top of the base hull weight.
+	# ArmorPaint.analyze() already computes this from the armor_plan meta;
+	# we add it here so the design's total weight (and therefore speed/load)
+	# reflects painted facets without altering the hull's base weight.
+	var armor_plan_wt: float = 0.0
+	var plan: Dictionary = hull_node.get_meta("armor_plan", {})
+	if not plan.is_empty() and not bool(plan.get("empty", true)):
+		# Re-use ArmorPaint's weight computation without the
+		# side-coverage / coverage overhead.
+		var facets: Dictionary = plan.get("facets", {})
+		for fid in facets.keys():
+			var a: Dictionary = facets[fid]
+			var data = ModuleCatalog.get_module_data(str(a.get("type_id", "")))
+			if data.is_empty(): continue
+			# ARMOR_REFERENCE_AREA is the area one catalog row's stats buy
+			# in square metres (see armor_paint.gd line 49).
+			var ref_area := ArmorPaint.ARMOR_REFERENCE_AREA
+			var units: float = (float(a.get("area", 0.0)) / ref_area) * float(a.get("thickness", 1.0))
+			armor_plan_wt += float(data.get("weight", 0.0)) * units
+	weight += armor_plan_wt
 	# The locomotor is treated as a self-contained system "tuned for the
 	# unit" (Chris, 2026-08-16): its carrying capacity is for what it
 	# carries beyond the chassis baseline, not for the chassis itself.

@@ -41,6 +41,19 @@ const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
 # were converted at the 2x crystal rate: 250/75 -> 400, 900/400 -> 1700.
 const RESOURCE_PRESETS = [-1, 400, 1700]
 const RESOURCE_LABELS = ["Standard", "Low (tight economy)", "High (build fast, fight fast)"]
+# AI Opponent. WHAT THIS REPLACES, AND WHY: a hardcoded `enemy_faction = "enemy"`
+# in _on_start_pressed() that left the player no way to play the map without an
+# AI commander. The infrastructure for "no AI" already exists - MatchRuleSet
+# has carried an enable_ai field since the test_range factory was added
+# (match_rule_set.gd:117, used at match_director.gd:561-578 to gate the
+# CommanderScript instantiation) - so this dropdown is just exposing a
+# per-match switch that the setup screen previously hid.
+#
+# Added 2026-08-18 for the live perf investigation: a playtest in each mode
+# (Standard vs None) is the A/B test for whether the AI commander is the
+# cause of the per-frame hitches. If the hitches collapse in None mode the
+# commander was the source; if they stay it is something else.
+const AI_OPPONENT_LABELS = ["None", "Standard"]
 # Matches skirmish.gd's own hardcoded roster.slice(0, 12) - kept as a
 # separate constant here (not read from skirmish.gd, which isn't loaded
 # yet at this point in the flow) since this screen needs to warn BEFORE
@@ -52,6 +65,7 @@ var map_desc_label: Label
 var MAP_IDS: Array = []
 var difficulty_btn: OptionButton
 var resources_btn: OptionButton
+var ai_btn: OptionButton
 var bp_manager: Node
 var roster_picker: RosterPicker
 
@@ -147,6 +161,17 @@ func _ready():
 	difficulty_btn.set_item_tooltip(1, "Balanced AI pacing.")
 	difficulty_btn.set_item_tooltip(2, "AI builds and attacks faster, and recovers quickly from economic setbacks.")
 	resources_btn = _add_dropdown(grid, "Starting Resources", RESOURCE_LABELS)
+	# Default to Standard so a player who never opens the dropdown gets the
+	# same match they got before this control was added. enable_ai defaults
+	# to true on MatchRuleSet, so the explicit `selected = 1` is a no-op
+	# for the rule set today, but a future change to that default would
+	# not silently break the screen's promise of "looks like the old
+	# Skirmish on a fresh load".
+	ai_btn = _add_dropdown(grid, "AI Opponent", AI_OPPONENT_LABELS)
+	ai_btn.selected = 1
+	ai_btn.tooltip_text = "Whether the AI commander runs in this match. None plays the map solo with no opposing force; Standard is a regular Skirmish."
+	ai_btn.set_item_tooltip(0, "No AI commander. Plays the map solo; useful for testing designs on a live map, and for isolating whether the AI is the cause of a per-frame cost.")
+	ai_btn.set_item_tooltip(1, "AI commander runs (Skirmish default).")
 
 	# The selected map's description, live beneath the settings grid. On the
 	# old MapSelect screen this text existed but you had to leave the screen
@@ -289,6 +314,13 @@ func _on_start_pressed():
 		var enemy_faction: String = "enemy"
 		var ai_difficulty: String = DIFFICULTIES[difficulty_btn.selected]
 		var starting_credits: int = RESOURCE_PRESETS[resources_btn.selected]
+		# The AI Opponent dropdown writes through to MatchRuleSet.enable_ai
+		# (match_rule_set.gd:117). None = false (no CommanderScript), Standard
+		# = true (default behaviour, what the match used to do before this
+		# control existed). Set on the rule set after the factory call rather
+		# than adding an enable_ai parameter to skirmish() - same pattern as
+		# starting_credits below, same justification.
+		var ai_enabled: bool = ai_btn.selected != 0
 		# Slot order, left to right and top to bottom, gaps skipped. Under the old
 		# checkbox list this was library sort order, which meant which designs
 		# survived skirmish.gd's roster.slice(0, 12) was effectively incidental.
@@ -316,6 +348,7 @@ func _on_start_pressed():
 		# default of "use the director's STARTING_CREDITS" intact when
 		# the screen does not override.
 		match_config.rule_set.starting_credits = starting_credits
+		match_config.rule_set.enable_ai = ai_enabled
 
 	# Routed through SceneRouter rather than change_scene_to_file(): loading
 	# Skirmish.tscn synchronously blocks the main thread for over a second,

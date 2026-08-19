@@ -34,6 +34,8 @@ class_name VFXEffects
 # rule (and same reason) as vfx_burst.gd: many live emitters share one
 # resource, so mutating a cached material would stomp every other user.
 
+const MunitionPool = preload("res://scripts/munition_pool.gd")
+
 const FLAME_TEX = preload("res://assets/textures/effects/flame_flipbook.png")
 const SMOKE_TEX = preload("res://assets/textures/effects/smoke_flipbook.png")
 const SCORCH_EMISSION_TEX = preload("res://assets/textures/effects/scorch_emission.png")
@@ -342,6 +344,99 @@ static func _stop_and_free_after(p: GPUParticles3D, duration: float) -> void:
 				p.queue_free()))
 
 
+# --- Building placement dust --------------------------------------------
+#
+# A ring of yellow-brown dust puffs spawned when a structure is placed.
+# Draws the eye away from terrain intersection at the building's edges
+# (especially noticeable under refinery dock bays) without modifying the
+# terrain mesh. The puffs expand, drift upward, and despawn.
+static func dust_cloud(parent: Node3D, center: Vector3, half_extents: Vector2) -> void:
+	const PERIMETER_COUNT := 10
+	const CENTER_COUNT := 4
+	const DUST_COLOR := Color(0.62, 0.58, 0.50, 0.5)
+	const TOTAL_LIFE := 2.0
+	const FADE_START := 0.9
+	const BLOOM_TIME := 0.3
+
+	var mesh := MunitionPool.unit_sphere()
+	var mat := MunitionPool.alpha(DUST_COLOR)
+	var puffs: Array[MeshInstance3D] = []
+	# Scale puffs relative to the building footprint so they're visible at
+	# RTS zoom. The unit_sphere has radius 0.5 (diameter 1.0), so a scale
+	# of 2.0 gives a 2.0m-diameter puff — visible against a 6-12m building.
+	var foot_span: float = maxf(half_extents.x, half_extents.y) * 2.0
+	var puff_size: float = clampf(foot_span * 0.18, 1.2, 3.0)
+
+	# Perimeter puffs along the building edges.
+	for i in range(PERIMETER_COUNT):
+		var puff := MeshInstance3D.new()
+		puff.mesh = mesh
+		puff.material_override = mat
+		parent.add_child(puff)
+		var t := float(i) / float(PERIMETER_COUNT)
+		var edge_pos := Vector3(
+			center.x + lerpf(-half_extents.x, half_extents.x, fmod(t * 2.0, 1.0)),
+			center.y + 0.2,
+			center.z + (half_extents.y if t < 0.5 else -half_extents.y) * (1.0 if t < 0.25 or t >= 0.75 else -1.0))
+		if t < 0.25:
+			edge_pos.x = center.x - half_extents.x
+			edge_pos.z = center.z + lerpf(-half_extents.y, half_extents.y, t * 4.0)
+		elif t < 0.5:
+			edge_pos.x = center.x + lerpf(-half_extents.x, half_extents.x, (t - 0.25) * 4.0)
+			edge_pos.z = center.z + half_extents.y
+		elif t < 0.75:
+			edge_pos.x = center.x + half_extents.x
+			edge_pos.z = center.z + lerpf(half_extents.y, -half_extents.y, (t - 0.5) * 4.0)
+		else:
+			edge_pos.x = center.x + lerpf(half_extents.x, -half_extents.x, (t - 0.75) * 4.0)
+			edge_pos.z = center.z - half_extents.y
+		edge_pos.x += randf_range(-0.6, 0.6)
+		edge_pos.z += randf_range(-0.6, 0.6)
+		puff.position = edge_pos
+		var base_scale := puff_size * randf_range(0.8, 1.2)
+		puff.scale = Vector3.ONE * base_scale
+		puffs.append(puff)
+
+	# Center puffs under the building for density.
+	for i in range(CENTER_COUNT):
+		var puff := MeshInstance3D.new()
+		puff.mesh = mesh
+		puff.material_override = mat
+		parent.add_child(puff)
+		puff.position = Vector3(
+			center.x + randf_range(-half_extents.x * 0.5, half_extents.x * 0.5),
+			center.y + 0.15,
+			center.z + randf_range(-half_extents.y * 0.5, half_extents.y * 0.5))
+		var base_scale := puff_size * randf_range(0.9, 1.4)
+		puff.scale = Vector3.ONE * base_scale
+		puffs.append(puff)
+
+	# Animate: bloom in, drift upward, shrink out, then free.
+	for puff in puffs:
+		var base_pos: Vector3 = puff.position
+		var base_scale: float = puff.scale.x
+		var drift := Vector3(randf_range(-0.15, 0.15), randf_range(0.3, 0.8), randf_range(-0.15, 0.15))
+		var stagger := randf_range(0.0, 0.25)
+		var dt := puff.create_tween()
+		# Stagger before bloom in.
+		puff.scale = Vector3.ZERO
+		dt.tween_interval(stagger)
+		# Bloom in.
+		dt.tween_property(puff, "scale", Vector3.ONE * base_scale, BLOOM_TIME)
+		# Drift upward for the remaining life.
+		dt.parallel().tween_property(puff, "position", base_pos + drift * TOTAL_LIFE, TOTAL_LIFE - stagger)
+		# Shrink out over the last portion of life. Scale to zero is the
+		# standard 3D fade pattern in this codebase — modulate is
+		# CanvasItem-only and does not exist on Node3D / MeshInstance3D.
+		var shrink_delay: float = FADE_START - stagger
+		if shrink_delay > 0.0:
+			dt.tween_interval(shrink_delay)
+		dt.tween_property(puff, "scale", Vector3.ZERO, maxf(TOTAL_LIFE - FADE_START, 0.1))
+		dt.finished.connect(func():
+			if is_instance_valid(puff):
+				puff.queue_free())
+
+
 # --- Ground scorch / burning pool --------------------------------------
 #
 # A Decal, not a flat MeshInstance3D laid on the ground. The difference
@@ -370,7 +465,10 @@ static func scorch(parent: Node3D, world_pos: Vector3, radius: float = 3.0,
 	# unbounded decals - each one frees itself.
 	var fade = d.create_tween()
 	fade.tween_interval(max(burn_seconds, 0.0))
-	fade.tween_property(d, "modulate:a", 0.0, fade_seconds)
+	# Decal inherits Node3D, which has no modulate property. Shrink to
+	# zero instead — same pattern as dust_cloud and every other Mesh-
+	# based VFX in this codebase.
+	fade.tween_property(d, "scale", Vector3.ZERO, fade_seconds)
 	fade.finished.connect(func():
 		if is_instance_valid(d):
 			d.queue_free())
@@ -394,7 +492,7 @@ static func crater(parent: Node3D, world_pos: Vector3, radius: float = 2.0,
 	d.name = "Crater"
 	var fade = d.create_tween()
 	fade.tween_interval(fade_seconds * 0.7)
-	fade.tween_property(d, "modulate:a", 0.0, fade_seconds * 0.3)
+	fade.tween_property(d, "scale", Vector3.ZERO, fade_seconds * 0.3)
 	fade.finished.connect(func():
 		if is_instance_valid(d):
 			d.queue_free())
@@ -443,4 +541,3 @@ static func _ground_decal(parent: Node3D, world_pos: Vector3, radius: float, set
 	d.global_position = world_pos
 	_register_decal(d)
 	return d
-

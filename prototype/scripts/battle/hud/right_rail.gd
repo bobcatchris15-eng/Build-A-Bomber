@@ -49,12 +49,16 @@ extends PanelContainer
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 
-# Width of the rail. Sized to fit the SelectionPanel's
-# custom_minimum_size (240) plus SPACE_MD breathing room on each side;
-# the SpecPlacard and CommandCard both fit at this width with no
-# wrapping, and the production bar's centred toolbox row is unaffected
-# because the rail lives in the right margin that row leaves free.
-const RAIL_WIDTH := 260.0
+# Width of the rail. Sized to fit the CommandCard (296 wide) plus
+# SPACE_MD breathing room on each side. The previous value (260) was
+# measured against the SelectionPanel alone - the CommandCard that
+# landed in PR2 is 296 wide (4 cells of 64 + 3 spacings of 8 + the
+# HUDPanel stylebox's 8+8 content margin = 296), and at 260 the card
+# overflowed the scroll by 36 pixels on the right. The rightmost
+# production toolbox ends at roughly x=1480 on a 1920 viewport, so a
+# 320-wide rail still lives in the unused right margin and the
+# centred toolbox row is unaffected.
+const RAIL_WIDTH := 320.0
 # Height of the top strip - referenced from BattleHUD.TOP_STRIP_HEIGHT
 # (battle_hud.gd:145) and copied here because the rail needs the same
 # offset to land directly below the minimap rather than guessing. If
@@ -81,13 +85,32 @@ func _init() -> void:
 	# minimap, which it does not.
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	_anchor_under_minimap()
+	# The body is built in _init, not _ready, on purpose. Godot 4 does
+	# NOT call _ready synchronously inside add_child() - it defers to
+	# the next idle frame - so a consumer that does
+	# `add_child(rail); rail.body().add_child(child)` would hit a null
+	# body. Building here, synchronously, makes body() work the moment
+	# the rail is constructed, which is the contract the BattleHUD's
+	# setup() relies on. The body is pure layout (VBoxContainer +
+	# ScrollContainer + VBoxContainer) and does not need the tree.
+	_build()
 
 
 # Anchors + offsets that place the rail directly under the minimap, on
-# the same right edge, with a SPACE_MD gap between them.
+# the same right edge, with a SPACE_MD gap between them, extending down
+# to the bottom of the HUD with a SPACE_MD breathing room.
 #
 # Extracted so a re-layout (e.g. a future minimap move) has one
 # single point of truth to update, not a four-offset block to chase.
+#
+# WHY BOTTOM-ANCHORED. The rail's contents are a VBox of a ScrollContainer
+# that holds SpecPlacard + CommandCard. A ScrollContainer's minimum
+# size is 0 by design (being smaller than its content is the entire
+# point of it), so a "content-driven" rail collapses to its panel
+# padding - eight pixels - and the placard/command card render but in
+# a window the player can never see. The rail MUST be bottom-anchored
+# to the HUD so it has a real extent; the ScrollContainer inside then
+# handles overflow as scrolling when the contents grow past that extent.
 func _anchor_under_minimap() -> void:
 	set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	# Right edge aligns with the minimap. Minimap uses -SPACE_MD; the
@@ -99,12 +122,14 @@ func _anchor_under_minimap() -> void:
 	# the exact y the minimap's bottom edge occupies, plus a deliberate
 	# gap so the two panels read as a stacked pair.
 	offset_top = Tokens.SPACE_MD + TOP_STRIP_HEIGHT + MINIMAP_SIZE + Tokens.SPACE_MD
-	# No explicit bottom anchor. The rail's height is content-driven,
-	# so a fixed bottom would either clip the scrollable content or
-	# fight the layout every time the viewport resized. The viewport
-	# fit happens in the parent battle_hud (which sizes itself to
-	# the viewport rect in fit_to_viewport()).
-	offset_bottom = offset_top
+	# Bottom: anchored to the HUD's bottom edge with a SPACE_MD inset,
+	# so the rail extends down to the screen bottom. The HUD sizes
+	# itself to the viewport in fit_to_viewport(); the parent layer is
+	# a CanvasLayer (no rect), so the HUD's rect IS the viewport, and
+	# this offset_bottom puts the rail's bottom at the visible
+	# bottom of the screen.
+	anchor_bottom = 1.0
+	offset_bottom = -Tokens.SPACE_MD
 
 
 # The container callers add their children to. Same pattern as
@@ -116,7 +141,9 @@ func body() -> VBoxContainer:
 
 
 func _ready() -> void:
-	_build()
+	# Body was built in _init so body() works synchronously. Nothing
+	# to do here.
+	pass
 
 
 # One Column VBoxContainer hosts the scroll wrapper. The vertical

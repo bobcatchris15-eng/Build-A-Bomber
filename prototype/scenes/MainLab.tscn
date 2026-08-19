@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3 uid="uid://cxabmain1234"]
+[gd_scene load_steps=14 format=3 uid="uid://cxabmain1234"]
 
 ; WHAT THIS IS, AND WHY
 ;
@@ -26,8 +26,19 @@
 ; DOF notes:
 ;   * CameraAttributesPractical is wired in below; designer_camera.gd
 ;     updates dof_blur_far_distance on zoom so the focal point tracks
-;     the model. dof_blur_amount is set high (0.25) for the heavy
-;     floor-blur the design wants.
+;     the model. dof_blur_amount is set high (0.25, well above Battle's
+;     0.06) because here the mat IS the subject to be blurred,
+;     not just a distant landscape band.
+;
+; WORKBENCH SWAP (2026-08-18): the player enters the Armor Station
+; (paint workspace) by clicking PAINT STATION in the toolbar. The
+; left parts bin swaps to a paint toolkit (UI_ArmorStationPanel),
+; the cutting mat environment hides and the wood-desktop + paint
+; supplies environment (PaintStationEnvironment) becomes visible,
+; and the model slides over to hover above the workbench. The
+; pan_blur overlay covers all three changes, so the player sees
+; a single "turn to the workbench" gesture instead of three
+; discrete ones. The reverse pan undoes the same swaps.
 
 [ext_resource type="Script" path="res://scripts/module_placer.gd" id="1_placer"]
 [ext_resource type="Script" path="res://scripts/designer_camera.gd" id="2_camera"]
@@ -37,6 +48,8 @@
 [ext_resource type="Script" path="res://scripts/drag_drop_manager.gd" id="6_drop"]
 [ext_resource type="Script" path="res://scripts/blueprint_manager.gd" id="7_blueprint"]
 [ext_resource type="Script" path="res://scripts/part_thumbnail.gd" id="8_thumbs"]
+[ext_resource type="PackedScene" uid="uid://cxabpaintsta01" path="res://scenes/PaintStationEnvironment.tscn" id="9_paint_station"]
+[ext_resource type="PackedScene" uid="uid://cxabarmstat01" path="res://scenes/UI_ArmorStationPanel.tscn" id="10_armor_station"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_x3k"]
 sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
@@ -91,6 +104,9 @@ shadow_enabled = true
 
 [node name="LabEnvironment" parent="." instance=ExtResource("3_lab_env")]
 
+[node name="PaintStationEnvironment" parent="." instance=ExtResource("9_paint_station")]
+visible = false
+
 [node name="Hull" type="StaticBody3D" parent="."]
 ; Visual hint only; the placer overwrites hull.position.y at runtime
 ; from stage_y_offset, snapping the centre to (0, 2.5, 0).
@@ -122,6 +138,9 @@ script = ExtResource("6_drop")
 [node name="UI_StatBlock" parent="." instance=ExtResource("4_ui")]
 
 [node name="UI_PartsMenu" parent="." instance=ExtResource("5_parts")]
+
+[node name="UI_ArmorStationPanel" parent="." instance=ExtResource("10_armor_station")]
+visible = false
 
 [node name="BlueprintManager" type="Node" parent="."]
 script = ExtResource("7_blueprint")

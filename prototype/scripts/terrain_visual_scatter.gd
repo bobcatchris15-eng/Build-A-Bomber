@@ -241,6 +241,7 @@ func _add_multimesh_batch(mesh: Mesh, material: Material, transforms: Array[Tran
 		mmi.visibility_range_end = vis_end
 		mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	mmi.name = batch_name
+	mmi.add_to_group("visual_scatter")
 	add_child(mmi)
 	return mmi
 

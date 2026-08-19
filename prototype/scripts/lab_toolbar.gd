@@ -10,6 +10,7 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const UIShell = preload("res://scripts/ui_shell.gd")
+const PanTransitionOverlayScript = preload("res://scripts/pan_transition.gd")
 
 var lab: Node
 
@@ -192,19 +193,122 @@ func _on_library_pressed():
 		lab.get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
 
 # Same scratch handoff as the Test Range: write the working design out, then
-# swap screens. The Armor Bay reads that file, paints it and writes it back, so
-# returning to the Lab restores a design whose armor has changed and whose
-# modules have not.
-func _on_armor_bay_pressed():
+# swap paint modes. The Armor Station reads the design, paints it and writes
+# the paint plan back; returning to the design bench restores a design whose
+# armor has changed and whose modules have not.
+#
+# IN-SCENE SWAP. The Armor Station is NOT a separate scene. It is a
+# sub-mode of MainLab that swaps the parts bin for a paint toolkit,
+# swaps the cutting mat for a wood-desktop workbench, and strips the
+# hull's modules so the player can paint bare facets. The swap is
+# hidden by a pan_blur smear (pan_transition.gd) so the player's eye
+# reads it as a single "turn to the workbench" gesture, not three
+# discrete changes. The reverse pan (triggered by the panel's
+# back_requested signal) undoes all three in lockstep.
+func _on_paint_station_pressed():
 	var root = lab.get_node("/root/MainLab")
 	var blueprint_manager = root.get_node_or_null("BlueprintManager") if root else null
 	if blueprint_manager:
 		blueprint_manager.save_scratch()
-	var router = lab.get_node_or_null("/root/SceneRouter")
-	if router:
-		router.goto("res://scenes/ArmorBay.tscn", "res://scenes/MainLab.tscn")
-	else:
-		lab.get_tree().change_scene_to_file("res://scenes/ArmorBay.tscn")
+	# The pan overlay - same one the Lab->Armor Bay swap used, just
+	# without the SceneRouter behind it. Lives on its own CanvasLayer
+	# below SceneRouter's 128, so any concurrent fade is on top of
+	# the smear (which is the correct visual: fade beats smear when
+	# both run at once).
+	var overlay_layer := CanvasLayer.new()
+	overlay_layer.layer = PanTransitionOverlayScript.CANVAS_LAYER
+	lab.add_child(overlay_layer)
+	var overlay := PanTransitionOverlayScript.new(
+		PanTransitionOverlayScript.Direction.FORWARD, 0.45)
+	overlay_layer.add_child(overlay)
+	overlay.play()
+	# At the smear's midpoint, the world is fully smeared and the swap
+	# is invisible. Do the three swaps in one frame.
+	await overlay.halfway
+	_apply_paint_mode_swap(root)
+	# The panel's back_requested signal drives the reverse swap. We
+	# connect once per entry; the panel is freed on exit, so a
+	# second entry rebinds. Tracking the connection also means the
+	# signal handler can identify which entry it belongs to if the
+	# player spam-clicks (each entry gets its own panel reference).
+	var armor_panel: Control = root.get_node_or_null("UI_ArmorStationPanel")
+	if armor_panel and not armor_panel.back_requested.is_connected(_on_armor_station_back):
+		armor_panel.back_requested.connect(_on_armor_station_back.bind(root))
+
+
+# The reverse pan + the three reverse swaps. Mirrors _on_armor_bay_pressed
+# but in reverse. Bound to UI_ArmorStationPanel.back_requested.
+func _on_armor_station_back(root: Node) -> void:
+	if not root or not is_instance_valid(root):
+		return
+	var blueprint_manager = root.get_node_or_null("BlueprintManager")
+	# Persist the paint plan back to scratch BEFORE the modules come
+	# back, because the placer's save_scratch() reads the live module
+	# list as part of the scratch dict.
+	var armor_panel: Control = root.get_node_or_null("UI_ArmorStationPanel")
+	if armor_panel and armor_panel.has_method("exit"):
+		armor_panel.exit()
+	if blueprint_manager:
+		blueprint_manager.save_scratch()
+	var overlay_layer := CanvasLayer.new()
+	overlay_layer.layer = PanTransitionOverlayScript.CANVAS_LAYER
+	lab.add_child(overlay_layer)
+	var overlay := PanTransitionOverlayScript.new(
+		PanTransitionOverlayScript.Direction.REVERSE, 0.45)
+	overlay_layer.add_child(overlay)
+	overlay.play()
+	await overlay.halfway
+	_apply_build_mode_swap(root)
+	# Disconnect the back signal so a re-entry rebinds cleanly.
+	if armor_panel and armor_panel.back_requested.is_connected(_on_armor_station_back):
+		armor_panel.back_requested.disconnect(_on_armor_station_back)
+
+
+# The three swaps. They all run in one frame behind the smear so the
+# player sees a single gesture, not three independent ones.
+func _apply_paint_mode_swap(root: Node) -> void:
+	var parts_menu: Control = root.get_node_or_null("UI_PartsMenu")
+	if parts_menu:
+		parts_menu.visible = false
+	var armor_panel: Control = root.get_node_or_null("UI_ArmorStationPanel")
+	if armor_panel:
+		armor_panel.visible = true
+	var lab_env: Node3D = root.get_node_or_null("LabEnvironment")
+	if lab_env:
+		lab_env.visible = false
+	var paint_env: Node3D = root.get_node_or_null("PaintStationEnvironment")
+	if paint_env:
+		paint_env.visible = true
+	# Tell the panel to take over. The placer strips modules here so
+	# the player can paint bare facets; the panel re-parents them
+	# back on exit.
+	var placer: Node = root.get_node_or_null(".") if root else null
+	if armor_panel and armor_panel.has_method("enter") and root:
+		var hull: Node3D = root.get_node_or_null("Hull")
+		armor_panel.enter(hull, root)
+		# The panel is a Control already in the tree (UI_ArmorStationPanel
+		# node). Its _unhandled_input fires for any unhandled mouse
+		# event; mouse_filter = MOUSE_FILTER_IGNORE on the panel root
+		# means the click falls through to the 3D viewport, and the
+		# panel's _unhandled_input claims the event with
+		# set_input_as_handled() so the placer doesn't try to operate
+		# on the (now-empty) hull.
+
+
+# The three reverse swaps. Also runs in one frame.
+func _apply_build_mode_swap(root: Node) -> void:
+	var parts_menu: Control = root.get_node_or_null("UI_PartsMenu")
+	if parts_menu:
+		parts_menu.visible = true
+	var armor_panel: Control = root.get_node_or_null("UI_ArmorStationPanel")
+	if armor_panel:
+		armor_panel.visible = false
+	var lab_env: Node3D = root.get_node_or_null("LabEnvironment")
+	if lab_env:
+		lab_env.visible = true
+	var paint_env: Node3D = root.get_node_or_null("PaintStationEnvironment")
+	if paint_env:
+		paint_env.visible = false
 
 
 func _on_test_pressed():
@@ -359,7 +463,7 @@ func _build_toolbar() -> void:
 	# the chassis stripped of modules and a camera that can reach the belly -
 	# neither of which this screen can offer without a mode gate it does not
 	# have. The scratch design is the handoff, exactly as with the Test Range.
-	_toolbar_button(row, "ARMOR BAY", "icon_armor", _on_armor_bay_pressed)
+	_toolbar_button(row, "ARMOR STATION", "icon_armor", _on_paint_station_pressed)
 
 	row.add_child(VSeparator.new())
 

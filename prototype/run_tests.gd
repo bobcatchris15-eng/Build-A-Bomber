@@ -424,6 +424,14 @@ const SUITE_ORDER := [
 	["battle_hud", "test_opening_a_queue_is_an_accordion"],
 	["battle_hud", "test_the_readout_tracks_progress"],
 	["battle_hud", "test_idle_toolboxes_retreat_and_busy_ones_do_not"],
+	# 2026-08-18: right_rail and selection_dock must build their
+	# bodies in _init, not _ready, so the BattleHUD's setup() can
+	# populate them synchronously. The widget-level tests
+	# (right_rail, ui_dock) run first because they fail with a
+	# tighter stack trace; the integration test runs last.
+	["battle_hud", "test_right_rail_body_is_synchronous_after_add_child"],
+	["battle_hud", "test_ui_dock_body_is_synchronous_after_add_child"],
+	["battle_hud", "test_battle_hud_chrome_parents_into_their_containers"],
 	["battle_perf", "test_heightmap_authority_removes_terrain_from_the_collision_mask"],
 	["battle_perf", "test_a_unit_with_no_controller_keeps_terrain_collision"],
 	["operations_setup", "test_operations_engagement_count_spans_three_to_twelve"],
