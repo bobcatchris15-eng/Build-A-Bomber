@@ -550,6 +550,7 @@ const SUITE_ORDER := [
 	["armor_paint", "test_paint_coverage_weight_and_round_trip"],
 	["armor_paint", "test_paint_reresolves_when_the_hull_mesh_changes"],
 	["armor_paint", "test_resolver_reads_the_painted_facet"],
+	["armor_paint", "test_slat_cage_geometry"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

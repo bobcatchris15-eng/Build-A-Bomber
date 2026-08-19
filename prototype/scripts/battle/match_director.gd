@@ -141,6 +141,16 @@ var production_hud: ProductionHUD = null
 var stats = null
 var _perf_hud: CanvasLayer = null
 var _perf_toast: CanvasLayer = null
+
+# SKIRMISH_PERF_TROUBLESHOOTING.md §10.1. Counters behind the once-a-second
+# `perf_sample` event in _process(). Rendered frames and physics ticks are
+# counted separately and on purpose: the 2026-08-19 capture ran the sim at
+# 14.56 Hz against a 30 Hz target while the screen managed 4.53 fps, and a
+# single "fps" number would have hidden that they are two different problems.
+var _render_frames: int = 0
+var _physics_frames: int = 0
+var _physics_frames_at_sample: int = 0
+var _perf_sample_accum: float = 0.0
 var admin_menu: Control = null
 var debug_overlay: Control = null
 
@@ -188,6 +198,13 @@ signal progress(fraction: float, label: String)
 # itself is fire-and-forget; this is the replay buffer.
 var _last_progress_fraction: float = 0.0
 var _last_progress_label: String = ""
+# The last (label, fraction) WRITTEN TO THE LOG. Separate from the live
+# replay buffer above because the bar's progress signal still fires on
+# every emission - the dedup is a log-line policy, not a UI policy. A
+# downstream subscriber reading the buffer for the build-hang dump still
+# gets the most recent value; only the JSONL timeline is deduped.
+var _last_logged_phase_label: String = ""
+var _last_logged_phase_fraction: float = -1.0
 
 # Public so a late subscriber can read the most recent progress
 # value on connect. The pair is the same dict-shaped read the
@@ -213,6 +230,20 @@ func _emit_progress(fraction: float, label: String) -> void:
 	_last_progress_label = label
 	progress.emit(fraction, label)
 	if BattleLogger.enabled and BattleLogger.log_path != "":
+		# Dedup on (label, fraction). The 2026-08-19 log in
+		# SKIRMISH_PERF_TROUBLESHOOTING.md §4 defect 5 had 308 build_phase
+		# events with "Surveying terrain" appearing ~20x at an identical
+		# timestamp - the deferred navmesh-bake callback at line ~848
+		# fires per-tile completion and the rounding makes many of those
+		# map to the same fraction. The bar's progress signal still fires
+		# (UI may want each step), but the log entry is a post-mortem
+		# timeline and a duplicate is noise. The progress itself is
+		# still recorded in _last_progress_fraction/label for the build
+		# hang dump.
+		if _last_logged_phase_label == label and _last_logged_phase_fraction == fraction:
+			return
+		_last_logged_phase_label = label
+		_last_logged_phase_fraction = fraction
 		# log_phase is a JSONL line with the same fraction/label the
 		# bar shows. Pairs with the BattleLogger's existing
 		# section/hitch events; grep for "build_phase" to extract
@@ -358,6 +389,24 @@ func _ready() -> void:
 	# log file is already open and writing). A hang shows up in the log
 	# because build_started already landed and the per-tick
 	# build_phase emissions after this point trace where the hang was.
+	# PERF_TESTING_RIG.md Fix A. Applied before _evaluate_logging_flags so
+	# BattleLogger.begin_match() can record the resolved tick rate in the
+	# MATCH_BEGIN header. Previously the assignment happened at line ~394
+	# (after the log was already open), so a Skirmish running at 30 Hz
+	# recorded `engine_ticks_per_second: 60` in the header - making Fix A
+	# look like it had failed when it had not. The
+	# 2026-08-19 log in SKIRMISH_PERF_TROUBLESHOOTING.md §4 defect 2
+	# is the one that named this. Test Range's rule set still has the
+	# default 60, so headless tooling is unchanged.
+	#
+	# The rule set is resolved above this point (see the match_config /
+	# _match_rule_set block at the top of _ready), so reading it here is
+	# the same read the assignment at ~line 394 used to do.
+	var tick_rate: int = _match_rule_set.physics_ticks_per_second if _match_rule_set != null else 60
+	Engine.physics_ticks_per_second = tick_rate
+	if tick_rate != 60:
+		print("[match_director] physics_ticks_per_second = %d" % tick_rate)
+
 	_evaluate_logging_flags()
 	_emit_progress(0.01, "Initializing command systems")
 	# PR9 (2026-08-17). Yield at the first emission so the deploy-gate
@@ -383,17 +432,13 @@ func _ready() -> void:
 	# because nothing in _ready above this point needed the rule set.
 	# The 2026-08-18 logging fix moved both resolutions to the top, so
 	# the local declaration and the duplicate assignments are gone.
-
-	# PERF_TESTING_RIG.md Fix A. Applied before any physics work, so all
-	# subsequent await physics_frame calls in this scene inherit the rate.
-	# Skirmish/Operations set 30; Test Range stays at 60 (rule-set default).
-	# The rule set is now loaded by the time we get here, so the
-	# workaround that read match_config.rule_set directly is no longer
-	# needed - we read _match_rule_set like everything else does.
-	var tick_rate: int = _match_rule_set.physics_ticks_per_second if _match_rule_set != null else 60
-	Engine.physics_ticks_per_second = tick_rate
-	if tick_rate != 60:
-		print("[match_director] physics_ticks_per_second = %d" % tick_rate)
+	#
+	# The Engine.physics_ticks_per_second assignment itself moved up
+	# too: see the block just before _evaluate_logging_flags(). It has
+	# to land before BattleLogger.begin_match() so the header's
+	# engine_ticks_per_second field is the rate the match will actually
+	# run at, not the engine default the director overwrote a moment
+	# later.
 
 	# Battle-system unification (Phase 3). The rule set, when set,
 	# picks which camera is `current`. Test Range activates the chase
@@ -813,17 +858,37 @@ func _scale_lighting_to_world() -> void:
 			if env_data.has("horizon_color"):
 				sky_mat.sky_horizon_color = env_data["horizon_color"]
 
+# SKIRMISH_PERF_TROUBLESHOOTING.md §10.6. This function IS the load screen:
+# across 631 runs on 2026-08-19 the "Sculpting terrain mesh" phase - which is
+# exactly `await _setup_terrain()` - averaged 21.2 s and peaked at 81.9 s, while
+# every other build phase came in under 0.4 s. The open question is why 7 runs
+# built lake_crossing in ~3 s against a 27.8 s median for the same map, with
+# concurrency, viewport and time-of-day all ruled out.
+#
+# The sub-steps below are timed to BattleLogger.log_build_step rather than to
+# Profiler sections because the director calls Profiler.reset() once the world
+# is ready, which discards anything recorded here (see battle_logger.gd's
+# log_build_step header). Each step is measured with its own wall clock so a
+# single capture says which one carries the 21 s - and, on a fast run, which one
+# is being skipped.
 func _setup_terrain() -> void:
 	# Build visual ground mesh and surrounding terrain skirt first
 	var ground := get_node_or_null("Ground")
 	if ground:
 		ground.position = Vector3.ZERO
+		var _t_mesh := Time.get_ticks_usec()
 		var generated: Dictionary = TerrainBuilder.build_ground_visual_mesh(current_map)
+		BattleLogger.log_build_step("terrain.ground_visual_mesh",
+			float(Time.get_ticks_usec() - _t_mesh) / 1000.0,
+			{"map_id": str(current_map.get("id", map_id))})
 		var mesh_inst: MeshInstance3D = ground.get_node_or_null("MeshInstance3D")
 		if mesh_inst:
 			mesh_inst.mesh = generated.mesh
+			var _t_mat := Time.get_ticks_usec()
 			mesh_inst.material_override = TerrainBuilder.build_ground_material_heightmap(
 				current_map.get("ground_color", Color(0.2, 0.26, 0.21)), current_map)
+			BattleLogger.log_build_step("terrain.ground_material",
+				float(Time.get_ticks_usec() - _t_mat) / 1000.0)
 		var col: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
 		if col:
 			col.shape = generated.shape
@@ -832,23 +897,61 @@ func _setup_terrain() -> void:
 	await get_tree().process_frame
 
 	var nav: Dictionary
+	var _t_holes := Time.get_ticks_usec()
 	var holes := _building_holes()
+	BattleLogger.log_build_step("terrain.building_holes",
+		float(Time.get_ticks_usec() - _t_holes) / 1000.0, {"holes": holes.size()})
+	var _t_nav := Time.get_ticks_usec()
 	if DisplayServer.get_name() in ["headless", "dummy"] or "--headless" in OS.get_cmdline_args() or "--headless" in OS.get_cmdline_user_args():
 		nav = TerrainBuilder.build_navmeshes(current_map, holes)
+		# The synchronous path is one call, so dispatch and wait are the same
+		# span. Logged under the same two names as the deferred path with the
+		# wait at zero, so a reader does not have to special-case headless.
+		BattleLogger.log_build_step("terrain.navmesh_build_sync",
+			float(Time.get_ticks_usec() - _t_nav) / 1000.0, {"tiles": 0})
 	else:
 		nav = TerrainBuilder.build_navmeshes_deferred(current_map, holes)
+		BattleLogger.log_build_step("terrain.navmesh_dispatch",
+			float(Time.get_ticks_usec() - _t_nav) / 1000.0,
+			{"tiles": nav["pending"].size()})
+		var _t_wait := Time.get_ticks_usec()
 		var remaining := {"n": nav["pending"].size()}
 		var total_tiles: int = remaining["n"]
 		var done: Dictionary = {"n": 0}
+		# SKIRMISH_PERF_TROUBLESHOOTING.md §5 Track A / §6 item 3.
+		# The per-tile completion callback runs on the main thread
+		# between physics ticks (it's a Callable scheduled from the
+		# Recast worker). The profiler's end_frame() fires from
+		# _physics_process, so any work the callback does is attributed
+		# to the next physics frame's <untimed> - which is why the
+		# 2026-08-19 log had 36 s of <untimed> in the first 90 frames
+		# and the 2026-08-19T19-00-03 capture had a 28.9 s boot stall
+		# that named nothing.
+		#
+		# The section is per-callback, so the readout answers the
+		# "one slow tile or N normal ones" question directly. If the
+		# mean is small and the worst is large, one tile is the cost
+		# and the fix is per-tile (coarsen, timeout, skip). If the
+		# mean is large, the callback itself is doing too much work
+		# per tile (e.g. shader compile, material upload).
 		for entry in nav["pending"]:
 			TerrainBuilder.bake_pending_entry_async(entry, nav["cell_size"], func():
+				var _t := Profiler.start()
 				done["n"] += 1
 				if total_tiles > 0:
 					var tile_frac: float = float(done["n"]) / float(total_tiles)
 					_emit_progress(0.10 + tile_frac * 0.45, "Surveying terrain")
-				remaining["n"] -= 1)
+				remaining["n"] -= 1
+				Profiler.stop("navmesh_boot_bake", _t))
 		while remaining["n"] > 0:
 			await get_tree().process_frame
+		# The wall-clock cost of waiting out the Recast workers, against the
+		# tile count that produced it. Dividing the two gives per-tile cost,
+		# which is what distinguishes "one pathological tile" from "this map
+		# simply has 400 of them" - and a ~3 s run from a ~28 s one.
+		BattleLogger.log_build_step("terrain.navmesh_wait",
+			float(Time.get_ticks_usec() - _t_wait) / 1000.0,
+			{"tiles": total_tiles})
 
 	ground_nav_map = nav.ground_map
 	water_nav_map = nav.water_map
@@ -860,7 +963,15 @@ func _setup_terrain() -> void:
 	_water_nav_region = nav.water_region
 	_deep_water_nav_region = nav.deep_water_region
 
+	var _t_vis := Time.get_ticks_usec()
 	TerrainBuilder.spawn_visuals(current_map, self)
+	# Ambient scatter. PROGRESS.md's 2026-08-10 entry measured ~1650
+	# ResourceNode instances on a 210-half map before the clustering change,
+	# so this is a credible second home for the load time even though the
+	# navmesh usually gets the blame.
+	BattleLogger.log_build_step("terrain.spawn_visuals",
+		float(Time.get_ticks_usec() - _t_vis) / 1000.0,
+		{"resource_nodes": get_tree().get_nodes_in_group("resource_nodes").size()})
 	await get_tree().process_frame
 
 
@@ -1460,15 +1571,26 @@ func place_hq_for_human(at: Vector3) -> bool:
 
 func _place_structure(kind: String, structure_team: int, at: Vector3, under_construction: bool = false) -> Structure:
 	var _prof := Profiler.start()
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §10.8 item 1. `place_structure` measured
+	# 47.9 ms mean / 175 ms worst across 56 calls and is a visible hitch on every
+	# building placed. The four sub-sections below split it into the candidates
+	# named in §5 Track C - the structure's own setup (mesh + collider), the dust
+	# VFX, the terrain-prop displacement walk, and the visibility-range walk -
+	# so the next capture names one instead of re-listing all four.
+	var _t_setup := Profiler.start()
 	var s := StructureScript.new()
 	add_child(s)
 	s.position = Vector3(at.x, terrain_height_at(at), at.z)
 	s.setup(kind, structure_team)
 	s.died.connect(_on_structure_died)
+	Profiler.stop("place.setup", _t_setup)
 	# Dust cloud masks terrain intersection at the building's edges.
 	var foot: Vector2 = Vector2(s.footprint.x, s.footprint.z)
+	var _t_dust := Profiler.start()
 	VFXEffectsScript.dust_cloud(self, s.position, foot * 0.5)
+	Profiler.stop("place.dust", _t_dust)
 	# Displace overlapping terrain props (greebles, grass, rocks).
+	var _t_props := Profiler.start()
 	_displace_terrain_props(at, foot * 0.5)
 	# Dock bays (refinery harvest pads) extend well past the core footprint.
 	# Displace terrain props under each bay so pads don't sit on grass.
@@ -1477,6 +1599,7 @@ func _place_structure(kind: String, structure_team: int, at: Vector3, under_cons
 		var bay_half := Vector2(4.0, 5.0)
 		for bay_off in bays:
 			_displace_terrain_props(at + Vector3(bay_off.x, bay_off.y, bay_off.z), bay_half)
+	Profiler.stop("place.displace_props", _t_props)
 	# structure_built is logged on both paths (under construction and
 	# finished) so the post-match report can correlate structure deaths
 	# with the spawn that made them. The HUD's signal listener is still
@@ -1489,7 +1612,9 @@ func _place_structure(kind: String, structure_team: int, at: Vector3, under_cons
 	# viewport is what was paying for itself in the perf log. The
 	# fade width is 6 m here (a bit wider than units) because a
 	# building popping in is more visible than a unit popping in.
+	var _t_vis := Profiler.start()
 	_apply_structure_visibility_range(s)
+	Profiler.stop("place.visibility_range", _t_vis)
 	Profiler.stop("place_structure", _prof)
 	# A new live structure can change which designs pass the tech-tree gate
 	# (a fresh tech_lab unlocks every tech_lab-gated design, a fresh refinery
@@ -1734,9 +1859,38 @@ func _mark_navmesh_dirty(urgent: bool = true) -> void:
 	# the main thread (Recast dispatches the actual bake to a
 	# worker internally, so the main thread blocks on the result,
 	# not on the work).
+	#
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §6 item 3 / defect 4. The
+	# async (lazy) path's dispatch and callback have sections
+	# ("navmesh_dispatch" / "navmesh_callback"), but the URGENT
+	# path - the one that fires on every structure placement,
+	# which is the base-building case the user is hitting - had
+	# none. It landed in <untimed>, which is what made
+	# navmesh_dispatch + navmesh_callback record zero frames in
+	# the 2026-08-19 log while structures_built sat at 36. The
+	# two sections below name the two halves: the Recast bake
+	# itself, and the flow-field + per-unit repath walk that
+	# runs immediately after. If the bake is the cost, it shows
+	# up in navmesh_sync_rebake; if the per-unit repath is, it
+	# shows up in navmesh_invalidate. Either was previously
+	# invisible.
+	var _t_bake := Profiler.start()
+	var _bake_wall := Time.get_ticks_usec()
 	TerrainBuilder.rebake_ground_amphibious_tiles_sync(
 		current_map, new_holes, _ground_nav_regions, _amphibious_nav_regions,
 		_nav_tile_rects, affected)
+	Profiler.stop("navmesh_sync_rebake", _t_bake)
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §10.3. The section total already says
+	# this costs 272 ms mean / 626 ms worst and 29 s of a 259 s match. What it
+	# cannot say is WHY there were 107 of them for 59 structures. Logging the
+	# affected-tile count and the hole count per rebake separates the two
+	# possible answers: if `tiles` is small and the count is ~2x structures,
+	# the rebakes are duplicated and the fix is de-duplication; if `tiles`
+	# varies widely, they are legitimately distinct and the fix is coalescing
+	# a build burst into one bake.
+	BattleLogger.log_nav_rebake("structure_placed",
+		float(Time.get_ticks_usec() - _bake_wall) / 1000.0,
+		{"tiles": affected.size(), "holes": new_holes.size()})
 	_nav_rebake_pending = false
 	# Flow fields are sampled against the old passability, and
 	# every live agent is following a path through what may now
@@ -1744,10 +1898,12 @@ func _mark_navmesh_dirty(urgent: bool = true) -> void:
 	# second half of the urgent-path fix: even if a unit's
 	# existing path is now invalid, the new navmesh is in
 	# place so the next path request goes around.
+	var _t_inv := Profiler.start()
 	flow_fields.invalidate()
 	for u in get_tree().get_nodes_in_group("units"):
 		if is_instance_valid(u) and not u.is_dead and u.has_method("request_repath"):
 			u.request_repath()
+	Profiler.stop("navmesh_invalidate", _t_inv)
 
 
 # Runs the deferred bake once the map has been quiet for NAV_LAZY_REBAKE_DELAY.
@@ -2880,7 +3036,21 @@ func _is_inside_player_zone(p: Vector3) -> bool:
 # A blueprint-built turret. Same lifecycle as any other structure - it carves the
 # navmesh, it dies through the same signal, it ends the match if it were an HQ -
 # it just gets its geometry and its guns from a design instead of the catalog.
+# SKIRMISH_PERF_TROUBLESHOOTING.md §10.4. This was the one placement path with
+# NO profiler section at all: `_place_structure` has had `place_structure` since
+# the first pass, but a defence built by the AI went through here and was timed
+# nowhere - it just inflated `commander.execute`. `setup_from_blueprint` runs the
+# full blueprint reconstruction (hull mesh, modules, materials), which is the
+# same work `spawn.assemble` measures at ~120 ms on a unit, so this is a strong
+# candidate for the missing ~200 ms per AI decision.
 func _place_defence(blueprint: Dictionary, structure_team: int, at: Vector3, under_construction: bool = false) -> Structure:
+	var _t := Profiler.start()
+	var out := _place_defence_impl(blueprint, structure_team, at, under_construction)
+	Profiler.stop("place_defence", _t)
+	return out
+
+
+func _place_defence_impl(blueprint: Dictionary, structure_team: int, at: Vector3, under_construction: bool = false) -> Structure:
 	var s := StructureScript.new()
 	add_child(s)
 	s.position = Vector3(at.x, terrain_height_at(at), at.z)
@@ -2902,6 +3072,13 @@ func _place_defence(blueprint: Dictionary, structure_team: int, at: Vector3, und
 
 # Queue a defensive structure from the AI's roster.
 func ai_build_defence(for_team: int) -> bool:
+	var _t := Profiler.start()
+	var ok := _ai_build_defence_impl(for_team)
+	Profiler.stop("ai.build_defence", _t)
+	return ok
+
+
+func _ai_build_defence_impl(for_team: int) -> bool:
 	var design := ai_design_for_role(for_team, "defense")
 	if design.is_empty():
 		return false
@@ -2932,9 +3109,23 @@ func ai_build_defence(for_team: int) -> bool:
 # player's rules rather than to a looser private copy. It previously had one: a
 # bounds/water/overlap check that ignored buildable-area adjacency entirely, and
 # would happily site a power plant six rings out in open field.
+#
+# SKIRMISH_PERF_TROUBLESHOOTING.md §6 item 2. The 2026-08-19 log had
+# `place_structure` at 44.5 ms mean / 179 ms worst across 35 invocations,
+# AND `commander` at 30-120 ms per decision - the two land on the same
+# frame often enough to compound into 300+ ms hitches. Profiling this
+# function inside its own section (rather than relying on the outer
+# `place_structure` wrapper) is what proves whether _ai_placement_site
+# is the cost in the placement path or _displace_terrain_props /
+# _apply_structure_visibility_range are. It is also visible as a
+# `commander.execute` blow-up when the AI makes a placement, which
+# the Track B instrumentation will catch.
 func _ai_placement_site(for_team: int, kind: String, blueprint: Dictionary = {}) -> Vector3:
-	return PlacementServiceScript.find_site(
+	var _t := Profiler.start()
+	var site := PlacementServiceScript.find_site(
 		self, for_team, _team_home(for_team), kind, blueprint)
+	Profiler.stop("ai_placement_site", _t)
+	return site
 
 
 func _on_unit_completed(for_team: int, queue_name: String, blueprint: Dictionary) -> void:
@@ -3000,6 +3191,13 @@ func apply_explosion(at: Vector3, radius: float, damage: float, source: Node) ->
 # mounts rather than from a hand-curated per-role list. A design the player built
 # would count as anti-air if it carries a CIWS.
 func ai_build_unit(for_team: int, role: String) -> bool:
+	var _t := Profiler.start()
+	var ok := _ai_build_unit_impl(for_team, role)
+	Profiler.stop("ai.build_unit", _t)
+	return ok
+
+
+func _ai_build_unit_impl(for_team: int, role: String) -> bool:
 	var pick: Dictionary = ai_design_for_role(for_team, role)
 	# No design fills the role - fall back to any VEHICLE rather than stalling.
 	# An AI that refuses to build because it has no dedicated AA is worse than
@@ -3047,7 +3245,19 @@ static func is_defence_design(blueprint: Dictionary) -> bool:
 # Foundations are excluded from every MOBILE role, including the catch-all
 # "general" - design_fills_role() answers true for anything there, so without
 # this filter the AI could pick a gun turret as its general-purpose tank.
+# Timed because it is the one thing EVERY ai_build_* path calls, sometimes
+# twice (ai_build_unit falls back to "general"), and ai_can_build_role calls it
+# again on top - so a modest per-call cost multiplies through the whole
+# decision. design_fills_role() walks a blueprint's module list per candidate,
+# which is not free on a large roster.
 func ai_design_for_role(for_team: int, role: String) -> Dictionary:
+	var _t := Profiler.start()
+	var out := _ai_design_for_role_impl(for_team, role)
+	Profiler.stop("ai.design_for_role", _t)
+	return out
+
+
+func _ai_design_for_role_impl(_for_team: int, role: String) -> Dictionary:
 	var pool: Array = enemy_roster if not enemy_roster.is_empty() else roster
 	var want_defence := role == "defense"
 	for design in pool:
@@ -3081,6 +3291,13 @@ func ai_can_build_role(for_team: int, role: String) -> bool:
 # builds whatever unblocks the harvester first - an economy that cannot start is
 # the only truly fatal state - and otherwise fills in the tiers it lacks.
 func ai_build_production(for_team: int) -> bool:
+	var _t := Profiler.start()
+	var ok := _ai_build_production_impl(for_team)
+	Profiler.stop("ai.build_production", _t)
+	return ok
+
+
+func _ai_build_production_impl(for_team: int) -> bool:
 	var wanted := ""
 	var harvester := ai_design_for_role(for_team, "harvester")
 	if not harvester.is_empty() and not ai_can_build_role(for_team, "harvester"):
@@ -3103,7 +3320,30 @@ func _manufactory_for_queue(queue_name: String) -> String:
 	return kinds[0] if not kinds.is_empty() else "light_manufactory"
 
 
+# SKIRMISH_PERF_TROUBLESHOOTING.md §10.4. `commander.execute` measured 250 ms
+# mean / 490 ms worst across 71 calls, and the two sections already nested
+# inside it - `place_structure` (47.9 ms) and `ai_placement_site` (3.3 ms) -
+# account for barely a fifth of that. The remaining ~200 ms per call is
+# somewhere in these four ai_build_* entry points, and until each one is timed
+# separately there is no way to tell which.
+#
+# WHY A WRAPPER RATHER THAN INLINE TOKENS. Every one of these functions has
+# several early `return`s, and GDScript has no defer - an inline
+# Profiler.start()/stop() pair would silently leak the token on whichever path
+# a future edit adds. The public name keeps the profiler pairing, the _impl
+# holds the original body unchanged.
+#
+# These NEST (ai_build_production calls ai_build_structure; all of them call
+# ai_design_for_role), so their totals must not be added together. Read each
+# against its own call count.
 func ai_build_structure(for_team: int, kind: String) -> bool:
+	var _t := Profiler.start()
+	var ok := _ai_build_structure_impl(for_team, kind)
+	Profiler.stop("ai.build_structure", _t)
+	return ok
+
+
+func _ai_build_structure_impl(for_team: int, kind: String) -> bool:
 	var stats := BuildingCatalogScript.get_stats(kind)
 	if stats.is_empty():
 		return false
@@ -3234,9 +3474,72 @@ func get_nearby_damageable(pos: Vector3, radius: float) -> Array:
 
 # --- Per-tick bookkeeping ----------------------------------------------------
 
+# SKIRMISH_PERF_TROUBLESHOOTING.md §6 item 4. The profiler's end_frame()
+# fires from _physics_process, so a render frame without a physics tick
+# has no measurement - its work is attributed to the next physics frame
+# and lands in <untimed>. At 30 Hz physics / 60 Hz render that is half
+# the frames.
+#
+# This _process is intentionally a NO-OP. It exists so the gap between
+# physics ticks is captured under its own section, and so any future
+# non-physics work the director picks up (deferred callbacks, a HUD
+# pulse, an animation tick) is instrumented by the call site rather
+# than silently landing in <untimed>. If the section is consistently
+# near-zero, the gap is rendering and the answer to Track A "what is
+# <untimed> doing" is the renderer (Track E territory). If it spikes,
+# a deferred callable or signal is the cause and the next step is to
+# find it.
+func _process(delta: float) -> void:
+	var _t := Profiler.start()
+	Profiler.stop("render_frame", _t)
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §10.1. The single most important number
+	# in the 2026-08-19T19-57-23 capture - 4.53 rendered fps against a 14.56 Hz
+	# sim on a 30 Hz target - was not written in the log anywhere. It had to be
+	# recovered by counting `render_frame` section entries and dividing by the
+	# match duration. This counts rendered frames directly and emits one
+	# `perf_sample` per second of REAL time, so the log states the frame rate
+	# rather than implying it.
+	#
+	# _process is the right home for the counter: it runs once per rendered
+	# frame, where _physics_process runs on the fixed tick and cannot see
+	# dropped frames at all. Both rates are reported together because the gap
+	# between them is the diagnosis - a sim at half its target with the screen
+	# at a third of the sim means the engine is spending its time somewhere
+	# neither loop is measuring.
+	_render_frames += 1
+	_perf_sample_accum += delta
+	if _perf_sample_accum < 1.0:
+		return
+	if not BattleLogger.enabled:
+		_perf_sample_accum = 0.0
+		_render_frames = 0
+		_physics_frames_at_sample = _physics_frames
+		return
+	var phys: int = _physics_frames - _physics_frames_at_sample
+	BattleLogger.log_perf_sample({
+		"render_fps": snappedf(float(_render_frames) / _perf_sample_accum, 0.01),
+		"physics_hz": snappedf(float(phys) / _perf_sample_accum, 0.01),
+		"physics_hz_target": Engine.physics_ticks_per_second,
+		"draw_calls": int(Performance.get_monitor(
+			Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+		"render_objects": int(Performance.get_monitor(
+			Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)),
+		"nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+		"units_alive": get_tree().get_nodes_in_group("units").size(),
+		"structures_alive": get_tree().get_nodes_in_group("structures").size(),
+	})
+	_perf_sample_accum = 0.0
+	_render_frames = 0
+	_physics_frames_at_sample = _physics_frames
+
+
 func _physics_process(delta: float) -> void:
 	if game_over:
 		return
+	# Counted before any early-out below so the rate in `perf_sample` is the
+	# rate the engine actually ran the tick at, not the rate a subsystem
+	# happened to be enabled for. See §10.1.
+	_physics_frames += 1
 	var _t_audio := Profiler.start()
 	_tick_audio(delta)
 	Profiler.stop("audio", _t_audio)
@@ -3265,9 +3568,14 @@ func _physics_process(delta: float) -> void:
 		production.tick(delta)
 		Profiler.stop("production", t)
 	if commander:
-		t = Profiler.start()
+		# 2026-08-19. The commander internally splits its tick into
+		# read_state / decide / execute and each is profiled there
+		# (commander.gd:tick). The single-bucket `commander` section
+		# used to live here; it was retired because 446 ms in a single
+		# bucket is a measurement, not an answer - which of the three
+		# sub-steps owns the cost is what the 2026-08-19 plan asked for.
+		# SKIRMISH_PERF_TROUBLESHOOTING.md §5 Track B, §6 item 1.
 		commander.tick(delta)
-		Profiler.stop("commander", t)
 	# Squads tick every frame while the commander re-decides every couple of
 	# seconds: the macro choice is slow, but a squad deciding to retreat cannot
 	# wait two seconds for the next decision window.

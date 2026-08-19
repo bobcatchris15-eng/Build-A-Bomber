@@ -294,6 +294,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	_p = Profiler.start()
 	_create_selection_ring(base_size)
 	Profiler.stop("spawn.selection_ring", _p)
+	_log_collider_census()
 	_detect_harvester(controller)
 	_create_cargo_bar(base_size)
 
@@ -1454,6 +1455,55 @@ func _update_cargo_bar() -> void:
 	# reads as a shrinking bar rather than a filling one.
 	_cargo_fill.scale.x = maxf(frac, 0.0001)
 	_cargo_fill.position.x = -(_cargo_bar_width * 0.5) * (1.0 - frac)
+
+# SKIRMISH_PERF_TROUBLESHOOTING.md §10.2. `unit.move_and_slide` is the single
+# largest line item in a real match - 44 s of a 259 s capture, ~4 ms per unit
+# per frame at 15 units - and its per-unit cost rose ~46x between 2 and 15
+# units. That superlinearity points at the broadphase rather than at any
+# GDScript here: Godot generates one collision pair PER SHAPE per interacting
+# body, so N units at S shapes each is an N x N x S problem, and S is the term
+# nothing in the log currently reports.
+#
+# S is not derivable from the blueprint either. unit_assembly._add_hull_collider
+# resolves through three tiers (authored convex fit / box fallback) and the
+# module hit volumes are capped at BATTLE_MODULE_MAX_SHAPES per module, so the
+# only honest way to know the number is to count the nodes after assembly.
+#
+# Logged once per spawn, not per frame. Cost is one subtree walk on a frame that
+# already spends ~125 ms assembling the unit.
+func _log_collider_census() -> void:
+	if not BattleLogger.enabled:
+		return
+	var body_shapes := 0
+	for c in get_children():
+		if c is CollisionShape3D:
+			body_shapes += 1
+	# Module hit volumes are Area3Ds parented under the hull, each carrying its
+	# own shapes. Counted separately from the body's own shapes because they sit
+	# on a different physics layer (BattleLayers.UNIT_MODULES) and are queried by
+	# weapons rather than by movement - so a fix that removes them helps hit
+	# detection cost, not move_and_slide, and the two must not be conflated.
+	var area_count := 0
+	var area_shapes := 0
+	var stack: Array = [self]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children():
+			stack.append(c)
+		if n is Area3D:
+			area_count += 1
+			for c in n.get_children():
+				if c is CollisionShape3D:
+					area_shapes += 1
+	BattleLogger.log_unit_colliders(name, team, {
+		"design": str(blueprint.get("name", "")),
+		"hull": _hull_type,
+		"body_shapes": body_shapes,
+		"module_areas": area_count,
+		"module_shapes": area_shapes,
+		"total_shapes": body_shapes + area_shapes,
+	})
+
 
 func _create_selection_ring(base_size: Vector3) -> void:
 	var ring := MeshInstance3D.new()

@@ -29,6 +29,12 @@ const C = preload("res://scripts/battle/ai/considerations.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
+# SKIRMISH_PERF_TROUBLESHOOTING.md §5 Track B / §6 item 1.
+# Profiler sections are added INSIDE this class so the per-step
+# breakdown is captured even when the caller forgets to time
+# commander.tick() as a whole. Cost when disabled: one static bool
+# read per call site (battle_profiler.gd's contract).
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 
 # Reused verbatim from enemy_ai.gd:109-118. The CLASSIFICATION was sound - these
 # really are the roster's answers to air and to armour - it was only its consumer
@@ -169,11 +175,32 @@ func tick(delta: float) -> void:
 		return
 	_timer = 0.0
 	_dirty = false
+
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §6 item 1. The 2026-08-19
+	# log showed `commander` as a single bucket at 8048 ms total and
+	# 446 ms worst. Without the split, the answer to "why is the
+	# re-decide slow" is a number, not a place to look. The three
+	# sections here convert that bucket into per-step totals so a
+	# single capture answers Track B before any commander code is
+	# touched. read_state walks every unit and structure on both
+	# teams; decide runs the consideration fan-out; execute is
+	# thin (a single ai_* call) and is profiled so a regression
+	# inside _ai_placement_site, which is the Track C suspect, is
+	# visible as commander.execute blowing up rather than as
+	# "commander" being slow.
+	var _t_state := Profiler.start()
 	var state := read_state()
+	Profiler.stop("commander.read_state", _t_state)
+
+	var _t_decide := Profiler.start()
 	var choice := decide(state)
+	Profiler.stop("commander.decide", _t_decide)
+
 	_last_action = choice
 	if choice >= 0:
+		var _t_execute := Profiler.start()
 		_execute(choice, state)
+		Profiler.stop("commander.execute", _t_execute)
 
 
 # --- Perception --------------------------------------------------------------

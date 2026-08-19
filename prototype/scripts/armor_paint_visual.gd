@@ -108,12 +108,89 @@ static func rebuild(hull: Node3D, mesh_inst: MeshInstance3D) -> int:
 		# carries that frame and NOTHING else. Any inherited scale or offset here
 		# is the bug that made these read as floating slabs.
 		inst.transform = Transform3D(frame["basis"], frame["center"])
-		inst.material_override = _armor_material(
-			str(entry.get("material", "")), hull_tint)
+		# Cage-mode types (slat) get a flat StandardMaterial3D: the bars carry
+		# the visual structure themselves, and the armor shader's normal-map
+		# pipeline would be wrong on a closed box's per-face UVs. Skin types
+		# stay on the shader, which is where the per-material signature lives.
+		var material_id := str(entry.get("material", ""))
+		if _is_cage_type(type_id):
+			inst.material_override = _cage_material(material_id, hull_tint)
+		else:
+			inst.material_override = _armor_material(material_id, hull_tint)
 		inst.set_meta("armor_facet_id", int(fid))
 		holder.add_child(inst)
 		built += 1
 	return built
+
+
+# True for paint types whose `mode` in HullFacets.SURFACE_PATTERNS is "cage".
+# Kept as a single source of truth in hull_facets.gd and read here rather than
+# mirrored as another constant - if a future type joins the cage path, only
+# the SURFACE_PATTERNS row needs editing.
+static func _is_cage_type(type_id: String) -> bool:
+	if type_id == "":
+		return false
+	# Late-bind the lookup to avoid a preload cycle: armor_paint_visual.gd is
+	# preloaded by hull_facets.gd's caller chain, and re-preloading it would
+	# fail at parse time.
+	var patterns: Dictionary = _surface_patterns()
+	return str(patterns.get(type_id, {}).get("mode", "skin")) == "cage"
+
+
+static func _surface_patterns() -> Dictionary:
+	# Cache the lookup so the per-facet rebuild does not re-evaluate it for
+	# every painted facet.
+	if _patterns_cache.is_empty():
+		var script = load("res://scripts/hull_facets.gd")
+		if script != null and script.has_method("get_surface_patterns"):
+			_patterns_cache = script.get_surface_patterns()
+	return _patterns_cache
+
+
+static var _patterns_cache: Dictionary = {}
+
+
+# The cage's material: a flat StandardMaterial3D with the armor's per-material
+# finish (tint + metallic + roughness) but no normal map, no shader. The bars
+# themselves are the visual structure, so the per-material height field in
+# armor_surface.gdshader would be wrong on a closed box's per-face UVs.
+#
+# Cached per (material, tint) for the same reason _armor_material is: a hull
+# paints up to ~20 facets and otherwise each one would allocate an identical
+# StandardMaterial3D.
+static var _cage_mat_cache: Dictionary = {}
+
+
+static func _cage_material(material_id: String, hull_tint: Color) -> StandardMaterial3D:
+	var key := "cage|%s|%.3f_%.3f_%.3f" % [material_id, hull_tint.r, hull_tint.g, hull_tint.b]
+	if _cage_mat_cache.has(key):
+		return _cage_mat_cache[key]
+	var f: Dictionary = MATERIAL_FINISH.get(material_id, MATERIAL_FINISH["hardened_steel"])
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = _tint_for(material_id, hull_tint)
+	mat.metallic = float(f["metallic"])
+	mat.roughness = float(f["roughness"])
+	# No texture, no normal map. The bars are the visual.
+	# Back-face culling is the Godot 4 default (CULL_BACK) but we set it
+	# EXPLICITLY here: the bar is a closed box and the user has reported
+	# what reads as "I can see through the bar to its opposite face",
+	# which is exactly the failure mode of an inherited CULL_DISABLED
+	# or a mirrored-basis normal that gets unculled on the back side.
+	# Pinning CULL_BACK at the material level means a mesh-resource
+	# default or a viewport setting cannot flip it under us.
+	mat.cull_mode = BaseMaterial3D.CULL_BACK
+	# Depth test on (the default), depth write on (the default). The bar
+	# is fully opaque and must occlude anything behind it.
+	mat.no_depth_test = false
+	# No transparency. The bar is solid.
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	_cage_mat_cache[key] = mat
+	return mat
+
+
+static func clear_material_cache() -> void:
+	_mat_cache.clear()
+	_cage_mat_cache.clear()
 
 
 # The hull's rendered livery colour, so armor paint reads as a surface
@@ -200,10 +277,6 @@ static func _armor_material(material_id: String, hull_tint: Color) -> ShaderMate
 	mat.set_shader_parameter("seam", float(f["seam"]))
 	_mat_cache[key] = mat
 	return mat
-
-
-static func clear_material_cache() -> void:
-	_mat_cache.clear()
 
 
 static func _tint_for(material_id: String, hull_tint: Color) -> Color:

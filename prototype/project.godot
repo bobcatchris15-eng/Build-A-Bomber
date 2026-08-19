@@ -61,4 +61,3 @@ theme/custom="res://resources/bomber_theme.tres"
 
 textures/vram_compression/import_etc2_astc=true
 anti_aliasing/quality/msaa_3d=2
-"2D MSAA is enabled while there is no 2D contentwarningatboot.#Cheapfix,freeperfheadroom.anti_aliasing/quality/msaa_2d"=0

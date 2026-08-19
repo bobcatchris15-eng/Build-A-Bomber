@@ -235,6 +235,69 @@ static func structure_died(kind: String, team: int) -> void:
 	_write_event("structure_death", {"kind": kind, "team": team})
 
 
+# --- Build-time and runtime instrumentation (SKIRMISH_PERF_TROUBLESHOOTING.md §10) ---
+#
+# WHY THESE ARE EVENTS AND NOT PROFILER SECTIONS. Everything that runs before
+# `world_is_ready` is wiped by the `Profiler.reset()` the director does at the
+# end of the build, so a section opened during the world build never reaches
+# `sections()`. That is why `navmesh_boot_bake` records real time and then
+# appears nowhere in the summary. Build-phase costs therefore have to be written
+# straight to the log as their own event, at the moment they are measured.
+#
+# `build_step` answers §10.6: time-to-Ready is p50 15.7 s / max 83.6 s and
+# essentially all of it is one phase ("Sculpting terrain mesh"), but 7 runs did
+# the same map in ~3 s. Sub-step timings are what separate "the mesh build is
+# slow" from "the navmesh wait is slow" from "something is being skipped".
+static func log_build_step(step: String, ms: float, detail: Dictionary = {}) -> void:
+	if not enabled or _file == null:
+		return
+	var payload := {"step": step, "ms": snappedf(ms, 0.001)}
+	for k in detail:
+		payload[k] = detail[k]
+	_write_event("build_step", payload)
+
+
+# §10.1. The rendered frame rate was only derivable by counting `render_frame`
+# section entries and dividing by the match duration - which works, but means
+# the single most important number in the log (4.53 fps) is not written
+# anywhere in it. This states it directly, once a second, alongside the
+# renderer counters that explain it.
+static func log_perf_sample(detail: Dictionary) -> void:
+	if not enabled or _file == null:
+		return
+	_write_event("perf_sample", detail)
+
+
+# §10.2 support. `unit.move_and_slide` costs ~4 ms per unit per frame at 15
+# units and scales superlinearly, which points at collision geometry. Godot's
+# broadphase generates one pair PER SHAPE per interacting body, so the shape
+# COUNT per unit is the number that predicts the cost - and it is not knowable
+# from the blueprint alone, because it depends on which collider tier the hull
+# resolved to. Logged once per spawn so a capture can be read as
+# "N units x S shapes" instead of "N units".
+static func log_unit_colliders(unit_name: String, team: int, detail: Dictionary) -> void:
+	if not enabled or _file == null:
+		return
+	var payload := {"unit": unit_name, "team": team}
+	for k in detail:
+		payload[k] = detail[k]
+	_write_event("unit_colliders", payload)
+
+
+# §10.3. 107 synchronous Recast rebakes for 59 structures - roughly two per
+# placement - at 272 ms mean. Whether that is "two placements each needing one"
+# or "one placement triggering two" decides whether the fix is coalescing or
+# de-duplication, and the trigger plus the affected-tile count is what tells
+# them apart.
+static func log_nav_rebake(reason: String, ms: float, detail: Dictionary = {}) -> void:
+	if not enabled or _file == null:
+		return
+	var payload := {"reason": reason, "ms": snappedf(ms, 0.001)}
+	for k in detail:
+		payload[k] = detail[k]
+	_write_event("nav_rebake", payload)
+
+
 static func beacon_fired(unit_name: String, fog_point: Vector3) -> void:
 	if not enabled or _file == null:
 		return

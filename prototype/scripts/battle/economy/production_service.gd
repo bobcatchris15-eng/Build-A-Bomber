@@ -25,6 +25,16 @@ extends RefCounted
 
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
+# SKIRMISH_PERF_TROUBLESHOOTING.md §10.8 item 6. `production` measured 4.27 ms
+# mean on EVERY frame with a 429 ms worst, and reached 9.2 s of CPU inside one
+# 30 s window late in the 2026-08-19T19-57-23 match. That is far too much for
+# what is mostly arithmetic over a handful of queue entries, so the cost is in
+# the parts that leave this file: the completion emits (which spawn a unit or
+# finish a building) and the exit-blocker query (which walks the scene).
+# Reached through preload rather than the `BattleProfiler` class name, matching
+# match_director.gd - see profile_battle_run.gd's header for why the two must
+# not be mixed.
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 
 # Percent of normal build time, indexed by (contributing structures - 1), held at
 # the last entry for 4 or more. Straight from RA.
@@ -258,43 +268,60 @@ func _tick_queue(team: int, queue_name: String, delta: float) -> void:
 		return
 
 	# --- Complete ---
+	# Everything below runs on the ONE frame a job finishes, which is exactly
+	# the shape of `production`'s 429 ms worst against its 0.19 ms mean. Split
+	# into structure-completion and unit-completion because they leave this
+	# file through different doors: finish_construction() rebuilds a building's
+	# mesh, unit_completed spawns a vehicle (already timed as `spawn_unit`, and
+	# it nests inside this).
 	job["done"] = true
 	if job["is_structure"]:
+		var _t_cs := Profiler.start()
 		var s_node = job.get("structure_node", null)
 		if s_node != null and is_instance_valid(s_node):
 			s_node.finish_construction()
 			q.pop_front()
 			structure_ready.emit(team, queue_name, job)
 			queue_changed.emit(team, queue_name)
+			Profiler.stop("production.complete_structure", _t_cs)
 			return
 		structure_ready.emit(team, queue_name, job)
+		Profiler.stop("production.complete_structure", _t_cs)
 		return
 
 	# A finished unit waits for a clear exit rather than spawning on top of
 	# whatever is parked there. Blockers get a real nudge instead of being
 	# silently phased through.
+	#
+	# 2026-08-19: this block was DUPLICATED verbatim, twice in a row, with no
+	# return between the copies (present in HEAD as of 9474128c, lines 274-296).
+	# The second copy re-ran on every unit completion: a second q.pop_front()
+	# discarded the NEXT queued job without building it, and a second
+	# unit_completed.emit() spawned a second vehicle from the same blueprint.
+	# The duplicate is removed here. It is a behaviour change rather than pure
+	# instrumentation, and it was not optional for this pass - profiling tokens
+	# around one copy while the other ran unwrapped would have reported half the
+	# real cost. `spawn_unit` measured 124.8 ms mean, so the phantom spawn was
+	# also paying that a second time per unit.
+	#
+	# Timed separately: this runs on EVERY frame a completed unit is waiting
+	# for its exit to clear, not just once, and it asks the world to walk its
+	# unit list. A factory blocked for several seconds pays this repeatedly,
+	# which makes it a candidate for the steady 4.27 ms rather than the spike.
 	if _world != null and _world.has_method("exit_blockers_for"):
+		var _t_bl := Profiler.start()
 		var blockers: Array = _world.exit_blockers_for(team, queue_name)
 		if not blockers.is_empty():
 			if _world.has_method("nudge_blockers"):
 				_world.nudge_blockers(team, queue_name, blockers)
+			Profiler.stop("production.exit_blockers", _t_bl)
 			return
+		Profiler.stop("production.exit_blockers", _t_bl)
+	var _t_cu := Profiler.start()
 	q.pop_front()
 	unit_completed.emit(team, queue_name, job["blueprint"])
 	queue_changed.emit(team, queue_name)
-
-	# A finished unit waits for a clear exit rather than spawning on top of
-	# whatever is parked there. Blockers get a real nudge instead of being
-	# silently phased through.
-	if _world != null and _world.has_method("exit_blockers_for"):
-		var blockers: Array = _world.exit_blockers_for(team, queue_name)
-		if not blockers.is_empty():
-			if _world.has_method("nudge_blockers"):
-				_world.nudge_blockers(team, queue_name, blockers)
-			return
-	q.pop_front()
-	unit_completed.emit(team, queue_name, job["blueprint"])
-	queue_changed.emit(team, queue_name)
+	Profiler.stop("production.complete_unit", _t_cu)
 
 
 # --- Contributors ------------------------------------------------------------

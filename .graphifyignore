@@ -33,6 +33,8 @@ prototype/python*/
 *.gif
 *.glb
 *.gltf
+# UI vector assets — game loads these at runtime, not architecture
+*.svg
 *.blend
 *.fbx
 *.obj

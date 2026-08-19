@@ -37,6 +37,14 @@ extends RefCounted
 const HullMaterialBuilder = preload("res://scripts/hull_material_builder.gd")
 const LiveryScript = preload("res://scripts/livery.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
+# SKIRMISH_PERF_TROUBLESHOOTING.md §6 item 3. The PackedScene load is
+# the only synchronous resource load on the structure-placement path.
+# ResourceLoader's internal cache makes repeat loads cheap; the first
+# instance of a kind is the cost. If the captured section shows this
+# dominating the <untimed> stall on a structure_built frame, the fix
+# is a deploy-gate prewarm of the GLB roster rather than per-call
+# instrumentation.
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 
 const MODEL_DIR := "res://assets/models/buildings/%s.glb"
 
@@ -57,7 +65,15 @@ static func build(parent: Node3D, kind: String, footprint: Vector3,
 	var path := MODEL_DIR % kind
 	if not ResourceLoader.exists(path):
 		return null
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §6 item 3. First-instance-of-a-kind
+	# cost. ResourceLoader's internal cache makes repeat calls cheap, so
+	# this section's mean will be near-zero and its worst will be the
+	# real cost - which is what we want. Reading it next to
+	# structure_built events in the log answers the "is the building GLB
+	# load the stall" question without further investigation.
+	var _t := Profiler.start()
 	var packed := load(path) as PackedScene
+	Profiler.stop("battle_resource_load", _t)
 	if packed == null:
 		return null
 	var inst := packed.instantiate() as Node3D

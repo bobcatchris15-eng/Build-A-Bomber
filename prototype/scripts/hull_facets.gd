@@ -615,44 +615,107 @@ static func measure(mesh_inst: MeshInstance3D, hull_type_id: String, local_pos: 
 	}
 
 
-# Per-type surface pattern. Every armor type is the SAME thin shell of the
-# facet - the type shows in how that shell is cut, not in anything added on top
-# of it.
+# Per-type surface pattern. Not every paintable armor type wants the same
+# geometry: plate, composite, foam, and the steel/carbon/titanium *finishes* on
+# top of them read as surface treatments on the hull, but slat is a real cage
+# and ceramic is a tile with thickness, and the difference is load-bearing.
 #
-# This replaces an attempt to tile each type's authored .glb across the facet
-# and displace its vertices onto the surface. It preserved the authored art
-# exactly and was wrong anyway: slat_armor's authored form is a cage that STANDS
-# OFF the hull, so wrapping it produced a bulky block hanging off the face
-# rather than armor on it (Chris, 2026-08-17). The differentiating read at RTS
-# zoom is the pattern - bars, tiles, plate - and a pattern costs no thickness.
+# Each entry now has a `mode`:
+#
+#   skin  - the existing flat cut-and-lift pipeline. The type shows in how the
+#           skin is cut and in the shader's height field; the geometry itself
+#           sits 4mm off the hull and has no rim.
+#   cage  - emit N thin closed boxes standing off the hull, one per bar. Used
+#           by slat armor, where the daylight BETWEEN the bars is the actual
+#           protection mechanism - a 2D cut in a flat plane would not read as
+#           the same thing. See _cage() for why this is not the failed
+#           2026-08-17 cage attempt.
+#   skin+lift - the skin path with a per-type `lift_override` (e.g. 10mm for
+#           ceramic tiles). Used when the type needs the tile to clearly stand
+#           proud of the hull but the surface is still essentially flat - a
+#           bigger lift alone reads correctly because the tile top is a
+#           uniform plane, so a rim is not required for the read.
+#
+# The skin fields remain:
 #
 #   period - pattern repeat in metres along the facet's tangent axes
 #   duty   - fraction of each period that is solid (1.0 = no gaps at all)
 #   axis   - 0 strips along U, 1 strips along V, 2 a grid in both
+#
+# The cage fields are:
+#
+#   bar_thickness - bar width across the U axis in metres. The gap between bars
+#                   is (period - bar_thickness); duty is unused in cage mode.
+#   bar_height    - how far the bar's top sits above the hull, in metres. The
+#                   real-world number is 25-50cm; 0.30 reads correctly at RTS
+#                   camera distance and is the lower bound of "obviously a
+#                   cage" rather than a thick plate.
+#
+# The skin+lift field is:
+#
+#   lift_override - skin's z-fight epsilon is replaced with this absolute lift,
+#                   in metres. Used so a ceramic tile clearly reads as a tile
+#                   on top of the hull, not as part of its surface.
 const SURFACE_PATTERNS := {
 	# Plain plate: no cuts. Corner bolts and the like are the authored mesh's
 	# business and are deliberately not reproduced here - a solid shell is the
 	# honest read for "additional plate".
-	"armor_plating": {"period": 0.0, "duty": 1.0, "axis": 0},
+	"armor_plating": {"period": 0.0, "duty": 1.0, "axis": 0, "mode": "skin"},
 	# A cage of bars with real gaps between them. The gaps ARE the module: slat
 	# armor works by catching a shaped charge early, and a slat plate with no
-	# daylight through it is just plate.
-	"slat_armor": {"period": 0.42, "duty": 0.52, "axis": 0},
+	# daylight through it is just plate. Mode "cage" because the daylight must
+	# be a 3D gap you can see through, not a 2D cut in a flat plane - the
+	# physics of standoff munitions demands the visible standoff, and a
+	# 0.25-0.50m gap is what reads as "this stops shaped charges" rather than
+	# "this is plate with slots in it".
+	"slat_armor": {"period": 0.42, "duty": 0.52, "axis": 0, "mode": "cage",
+		"bar_thickness": 0.05, "bar_height": 0.30},
 	# Discrete panels with a visible seam between them.
-	"spaced_composite": {"period": 0.85, "duty": 0.86, "axis": 2},
+	"spaced_composite": {"period": 0.85, "duty": 0.86, "axis": 2, "mode": "skin"},
 	# A fine mosaic - the smallest period here, because tiles only read as
-	# tiles when there are many of them.
-	"ablative_foam": {"period": 0.46, "duty": 0.88, "axis": 2},
+	# tiles when there are many of them. Mode "skin+lift" because ceramic
+	# tiles are physically thin plates on the outside of a backing layer;
+	# 10mm of lift makes the tile clearly stand proud of the hull without
+	# adding a rim or turning it into a 3D block.
+	"ablative_foam": {"period": 0.46, "duty": 0.88, "axis": 2, "mode": "skin+lift",
+		"lift_override": 0.010},
 }
+
+
+# Public accessor for the SURFACE_PATTERNS dict. Exists so consumers outside
+# this file (armor_paint_visual.gd, mainly) can ask "is this type cage or
+# skin" without re-declaring the dict or preloading this script in a way
+# that would close a preload cycle. The return is a live reference; callers
+# that mutate it would be evil, but the const declaration here is the
+# language-level signal not to.
+static func get_surface_patterns() -> Dictionary:
+	return SURFACE_PATTERNS
 
 # Builds the armor plate for a facet, in the MODULE's local frame (X/Z tangent,
 # +Y the facet normal, origin at `center`).
 #
-# THE PLATE IS A SKIN, NOT A SLAB. It is the facet's own triangles lifted off
+# THE PLATE IS A SKIN FOR MOST TYPES. armor_plating, spaced_composite and
+# ablative_foam are surface treatments: the facet's own triangles lifted off
 # the hull by a hair - just enough to clear z-fighting - and cut by the type's
-# pattern. It adds no thickness, has no rim and has no underside, because armor
-# here is a surface treatment on a face the player can see, not a box bolted to
-# it (Chris, 2026-08-17).
+# pattern. They add no thickness, have no rim and have no underside, because
+# armor here is a surface treatment on a face the player can see, not a box
+# bolted to it (Chris, 2026-08-17).
+#
+# SLAT AND CERAMIC ARE NOT. The per-type `mode` in SURFACE_PATTERNS picks the
+# path:
+#
+#   * slat_armor uses the cage path (see _cage). The cage is a row of closed
+#     boxes standing off the hull by `bar_height` with daylight between them.
+#     The daylight IS the protection mechanism: a slat plate with no visible
+#     standoff is just plate with slots cut into it, and a shaped charge
+#     detonating on the slat's surface has the same focused jet at the hull as
+#     a hit on bare armor. The visible 0.30m gap is what reads as "this
+#     defeats standoff munitions" and is what makes the design choice honest.
+#   * ablative_foam uses the skin path with a per-type `lift_override` (10mm
+#     vs 4mm). The tile is still flat; the bigger lift just makes it read as
+#     a tile ON the hull rather than a continuation of it. A real rim is not
+#     added because the tile top is a uniform plane, so an oblique view that
+#     would expose the underside is rare at RTS camera distance.
 #
 # Three earlier versions are worth naming, because each was rejected for a
 # different reason and it would be easy to re-derive any of them:
@@ -660,18 +723,27 @@ const SURFACE_PATTERNS := {
 #   * A FLAT extruded polygon. Wrong on curvature - measured, only 3/10 facets
 #     on the Brenntal are flat to within 5cm and the worst departs 2.30m, so a
 #     flat plate is buried at the centre and floating at the rim.
-#   * The type's AUTHORED MESH wrapped onto the surface. Faithful to the art and
-#     still wrong: slat_armor's authored form is a cage that STANDS OFF the
-#     hull, so wrapping it reproduced that standoff as a block hanging off the
-#     face.
+#   * The type's AUTHORED MESH wrapped onto the surface. Faithful to the art
+#     and still wrong: slat_armor's authored form is a full-vehicle cage, so
+#     wrapping it produced a bulky block hanging off the face rather than
+#     armor on it. The 2026-08-17 cage attempt is THIS failure mode. The
+#     current cage is NOT this version: it emits N bars at the bar's own
+#     scale (bar_thickness wide, bar_height tall), one per pattern period, so
+#     the geometry is the cage's BARS, not a wrapped full-cage mesh. Do not
+#     regress to wrapping `slat_armor.glb` here.
 #   * A conformed SLAB with real thickness and a rim. Correct in shape, still
 #     read as a thick blocky plate sitting on the hull rather than as armor on
-#     its surface.
+#     its surface. This is what the cage's `bar_height` could become if it
+#     grew to e.g. 0.5m of solid plate material - keep bar_height in the
+#     0.25-0.40m range so the bars stay bars, not thick plates.
 #
-# CRISP EDGES ARE A PROPERTY OF THE NORMAL FIELD. The lift runs along corner
-# normals averaged only across neighbours within CREASE_SPLIT_DEG, so a chamfer
-# keeps a distinct normal each side and the skin turns the corner instead of
-# rolling over it.
+# CRISP EDGES ARE A PROPERTY OF THE NORMAL FIELD. The skin's lift runs along
+# corner normals averaged only across neighbours within CREASE_SPLIT_DEG, so a
+# chamfer keeps a distinct normal each side and the skin turns the corner
+# instead of rolling over it. The cage does not need this - each bar's
+# bottom, top and side faces are flat by construction (set per face in
+# _emit_cage_bar), and the bars do not conform to the chamfer anyway, so
+# crease-splitting would only soften the bar's edges.
 # MATERIAL RELIEF: the surface treatment that tells two materials apart.
 #
 # Colour cannot carry this. The player's livery repaints the whole vehicle, so
@@ -718,14 +790,304 @@ static func build_plate(mesh_inst: MeshInstance3D, hull_type_id: String, facet_i
 	var surface := _facet_surface(mesh_inst, hull_type_id, facet_id, center, frame)
 	if surface.is_empty():
 		return null
+	var pattern: Dictionary = SURFACE_PATTERNS.get(type_id,
+		{"period": 0.0, "duty": 1.0, "axis": 0, "mode": "skin"})
+	var mode: String = str(pattern.get("mode", "skin"))
+	# Cage mode skips the lift / relief / shader-height pipeline entirely -
+	# the bars carry the visual structure themselves, and applying the skin's
+	# z-fight lift to their bases is correct, but their height comes from
+	# `bar_height`, not from any relief or per-material offset.
+	if mode == "cage":
+		return _cage(surface, pattern, thickness)
 	var bounds: Rect2 = surface["bounds"]
 	# Scaled to the facet so it stays invisible on a 2m scout panel and on a 12m
 	# airship flank alike, with an absolute floor for tiny facets. Same reasoning
 	# (and the same order of magnitude) as HullProjection's decal offset.
+	# A per-type `lift_override` (e.g. 10mm for ceramic tiles) is a FLOOR, not
+	# an exact value: the type sits at LEAST this far above the hull, but on
+	# a large facet the bounds-scaled lift may already be higher (z-fight
+	# epsilon scales with the facet), in which case we keep that instead of
+	# letting the ceramic end up BELOW the skin it is supposed to be sitting
+	# ON TOP of. The order is: bounds-scaled z-fight epsilon, then floor by
+	# the type's minimum visible offset, then capped by nothing - the type's
+	# value is the "this far is the minimum read" line, not "this far is the
+	# exact offset".
 	var lift: float = maxf(bounds.size.length() * PLATE_LIFT_FRACTION, PLATE_LIFT_MIN)
-	var pattern: Dictionary = SURFACE_PATTERNS.get(type_id, {"period": 0.0, "duty": 1.0, "axis": 0})
+	if pattern.has("lift_override"):
+		lift = maxf(lift, float(pattern["lift_override"]))
 	var relief: Dictionary = MATERIAL_RELIEF.get(material_id, MATERIAL_RELIEF["hardened_steel"])
 	return _skin(surface, lift, pattern, relief, thickness)
+
+
+# The cage: a row of closed rectangular prisms, one per period, where each
+# bar's footprint is the HULL's surface clipped to the bar's U range
+# (Sutherland-Hodgman against the bar's two parallel U planes - the same
+# _clip_slab the skin pattern uses) and extruded vertically by `bar_height`.
+#
+# Slat armor is a real 3D cage, not a 2D pattern with slots cut into it - the
+# daylight between the bars is the entire protection mechanism, and a slat
+# plate with no visible standoff is just plate. The 2026-08-17 attempt to wrap
+# slat_armor.glb onto a facet failed because the WHOLE CAGE was wrapped, at
+# vehicle scale, as a single bulky block. The 2026-08-19 attempt to use the
+# full facet's V range per bar failed for the OPPOSITE reason: a bar at one
+# U position ran the full V length of the facet, so on any non-rectangular
+# facet (a tumblehome flank, a chamfered nose) the bar projected past the
+# hull's actual edge in world space - the V tangent in module-local space
+# points at an angle, and the full V range sits outside the hull's surface
+# at most U positions. The current version uses the V range of the
+# triangles that overlap the bar's U range, computed per bar.
+#
+# WHY A CLOSED RECTANGULAR PRISM, NOT A LOFTED CURTAIN. The curtain-walls
+# version (one wall quad per polyline segment of the cut surface) produced
+# a chaotic zigzag of triangles at very different angles - the polyline
+# segments came from individual facet triangles that were at slightly
+# different angles even within one facet. A real slat bar is a clean
+# rectangular prism, and the cage reads as a cage because the bars have
+# flat tops and flat sides.
+#
+# WHY A STRAIGHT BOX, NOT A LOFTED TOP. Earlier versions (2026-08-17)
+# lifted the bar by the facet's max |Y| (its curvature) so the bar's
+# bottom sat at or above the highest point of the hull's surface in
+# the facet, the way the hull's surface "grew out of" the bar. On a
+# curved facet that produced visibly FLOATING bars - measured ~0.5m
+# above the hull's mean plane on the Brenntal's tumblehome, which the
+# user described as "a separate object hovering in front of the hull,
+# not as armor on it". The user accepted the bar's bottom clipping
+# into the hull at curvature peaks ("they would be attached there"),
+# so the current version drops the curvature lift and uses the
+# z-fight epsilon only. The bar's bottom is a few cm above the hull's
+# mean plane; the hull's surface can push up through the bar's bottom
+# at curvature peaks and that is the intended "growing out of" read,
+# not a bug. The cage's visual structure (a row of solid bars standing
+# off the hull) is unchanged.
+#
+# Triangle cost is 12 triangles per bar (6 faces, 2 triangles each) - a
+# clean closed box. A 2m × 2m facet at 0.42m period is ~5 bars = 60
+# triangles, comparable to the rejected curtain-walls path. The bars
+# share no vertex with the hull and have no CollisionObject3D parent, so
+# the hull's collision shape is unaffected.
+static func _cage(surface: Dictionary, pattern: Dictionary, thickness: float = 1.0) -> ArrayMesh:
+	var bounds: Rect2 = surface["bounds"]
+	var period: float = float(pattern.get("period", 0.42))
+	# Default `bar_thickness` to the legacy `period * duty` so a row that
+	# only knew duty still gets something sensible. With explicit
+	# bar_thickness, duty is unused in cage mode - the gap is (period - thickness).
+	var bar_thickness: float = float(pattern.get("bar_thickness",
+		period * float(pattern.get("duty", 0.5))))
+	var bar_height: float = float(pattern.get("bar_height", 0.30))
+	if period <= 0.0 or bar_thickness <= 0.0 or bar_height <= 0.0:
+		return null
+
+	# Z-fight lift on the bar's bottom: same 4mm the skin uses, so the cut
+	# surface's bottom doesn't fuse with the hull at the lift's Y level.
+	# The bar_height is the additional standoff above that - 0.30m is the
+	# lower bound of "obviously a cage" rather than a thick plate.
+	#
+	# On a curved hull, the bar (a flat-topped box) needs an additional
+	# lift equal to the facet's max curvature: the bar sits at the facet's
+	# mean plane in module-local space, and a flat-bottomed box would
+	# otherwise sink below the hull at the curvature peaks. The user is
+	# OK with the bar's bottom "growing out of" the hull, but it should
+	# not disappear into the hull at the high points.
+	var tris: Array = surface["tris"]
+	var normals: Array = surface["normals"]
+	var u_lo: float = bounds.position.x
+	var u_hi: float = bounds.position.x + bounds.size.x
+	# The bar's V range is NOT the full facet's V range. Each bar gets the
+	# V range of the hull's surface in its OWN U slice, computed by
+	# clipping the facet's triangles to the bar's U range (see _bar_v_range
+	# below). On a rectangular facet where every triangle spans the full
+	# V range, every bar gets the full V range anyway; on a tumblehome
+	# flank or any facet where the V extent varies along U, each bar gets
+	# a V range that matches the hull's surface at that U position, so no
+	# bar projects past the hull's actual edge in world space.
+	#
+	# Lift is the z-fight epsilon ONLY - no curvature compensation. The
+	# earlier `max(bounds_scaled_lift, max_curvature)` formula lifted the
+	# bar by the facet's highest |Y| of any triangle, so on a curved
+	# facet the bars floated visibly above the hull (measured: ~0.5m on
+	# the Brenntal's tumblehome, the bars read as a separate object
+	# hovering in front of the hull, not as armor on it). The user
+	# accepted the bar's bottom clipping into the hull at curvature
+	# peaks ("they would be attached there"), so the right answer is to
+	# drop the curvature lift and let the bar sit at the hull's mean
+	# plane with the bar's bottom a few cm above the lowest point of the
+	# hull's surface. The hull's curvature at the bar's U slice can
+	# still push the hull's surface up through the bar's bottom - that
+	# is the intended "growing out of" read, not a bug.
+	var lift: float = maxf(bounds.size.length() * PLATE_LIFT_FRACTION,
+		PLATE_LIFT_MIN)
+	var y_top: float = lift + bar_height
+
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var emitted := 0
+	# Walk the bar positions left to right along U. A bar that runs past the
+	# facet's U extent is clipped to it, so a partial leading/trailing bar is
+	# possible but never a bar that overshoots into the next facet.
+	var u_pos: float = u_lo
+	while u_pos < u_hi:
+		var bar_u_lo: float = u_pos
+		var bar_u_hi: float = minf(u_pos + bar_thickness, u_hi)
+		if bar_u_hi > bar_u_lo + 1e-4:
+			var v_extent := _bar_v_range(tris, bar_u_lo, bar_u_hi)
+			if v_extent.y > v_extent.x + 1e-4:
+				emitted += _emit_cage_bar(st, bar_u_lo, bar_u_hi,
+					v_extent.x, v_extent.y, lift, y_top)
+		u_pos += period
+	if emitted == 0:
+		return null
+	# Normals were set per face inside _emit_cage_bar; tangents are unnecessary
+	# for the cage's StandardMaterial3D (no normal map, no shader UVs).
+	return st.commit()
+
+
+# V range of the hull's surface clipped to a bar's U range.
+#
+# Why this exists: a bar that runs the FULL facet's V range projects past
+# the hull's actual edge on any non-rectangular facet. The module-local
+# V tangent points at an angle in world space, so a V range covering the
+# whole facet sits outside the hull's surface at most U positions. The
+# fix is to ask "where does the hull's surface actually exist in this
+# bar's U slice?" and use THAT V range.
+#
+# Done per bar, not once, because each bar has a different U position
+# and a different V range as a result. A bar near the U end has a V
+# range biased toward that end; a bar across the middle has the V
+# range of the triangles that span the middle.
+#
+# The clip is Sutherland-Hodgman against the bar's two parallel U
+# planes (the same _clip_slab the skin pattern uses), reusing the
+# existing infrastructure rather than introducing a new shape math.
+# Triangles entirely outside the bar's U range are quick-rejected by
+# their bounding U; triangles that overlap are clipped to the bar's
+# U range and their surviving polygon's V extent contributes to the
+# bar's V range.
+static func _bar_v_range(tris: Array, bar_u_lo: float, bar_u_hi: float) -> Vector2:
+	var v_lo: float = INF
+	var v_hi: float = -INF
+	for tri in tris:
+		# Quick reject: triangle entirely outside the bar's U range.
+		# Computing the triangle's U range is 3 minf/maxf calls on
+		# already-loaded vertices, much cheaper than building a poly
+		# and running _clip_slab for nothing.
+		var tri_u_lo: float = minf(tri[0].x, minf(tri[1].x, tri[2].x))
+		var tri_u_hi: float = maxf(tri[0].x, maxf(tri[1].x, tri[2].x))
+		if tri_u_hi < bar_u_lo or tri_u_lo > bar_u_hi:
+			continue
+		# Clip the triangle to the bar's U range and aggregate the
+		# surviving polygon's V extent. Triangles with fewer than 3
+		# surviving vertices contribute nothing (a line or a point
+		# has no V extent).
+		var poly := []
+		for v in tri:
+			poly.append({"p": v, "n": Vector3.UP})
+		var clipped: Array = _clip_slab(poly, 0, bar_u_lo, bar_u_hi)
+		if clipped.size() < 3:
+			continue
+		for v in clipped:
+			var vz: float = (v["p"] as Vector3).z
+			if vz < v_lo: v_lo = vz
+			if vz > v_hi: v_hi = vz
+	return Vector2(v_lo, v_hi)
+
+
+# Build one cage bar as a single closed rectangular prism.
+#
+# The bar's footprint is a rectangle (U_lo..U_hi) × (V_lo..V_hi) in
+# module-local space, and the bar's height is `bar_height` along the
+# facet normal (Y). Six faces, twelve triangles, thirty-six vertices
+# per bar, identical triangle count for every bar in the cage (which
+# is what makes the test count and visual rhythm predictable).
+#
+# A REAL SLAT BAR IS A CLEAN RECTANGULAR PRISM, not a stitched-together
+# curtain. The previous "curtain walls" version emitted one quad per
+# polyline segment of the hull's surface, and the segments came from
+# individual triangles of the facet at very different angles. The
+# result was a chaotic zigzag of triangles pointing in every direction
+# - which is what the screenshot showed, and is what the user described
+# as the lateral surfaces inside the slat. Real slat bars are flat-
+# topped, flat-walled, and read as a single shape.
+#
+# The hull's curvature is NOT followed exactly here: the bar sits at
+# the mean Y of the cut surface (which is the facet's plane in
+# module-local), with the hull's surface curving around it. The
+# caller lifts the bar by `max(bounds_scaled_lift, max_curvature)` so
+# the bar's bottom is always at or above the highest point of the
+# hull's surface on this facet - the bar never pokes through at a
+# curvature peak.
+static func _emit_cage_bar(st: SurfaceTool,
+		u_lo: float, u_hi: float, v_lo: float, v_hi: float,
+		lift: float, y_top: float) -> int:
+	# Eight corners of the bar, named by (U_bit, Y_bit, V_bit).
+	var p000 := Vector3(u_lo, lift, v_lo)
+	var p100 := Vector3(u_hi, lift, v_lo)
+	var p010 := Vector3(u_lo, y_top, v_lo)
+	var p110 := Vector3(u_hi, y_top, v_lo)
+	var p001 := Vector3(u_lo, lift, v_hi)
+	var p101 := Vector3(u_hi, lift, v_hi)
+	var p011 := Vector3(u_lo, y_top, v_hi)
+	var p111 := Vector3(u_hi, y_top, v_hi)
+	var emitted := 0
+	# Six faces, each listed as a quad in CCW-from-outside corner order.
+	# _emit_cage_quad reverses that when it writes the triangles, because
+	# Godot's front face is CLOCKWISE - see the note on that function.
+	#
+	# GODOT 4 VECTOR3 CONSTANTS: Vector3.FORWARD = (0, 0, -1) and
+	# Vector3.BACK = (0, 0, +1). A previous version of this code wrote
+	# `Vector3.FORWARD` for the +Z face and `Vector3.BACK` for the -Z
+	# face, which is REVERSED: the WINDINGS were correct (CCW from the
+	# outside) so back-face culling was fine, but the stored normals
+	# pointed the wrong way and the bar's V-end faces rendered as
+	# unlit black under a default sun-direction light, which read as
+	# "I can see through the bar to its dark interior". The +Z face
+	# uses Vector3.BACK and the -Z face uses Vector3.FORWARD, matching
+	# the actual face directions.
+	# +Y top: corners in CCW order looking down from +Y are p010, p011, p111, p110.
+	emitted += _emit_cage_quad(st, p010, p011, p111, p110, Vector3.UP)
+	# -Y bottom: CCW from below (looking up at the -Y face) is p000, p100, p101, p001.
+	emitted += _emit_cage_quad(st, p000, p100, p101, p001, Vector3.DOWN)
+	# +X right: CCW from +X (looking at the right side) is p100, p110, p111, p101.
+	emitted += _emit_cage_quad(st, p100, p110, p111, p101, Vector3.RIGHT)
+	# -X left: CCW from -X (looking at the left side) is p001, p011, p010, p000.
+	emitted += _emit_cage_quad(st, p001, p011, p010, p000, Vector3.LEFT)
+	# +Z front (the V_hi end of the bar): CCW from +Z is p001, p101, p111, p011.
+	# Normal is (0, 0, +1) = Vector3.BACK. See the GODOT 4 VECTOR3 CONSTANTS
+	# note above.
+	emitted += _emit_cage_quad(st, p001, p101, p111, p011, Vector3.BACK)
+	# -Z back (the V_lo end of the bar): CCW from -Z is p000, p010, p110, p100.
+	# Normal is (0, 0, -1) = Vector3.FORWARD. See the GODOT 4 VECTOR3 CONSTANTS
+	# note above.
+	emitted += _emit_cage_quad(st, p000, p010, p110, p100, Vector3.FORWARD)
+	return emitted
+
+
+# Emit a single quad as 2 triangles with the given normal. The 4 vertices
+# a, b, c, d are given in CCW order from outside (looking back along the
+# normal), which is how the caller lists them because that is how the
+# corners of a box read on paper.
+#
+# GODOT'S FRONT FACE IS CLOCKWISE, so this emits them REVERSED. Verified
+# against Godot 4.7.1's own BoxMesh: for all 12 of its triangles,
+# (b - a).cross(c - a) points AGAINST the stored normal, i.e. a correctly
+# facing Godot triangle is wound clockwise as seen from outside. The
+# earlier version added the corners in the listed CCW order, so every one
+# of the cage's six faces was back-facing: back-face culling removed the
+# near wall of each bar and left the far wall's interior visible, which
+# is the "I can see straight through the slat to its opposite face"
+# report. Note that the stored normals were and are correct - only the
+# winding was inverted, which is why lighting looked plausible and the
+# bug read as transparency rather than as inside-out geometry.
+#
+# Reversing here rather than at the six call sites keeps the readable
+# CCW corner lists (p010, p011, p111, p110 ... ) intact and means there
+# is exactly one place that knows about the winding convention.
+static func _emit_cage_quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
+		n: Vector3) -> int:
+	for v in [c, b, a, d, c, a]:
+		st.set_normal(n)
+		st.add_vertex(v)
+	return 6
 
 
 # The skin: the facet's triangles lifted by `lift` and cut by the pattern.

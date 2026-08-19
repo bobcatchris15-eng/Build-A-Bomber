@@ -35,7 +35,6 @@ const LOADING_SCENE := "res://scenes/Loading.tscn"
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
-const DeployGateScript = preload("res://scripts/deploy_gate.gd")
 
 # ---------------------------------------------------------------------------
 # TRANSITION FADE
@@ -78,6 +77,15 @@ const WARM_SOURCES := {
 var _target_path: String = ""
 var _loading: bool = false
 var pending_context: String = ""
+
+# Where the router is headed. Read-only by convention - mutating this
+# from the outside would desync the router's own bookkeeping. Exists
+# so the loading screen can decide whether the destination is the
+# long-load Battle.tscn (worth a 3D preview) or the short-load
+# MainLab.tscn (not). The router's own _target_path is otherwise a
+# private implementation detail.
+func current_target_path() -> String:
+	return _target_path
 
 # Guards against a second transition starting while one is mid-fade. `_loading`
 # does not cover this: it is only set once run_load() begins, so it is false for
@@ -238,52 +246,113 @@ func run_load() -> void:
 		_target_path = ""
 		return
 
-	# Fade out over the loading screen before the swap. Skipping this is what
-	# would make the whole transition read as fading INTO a loading screen and
-	# then hard-cutting into the match, which is worse than no fade at all -
-	# an inconsistent transition draws more attention than an absent one.
-	await fade_out()
-	get_tree().change_scene_to_packed(packed)
-	# Skirmish's _ready() does substantial work (terrain, navmesh, spawns). Two
-	# frames rather than one, so the fade lifts on a built battlefield instead of
-	# on an empty stage that then pops into existence.
-	await get_tree().process_frame
-	await get_tree().process_frame
-	# 2026-08-13: hide the fade rect NOW. Its purpose was to hide
-	# the loading-screen -> battle scene swap, which is already
-	# done. Leaving it opaque (alpha 1.0) would block the new
-	# deploy gate's glass overlay from showing the world behind it
-	# - the gate sits on top of the fade rect on the same canvas
-	# layer (the gate is added after the fade rect, so the gate
-	# draws on top, but the fade rect's 1.0 alpha is what the
-	# player's eye reads through the gate's 0.45 alpha glass).
-	# Hiding it here means the gate's glass is the only overlay
-	# between the player and the world during the build.
-	_fade_rect.modulate.a = 0.0
-	_fade_rect.visible = false
-
-	# Deploy gate is specifically for battle deployment (e.g. Battle.tscn).
-	# Non-battle scenes (like MainLab.tscn) fade in directly without waiting for a battle deploy signal.
+	# No fade between the warm list and the world-build phase. The
+	# loading screen is what the player is looking at, and the
+	# next thing they see is DEPLOY - there is no other screen to
+	# transition TO. A fade here would read as the loading screen
+	# going dark and coming back, which is exactly the "duplicate"
+	# the user described.
+	#
+	# The loading screen also calls UIShell.workbench() in its
+	# own _ready, which paints the chipboard L0 backdrop. The
+	# fade rect was only needed for OLD screen -> NEW screen
+	# transitions; with the new flow the loading screen IS the
+	# only screen the player sees from the moment SceneRouter
+	# fades in, until the moment DEPLOY swaps to Battle. So
+	# there's no fade rect bookkeeping to do here.
+	#
+	# Two paths from here.
+	#
+	# Battle.tscn: hand the PackedScene to the loading screen. The
+	# screen instantiates it as a HIDDEN child of /root (visible
+	# = false so the Battle's Camera3D doesn't draw the sky behind
+	# the loading screen), pauses the tree, and waits for
+	# world_ready before showing a DEPLOY button. Re-instantiating
+	# the Battle on the way out would re-run the multi-second
+	# world build, so the screen hands back the SAME instance
+	# it built.
+	#
+	# Everything else (Lab, etc.): the old fast path. No world
+	# build, no DEPLOY - just swap scenes and fade in.
 	if _target_path == "res://scenes/Battle.tscn":
-		var gate = DeployGateScript.new()
-		_fade_layer.add_child(gate)
-		gate.start()
-		await gate.deploy_pressed
-		gate.dismiss()
+		var loading_screen = get_tree().current_scene
+		if loading_screen != null and loading_screen.has_method("attach_battle_scene"):
+			loading_screen.attach_battle_scene(packed)
+			# Awaiting a signal on another node: Godot 4 resolves
+			# this at the await point. The signal carries the
+			# already-built Battle instance.
+			var battle = await loading_screen.deploy_requested
+			# The loading screen has done two things by the time the
+			# signal fires: faded itself to modulate.a == 0 and made
+			# the Battle visible (and process_mode = INHERIT). The
+			# tree is still paused; the loading screen's
+			# attach_battle_scene() paused it so the world build
+			# wouldn't tick. Unpause now so the Battle's INHERIT
+			# children can run.
+			get_tree().paused = false
+			if battle != null and is_instance_valid(battle):
+				# Rename to the canonical scene name. attach_battle_scene
+				# used "BattlePending" to avoid colliding with the in-
+				# scene "Battle" name; now that we're swapping, the
+				# canonical name is what the router's debug logs and
+				# any "res://scenes/Battle.tscn" reference expect.
+				battle.name = "Battle"
+				# Make the already-built Battle the current_scene.
+				# change_scene_to_packed() would re-instantiate,
+				# which is the multi-second world build we just did.
+				# change_scene_to(node) does not exist on SceneTree
+				# in Godot 4.7 (the only legacy form was on the
+				# Viewport, and it's gone). The supported way to swap
+				# to a pre-built instance is to write
+				# current_scene directly - it's a settable property
+				# in Godot 4.x. The loading screen is still a child
+				# of /root from when the router
+				# change_scene_to_file()'d it in; the current_scene
+				# pointer is what gets read on the next frame for
+				# input routing, and repointing it at the Battle is
+				# the whole swap.
+				get_tree().current_scene = battle
+				# The loading screen is no longer the current_scene
+				# but is still in the tree (faded to alpha 0). Free
+				# it; the Battle is now the only scene node. queue_free
+				# is deferred, so the next idle frame the loading
+				# screen is gone and the Battle is fully on screen.
+				loading_screen.queue_free()
+			else:
+				# Safety fallback: the loading screen gave us nothing.
+				# Use the standard path so the player isn't stuck.
+				push_warning("SceneRouter: deploy_requested had no Battle; falling back to change_scene_to_packed")
+				get_tree().change_scene_to_packed(packed)
+			await get_tree().process_frame
+			await get_tree().process_frame
+		else:
+			# No loading screen with attach_battle_scene. Use the
+			# safe-but-slow fallback so the player isn't stuck on
+			# the warm list.
+			push_warning("SceneRouter: current scene has no attach_battle_scene; falling back to direct change")
+			get_tree().change_scene_to_packed(packed)
+			await get_tree().process_frame
+			await get_tree().process_frame
 	else:
+		# Non-Battle: Lab / other. Fast path. Change scene, fade
+		# in, done.
+		get_tree().change_scene_to_packed(packed)
+		await get_tree().process_frame
+		await get_tree().process_frame
 		await fade_in()
 
 	_transitioning = false
 	_target_path = ""
 
 
-# The DEPLOY gate is now a self-contained component
-# (scripts/deploy_gate.gd). The router no longer owns the
-# world-readiness polling, the tree pause, or the bezel/glass
-# visuals - the gate does. The router's only job during this
-# beat is to create the gate, await its deploy_pressed signal,
-# and dismiss it. The fade rect is hidden at the moment the
-# gate is created so the gate's glass can show the world.
+# The DEPLOY gate (scripts/deploy_gate.gd) is RETIRED. The
+# loading screen now owns the build -> DEPLOY handoff itself, on
+# the same surface the warm list is shown on. The router's only
+# remaining job at this beat is to hand the loaded PackedScene
+# to the loading screen, await its deploy_requested signal, and
+# call change_scene_to(battle) on the instance the screen built.
+# Re-instantiating via change_scene_to_packed would re-run the
+# world build.
 
 
 # Extracts a scene's heavy preload targets from its script SOURCE.
@@ -360,5 +429,3 @@ const STEP_LABELS := {
 func _label_for(path: String) -> String:
 	var stem := path.get_file().get_basename()
 	return STEP_LABELS.get(stem, "Loading %s" % stem.replace("_", " "))
-
-
