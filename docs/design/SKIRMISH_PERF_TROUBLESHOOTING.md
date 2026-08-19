@@ -529,3 +529,173 @@ Superseding §8. Ranked by measured cost, cheapest decisive experiment first.
 8. Log hygiene (§10.7), then the regression guard (§7) — now writable against
    real numbers: assert the `units` bucket stays under ~2 ms/unit/frame at 16
    units.
+
+---
+
+# 11. Results — `battle_2026-08-19T21-41-57_skirmish.log`
+
+First capture with the §10 instrumentation in place. lake_crossing, 221.7 s,
+30 Hz, **21 units**, 51 structures, 1920×1080, msaa 4x, vsync on. Four of the
+five open questions are answered outright.
+
+## 11.1 ANSWERED — load time is ambient scatter, not the navmesh
+
+```
+terrain.ground_visual_mesh    2 728.8 ms
+terrain.ground_material         148.1 ms
+terrain.building_holes            0.0 ms   (1 hole)
+terrain.navmesh_dispatch        139.8 ms   (289 tiles)
+terrain.navmesh_wait             91.2 ms   (289 tiles)
+terrain.spawn_visuals        24 458.2 ms   (255 resource nodes)
+```
+
+**`TerrainBuilder.spawn_visuals` is 24.5 s of a ~27.5 s build — 89 % of the load
+screen.** The navmesh, which the archived plan and §10.6 both assumed was the
+cost, is **231 ms total across 289 tiles**.
+
+This also explains the §10.6 spread: the fast ~3 s runs are the ones that skip
+or shorten scatter, not ones with a faster navmesh. `map_catalog.gd` already has
+a `disable_ambient_scatter` flag (added for `test_range`), which is why Test
+Range never showed this.
+
+255 resource nodes for 24.5 s is ~96 ms per node — that is the number to chase,
+not the node count.
+
+## 11.2 ANSWERED — `commander.execute`'s missing 200 ms is the navmesh rebake
+
+The chain, all nested:
+
+```
+commander.execute        192.5 ms mean  (72 calls)
+└ ai.build_production    294.8 ms mean  (47 calls)
+  └ ai.build_structure   294.7 ms mean  (47 calls)
+    ├ place_structure     47.7 ms mean  (48 calls)
+    │ └ place.displace_props  40.4 ms   ← 85 % of place_structure
+    └ navmesh_sync_rebake 239.5 ms mean ← 81 % of ai.build_structure
+```
+
+`_mark_navmesh_dirty(urgent = true)` performs the Recast rebake **inline and
+synchronously** in the same call, so every AI building placement blocks the main
+thread for ~240 ms. That is the entire unexplained cost from §10.4, and it makes
+§10.8 items 2 and 4 the same fix rather than two.
+
+## 11.3 ANSWERED — the rebakes are not duplicated; the per-tile cost is the problem
+
+55 rebakes for 51 structures — **1:1, not the 2:1 §10.3 suspected.**
+
+```
+ms     total 13 171.7   mean 239.5   p50 225.2   max 411.2
+tiles  mean 3.84 (47 of 55 rebakes touch exactly 4)
+cost   62.4 ms per tile
+```
+
+So de-duplication is off the table. The fix is either making the bake
+asynchronous (it already has a lazy path — `_mark_navmesh_dirty(false)`) or
+reducing the 62 ms per-tile cost. Debouncing a build burst would help the AI
+case, where 47 placements arrive over a few minutes.
+
+## 11.4 ANSWERED — the sim is healthy; rendering is the visible problem
+
+The new `perf_sample` event states it directly:
+
+```
+physics_hz   min 29.03   p50 29.96   mean 30.01   (target 30)
+render_fps   min  3.66   p50 10.60   mean 10.09   max 17.72
+draw_calls   p50 867     render_objects p50 1708
+```
+
+**Correction to §10.1:** I reported the sim running at 14.56 Hz, half its target.
+That was wrong — it came from counting `section` log entries per time bucket,
+which undercounts because a section only appears on frames where it recorded
+time. The direct counter shows physics holding **30.0 Hz throughout**. The
+rendered frame rate is the real problem, and it degrades from ~17 fps early to
+**3.7 fps at 21 units / 51 structures**.
+
+867 draw calls and 1708 objects are not high. This is not a draw-call-count
+problem, which points Track E at fill rate and shading — msaa 4x at 1920×1080
+first — rather than at batching.
+
+Note the main thread is also over half consumed by sim work: top-level sections
+sum to ~122 s of the 221.7 s match (55 %), so the renderer is competing for what
+is left.
+
+## 11.5 PARTLY ANSWERED — `move_and_slide` improved 5×, still the largest cost
+
+```
+units                75 285.2 ms   mean 18.04 ms/frame   (34 % of the match)
+└ unit.move_and_slide 67 441.4 ms   mean 16.16 ms/frame   (30 % of the match)
+```
+
+At 21 units that is **0.77 ms per unit per frame, down from 4.08 ms at 15 units**
+in the 19-57-23 capture — a ~5× per-unit improvement from the switch to a single
+convex hull fit (`unit_assembly._add_hull_collider`). That change worked.
+
+The collider census confirms the hull side is now minimal, and locates what is
+left:
+
+| Design | Body shapes | Module areas | Module shapes | Total | Count |
+|---|---|---|---|---|---|
+| Breaker TD | 1 | 5 | 11 | 12 | ×11 |
+| GravelGulper No. 7 | 1 | 14 | 47 | 48 | ×7 |
+| Magpie Ore Hauler | 1 | 14 | 47 | 48 | ×3 |
+
+**612 collision shapes across 21 units, mean 29.1 per unit** — and only 21 of
+those are on the bodies that move. The rest are module hit volumes on
+`UNIT_MODULES`, which weapons query and `move_and_slide` does not.
+
+So 16 ms per frame is being spent sweeping **21 single-shape bodies**. That is
+too much for body-vs-body, which makes the **ground collider** the leading
+suspect: every unit sweeps its hull against the terrain's concave trimesh every
+tick. Next experiment: swap the ground `CollisionShape3D` for a primitive plane
+on a flat test map and re-measure. If it collapses, terrain collision is the
+answer and a heightmap collider or per-unit ground raycast replaces it.
+
+## 11.6 CONFIRMED — the frame-1 artifact was an artifact
+
+`first_frame_ms: 4131.7` is now reported separately, and the worst in-match frame
+is **823 ms**, down from 28 133 ms. The multi-second "stalls" of §2 and §10.5 do
+not appear anywhere in this capture. The distribution is also no longer bimodal
+(p50 38.7 ms against a 33.3 ms tick period, mean 44.9) — the p50 1.86 ms
+catch-up signature is gone. §10.5's reading was correct.
+
+## 11.7 New, smaller findings
+
+- **`place.displace_props` is 85 % of `place_structure`** (40.4 ms of 47.7 ms).
+  `place.setup` — mesh, collider, the whole structure build — is 6.9 ms. Track C
+  is answered: it is the terrain-prop walk, and it is almost certainly the same
+  root cause as §11.1, since scatter density is what it walks.
+- **`production`'s spikes are structure completion.** `production.complete_structure`
+  is 243.4 ms mean over 6 calls (worst 314.5 ms); the section's own mean is
+  0.79 ms. `production.complete_unit` (76.1 ms × 19) is just `spawn_unit` nested
+  inside it.
+- **`vision` doubled to 15.0 ms mean** (from 8.2 ms), worst 44.1 ms, on 463
+  ticks. At 30 Hz one vision tick is now half a frame budget.
+- **`unit.steer_nav` collapsed** from 5.41 ms to 0.24 ms mean.
+- **`spawn.assemble` improved** from 119.6 ms to 72.3 ms.
+
+## 11.8 Bug found and fixed while instrumenting
+
+`production_service.gd`'s unit-completion block was **duplicated verbatim with
+no `return` between the copies** (present in `HEAD` at `9474128c`). Every
+completed unit ran it twice: a second `q.pop_front()` discarded the next queued
+job without building it, and a second `unit_completed.emit()` spawned a phantom
+second vehicle from the same blueprint — at `spawn_unit`'s ~76 ms each.
+
+Removed. This is a behaviour change, not instrumentation, and it was not
+optional: timing one copy while the other ran unwrapped would have reported half
+the real cost.
+
+## 11.9 Revised priorities
+
+1. **`terrain.spawn_visuals`** (§11.1) — 24.5 s of a 27.5 s load, ~96 ms per
+   resource node. Biggest single number anywhere in these logs and it is paid on
+   every single match start.
+2. **Make the urgent navmesh rebake async or debounced** (§11.2, §11.3) — one
+   fix that removes ~13 s of main-thread blocking and 81 % of the AI's decision
+   cost.
+3. **Track E's render sweeps** (§11.4) — 3.7 fps at 867 draw calls is a fill /
+   shading problem; msaa 4x first.
+4. **Terrain-collider experiment for `move_and_slide`** (§11.5) — 16 ms/frame
+   for 21 single-shape bodies points at the ground trimesh.
+5. `place.displace_props` (§11.7) — likely falls out of fix 1.
+6. `vision` at 15 ms mean (§11.7).
