@@ -62,9 +62,8 @@ const VFXEffectsScript = preload("res://scripts/vfx_effects.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const ResourceFieldScript = preload("res://scripts/battle/economy/resource_field.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
-const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
+const HUDRootScript = preload("res://scripts/hud/hud_root.gd")
 const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
-const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
 const CommanderScript = preload("res://scripts/battle/ai/commander.gd")
 const CounterDraftScript = preload("res://scripts/battle/ai/counter_draft.gd")
 const SquadScript = preload("res://scripts/battle/ai/squad.gd")
@@ -137,7 +136,8 @@ var alerts: AlertService = null
 var flow_fields: FlowFieldService = null
 var economy: EconomyService = null
 var production: ProductionService = null
-var production_hud: ProductionHUD = null
+# The single battle HUD. See scripts/hud/hud_root.gd for what it replaced.
+var hud: HUDRoot = null
 var stats = null
 var _perf_hud: CanvasLayer = null
 var _perf_toast: CanvasLayer = null
@@ -255,7 +255,9 @@ func _emit_progress(fraction: float, label: String) -> void:
 
 
 var vision: VisionService = null
-var battle_hud: BattleHUD = null
+# Kept as an alias of `hud` so external callers and the rule set do not need
+# to know the class changed.
+var battle_hud: HUDRoot = null
 var commander: Commander = null
 
 # One live squad per AI team. Kept between decisions so a squad's state -
@@ -783,10 +785,11 @@ func _on_vision_tick() -> void:
 	var t := Profiler.start()
 	vision.tick()
 	Profiler.stop("vision", t)
-	if battle_hud != null:
-		t = Profiler.start()
-		battle_hud.refresh()
-		Profiler.stop("hud_minimap", t)
+	# The HUD is NOT refreshed from here any more. hud_root.gd owns one clock
+	# and polls its own regions - the map at 20 Hz, the panels at 5 Hz - and
+	# its fog composite is gated on VisionService.shroud_version, so it picks
+	# this tick up on its own. Driving it from here as well meant the vision
+	# tick paid for a full minimap rebuild whether or not anything moved.
 
 
 # --- World ------------------------------------------------------------------
@@ -891,8 +894,28 @@ func _setup_terrain() -> void:
 				float(Time.get_ticks_usec() - _t_mat) / 1000.0)
 		var col: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
 		if col:
-			col.shape = generated.shape
-			col.scale = generated.get("collision_scale", Vector3.ONE)
+			# SKIRMISH_PERF_TROUBLESHOOTING.md §11.5 + §12. The flat_ground_collider
+			# flag swaps the heightmap collider for a single BoxShape3D on y=0.
+			# The visual mesh is unchanged (it still shows whatever hills the map
+			# author drew), but the per-unit `move_and_slide` cost drops to
+			# "convex hull vs flat plane" - the cheapest narrow-phase test the
+			# physics server has. The diff in the `units` profiler section
+			# between a real run on the same map and a flagged run is the
+			# ground-heightmap contribution to the late-game collision cost.
+			# Off by default; a per-map opt-in so the visual stays accurate for
+			# every other map. Set on test_range for the canonical experiment
+			# (it has no hills anyway, so the visual stays correct).
+			if bool(current_map.get("flat_ground_collider", false)):
+				var half: float = current_map.get("map_half_extents", 80.0)
+				var flat_box := BoxShape3D.new()
+				flat_box.size = Vector3(half * 2.0, 1.0, half * 2.0)
+				col.shape = flat_box
+				col.scale = Vector3.ONE
+				col.position = Vector3(0.0, -0.5, 0.0)
+			else:
+				col.shape = generated.shape
+				col.scale = generated.get("collision_scale", Vector3.ONE)
+				col.position = Vector3.ZERO
 
 	await get_tree().process_frame
 
@@ -1737,7 +1760,12 @@ func _displace_terrain_props(at: Vector3, half: Vector2) -> void:
 				if d_sq > radius_sq:
 					continue
 				VFXEffectsScript.dust_cloud(self, node.global_position, Vector2(0.8, 0.8))
-				node.queue_free()
+				# SKIRMISH_PERF_TROUBLESHOOTING.md §14. Defer the
+				# queue_free to _process_pending_debris_frees(). The
+				# grid entry is still removed inline so the next
+				# placement does not re-displace the same node;
+				# the actual node destruction is amortised.
+				_pending_debris_frees.append(node)
 				cell.remove_at(idx)
 
 	# Pass 2: ambient trees (scatter-batched). Scale to zero on hit via
@@ -1888,11 +1916,41 @@ var _debris_grid: Dictionary = {}
 var _ambient_node_grid: Dictionary = {}
 var _mm_instance_grid: Dictionary = {}
 var _debris_grid_built: bool = false
+# SKIRMISH_PERF_TROUBLESHOOTING.md §14. Deferred queue_free
+# accumulator. _displace_terrain_props() finds debris nodes
+# and removes them from the grid inline (so follow-up placements
+# do not re-displace the same node), but pushes the actual
+# queue_free() into this list. _process_pending_debris_frees()
+# drains it at FREE_BATCH_PER_FRAME per frame, amortising the
+# engine's per-free bookkeeping across ticks. At the 20:49:15
+# capture's worst case (~300 frees per power_plant placement
+# in a debris-rich cell) the dominant 320 ms hitch dropped to
+# a few ms per frame once this landed.
+const FREE_BATCH_PER_FRAME: int = 32
+var _pending_debris_frees: Array = []
 
 
 # Builds the PR-3 spatial index. O(N) once, then O(k) per displace call.
 # Called from _setup_terrain after spawn_visuals; lazily re-callable from
 # _displace_terrain_props if a placement races the build.
+# SKIRMISH_PERF_TROUBLESHOOTING.md §14. Drain the deferred-free
+# accumulator at FREE_BATCH_PER_FRAME per frame. The per-unit
+# bookkeeping that made the original 320 ms hitch is what we
+# are amortising, and the unit tick is the natural cadence.
+# Called from _physics_process. The is_instance_valid check
+# is cheap (one pointer compare) but necessary - a debris node
+# freed by something else between frames sits in this list
+# until the drain sees it and the check filters it out cleanly.
+func _process_pending_debris_frees() -> void:
+	if _pending_debris_frees.is_empty():
+		return
+	var batch: int = mini(FREE_BATCH_PER_FRAME, _pending_debris_frees.size())
+	for _i in range(batch):
+		var n: Node = _pending_debris_frees.pop_front()
+		if is_instance_valid(n):
+			n.queue_free()
+
+
 func _build_debris_grid() -> void:
 	_debris_grid.clear()
 	_ambient_node_grid.clear()
@@ -3819,6 +3877,12 @@ func _physics_process(delta: float) -> void:
 	# _physics_process and the engine runs a parent before its children, so this
 	# closes the frame on everything: whatever the sections above do not account
 	# for shows up as the gap between their sum and the frame total.
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §14. Drain the deferred
+	# debris-free accumulator. Runs once per frame at the end so
+	# the frees queued by a placement this frame do not compound
+	# the next frame's cost. FREE_BATCH_PER_FRAME caps the per-frame
+	# cost; the queue is naturally drained in 1-N frames.
+	_process_pending_debris_frees()
 	Profiler.end_frame()
 	# Mirror the per-frame profile into the structured log. Runs after
 	# end_frame() so the snapshot BattleLogger reads is the one the
@@ -4231,10 +4295,17 @@ func _resolve_left_release(at: Vector2, additive: bool) -> void:
 		# a building - the structure is the larger, less mobile target and the
 		# player can always click the tank a metre to one side.
 		var structure := _structure_at(at)
-		if structure != null and production_hud != null:
-			selection.clear()
-			production_hud.open_structure_ring(structure, at)
-			return
+		if structure != null and hud != null and hud.deck != null:
+			# Clicking a manufactory FOCUSES ITS QUEUE in the production deck
+			# rather than opening a radial menu over it. The radial was a second
+			# way to reach the same five queues, with its own copy of the build
+			# list and its own idea of what was gated; this routes the click to
+			# the one interface, which is also where the queue itself is visible.
+			var queue := hud.queue_for_structure(structure)
+			if queue != "":
+				selection.clear()
+				hud.deck.set_active(queue)
+				return
 		var one := selection.unit_at_point(at)
 		if one != null:
 			picked = [one]
@@ -4383,6 +4454,41 @@ func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
 				orders.harvest(recipients, ambient_target, queued)
 				return
 
+		# FOCUS FIRE (2026-08-20). Right-clicking an enemy unit should be an
+	# ATTACK on the unit specifically, not an ATTACK_MOVE to the ground
+	# behind it. The previous code did a GROUND-only ray which hit the
+	# dirt under the unit and turned the click into an advance order.
+	# A UNITS | BUILDINGS ray hits the body of the unit, so the click
+	# resolves to the unit, not the ground. The unit's body is on the
+	# UNITS layer (set in unit_assembly.gd:116) and carries the `team`
+	# meta (set in unit_assembly.gd:115); the team comparison decides
+	# friendly vs enemy. Buildings on BUILDINGS carry `structure` meta.
+	# Either way, orders.attack() is the existing ATTACK order - it
+	# engages the target until it dies, then goes back to IDLE, which
+	# is exactly the user spec for "attack this target first then go
+	# back to default behavior". The main_weapon_range on the unit
+	# (set in unit.gd:setup() from AssemblyScript.compute_main_weapon)
+	# drives _engagement_distance() so the unit closes to the main
+	# gun's range, not the longest weapon's reach.
+	var target_hit := _raycast(screen_pos, LayersScript.UNITS | LayersScript.BUILDINGS, false)
+	if not target_hit.is_empty():
+		var collider = target_hit.collider
+		# Enemy UNIT: the collider is the CharacterBody3D itself.
+		if collider.has_meta("team"):
+			var enemy_unit: Node = collider
+			if is_instance_valid(enemy_unit) and enemy_unit.team != PLAYER_TEAM:
+				orders.attack(recipients, enemy_unit, queued)
+				return
+		# Enemy BUILDING: the `structure` meta on the collider points
+		# to the Structure script.
+		if collider.has_meta("structure"):
+			var s = collider.get_meta("structure")
+			if is_instance_valid(s) and s.team != PLAYER_TEAM:
+				orders.attack(recipients, s, queued)
+				return
+		# Friendly or unrecognised hit - fall through to the ground ray
+		# so the click behaves like a normal move/attack-move.
+
 	var hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
 	if hit.is_empty():
 		return
@@ -4439,74 +4545,70 @@ func _on_group_recentre(centre: Vector3) -> void:
 
 # --- HUD ---------------------------------------------------------------------
 #
-# Deliberately minimal. The real in-match HUD is Phase 4; this is the drag
-# rectangle plus a one-line mode readout, which are the two things the command
-# layer cannot be used without.
+# ONE HUD. scripts/hud/hud_root.gd owns every region: tactical map, resource
+# ribbon, the five-tab production deck, the command card and the alert log. What
+# used to be here built TWO complete HUDs (BattleHUD -> CommandConsole, and a
+# separate ProductionHUD) which each drew their own production interface, plus
+# three minimap instances between them. See hud_root.gd for the inventory.
 
 # Built in headless too, deliberately. The obvious guard - skip the HUD when
-# there is no display - makes the entire production interface untestable, and
-# test_ui_and_camera already constructs UIDock headless without trouble. Control
-# nodes do not need a window; only rendering does.
+# there is no display - makes the entire production interface untestable.
+# Control nodes do not need a window; only rendering does.
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "UI"
 	add_child(layer)
 
-	# Battle-system unification (Phase 2). The per-mode rule set is the
-	# single source of truth for which sub-HUDs exist. The default
-	# Skirmish values (all on) keep the legacy path identical; Test
-	# Range's rule set flips production_hud and admin_menu off. The
-	# minimap lives inside BattleHUD - turning it off cleanly is a
-	# deeper change to BattleHUD itself, deferred until Phase 3 (Test
-	# Range launcher) wires the chase camera and the slim HUD together.
-	# _match_rule_set is the cached rule set from _ready(); reading from
-	# the member is the same pattern _spawn_bases / _setup_vision / etc
-	# use. The local match_config lookup above is no longer needed here.
-	var enable_battle_hud: bool = _match_rule_set.enable_battle_hud if _match_rule_set != null else true
-	var enable_production_hud: bool = _match_rule_set.enable_production_hud if _match_rule_set != null else true
+	# The per-mode rule set stays the single source of truth for which chrome
+	# exists. enable_battle_hud now gates the whole HUD (there is only one), and
+	# enable_production_hud / enable_minimap gate regions inside it - which is
+	# what the old comment here said was "deferred until Phase 3" because the
+	# minimap was welded inside BattleHUD and could not be turned off cleanly.
+	# It can now: the regions are siblings.
+	var enable_hud: bool = _match_rule_set.enable_battle_hud if _match_rule_set != null else true
+	var enable_production: bool = _match_rule_set.enable_production_hud if _match_rule_set != null else true
+	var enable_minimap: bool = _match_rule_set.enable_minimap if _match_rule_set != null else true
 	var is_debug := OS.has_feature("editor") or OS.is_debug_build() or "--cheats" in OS.get_cmdline_args()
 	var enable_admin_menu: bool = (_match_rule_set.enable_admin_menu if _match_rule_set != null else true) and is_debug
 
+	# The drag-select rectangle. Lives on the layer rather than inside the HUD
+	# because it is a cursor artefact, not chrome - it has to be able to draw
+	# over every panel.
 	_selection_rect = Panel.new()
 	_selection_rect.visible = false
 	_selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var box := StyleBoxFlat.new()
-	box.bg_color = Color(Tokens.SIGNAL_GO.r, Tokens.SIGNAL_GO.g, Tokens.SIGNAL_GO.b, 0.12)
-	box.border_color = Tokens.SIGNAL_GO
+	box.bg_color = Color(HUDStyle.TEAM_FRIENDLY.r, HUDStyle.TEAM_FRIENDLY.g,
+		HUDStyle.TEAM_FRIENDLY.b, 0.12)
+	box.border_color = HUDStyle.TEAM_FRIENDLY
 	box.set_border_width_all(1)
 	_selection_rect.add_theme_stylebox_override("panel", box)
 	layer.add_child(_selection_rect)
 
-	if enable_battle_hud:
-		battle_hud = BattleHUDScript.new()
-		battle_hud.name = "BattleHUD"
-		layer.add_child(battle_hud)
-		battle_hud.setup(self, PLAYER_TEAM, current_map)
-
-		# BELOW BattleHUD's top strip, not on top of it.
-		#
-		# All three of these were positioned independently against the top-left corner
-		# - the strip is a full-width band at y=8..64, the bindings sat at y=12 and the
-		# hint at y=56 - so the corner rendered as three overlapping texts. They are
-		# stacked deliberately now, measured off the strip's own height rather than
-		# from three separately-guessed constants.
-		var below_strip: float = Tokens.SPACE_SM + 56.0 + Tokens.SPACE_SM
-
-		_hud_hint = Label.new()
-		_hud_hint.theme_type_variation = "HintLabel"
-		_hud_hint.position = Vector2(Tokens.SPACE_MD, below_strip)
-		_hud_hint.text = ""
-		layer.add_child(_hud_hint)
-
-	if enable_production_hud:
-		production_hud = ProductionHUDScript.new()
-		layer.add_child(production_hud)
-		production_hud.setup(self)
+	if enable_hud:
+		hud = HUDRootScript.new()
+		layer.add_child(hud)
+		hud.setup(self, PLAYER_TEAM, current_map)
+		# battle_hud is the historical name several callers and tests reach for.
+		battle_hud = hud
+		# _flash() writes into the HUD's own hint banner rather than a loose Label
+		# positioned by hand against the top-left corner - which is where it used
+		# to sit, stacked under two other independently-positioned texts.
+		_hud_hint = hud.hint_label
+		hud.deck.visible = enable_production
+		hud.minimap.visible = enable_minimap
 
 	if enable_admin_menu:
 		admin_menu = AdminMenuScript.new()
 		admin_menu.name = "AdminMenu"
-		layer.add_child(admin_menu)
+		# Into the HUD's column when there is a HUD, so it shares the centred,
+		# ultrawide-capped layout and lands in the strip the alert log leaves for
+		# it. Onto the bare layer otherwise (Test Range, or a rule set with the
+		# HUD off), where it falls back to anchoring against the viewport.
+		if hud != null:
+			hud.attach_to_column(admin_menu)
+		else:
+			layer.add_child(admin_menu)
 		admin_menu.main_menu_requested.connect(func():
 			var router = get_node_or_null("/root/SceneRouter")
 			if router != null:
@@ -4523,7 +4625,10 @@ func _build_hud() -> void:
 	if is_debug:
 		debug_overlay = DebugOverlayScript.new()
 		debug_overlay.name = "DebugOverlay"
-		layer.add_child(debug_overlay)
+		if hud != null:
+			hud.attach_to_column(debug_overlay)
+		else:
+			layer.add_child(debug_overlay)
 
 
 func _update_selection_rect(at: Vector2) -> void:

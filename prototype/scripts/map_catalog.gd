@@ -422,6 +422,24 @@ const FIELD_SPEC: Dictionary = {
 	# needs to see their unit, not a forest the ambient code packed
 	# into whatever space it found. Default false (ambient on).
 	"disable_ambient_scatter": {"type": "bool", "required": false},
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §12. Per-map density multiplier on
+	# the ambient tree / ore scatter. 1.0 is the default; lake_crossing
+	# ships at 0.5 to cut the 23 s scatter cost on a populated map. The
+	# field multiplies the cluster count and the per-cluster item cap,
+	# so 0.5 yields ~25% of the original prop count (half the clusters,
+	# half the per-cluster ceiling). Numbers under 0.3 start to read as
+	# "the forest died", so the floor is more of a soft 0.25 than a hard
+	# zero - use disable_ambient_scatter for "off entirely".
+	"ambient_scatter_density": {"type": "number", "required": false, "min": 0.1, "max": 2.0},
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §12. Toggles the ground collider
+	# from a real subdivided heightmap to a single flat box. The cost
+	# of move_and_slide per unit changes from "convex hull against a
+	# heightmap-cell grid" to "convex hull against a flat plane" - the
+	# experiment in §11.5 that was hypothesized but never run. Set on
+	# a map that is genuinely flat (open_plains), record the units
+	# section cost, then unset it and re-record; the diff is the
+	# ground-heightmap contribution. Default false.
+	"flat_ground_collider": {"type": "bool", "required": false},
 	"water_blobs": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true, "scale": true},
 		"radius": {"type": "number", "required": true, "min": 0.01, "scale": true},

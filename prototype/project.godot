@@ -48,6 +48,15 @@ window/size/viewport_width=1920
 window/size/viewport_height=1080
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+; SKIRMISH_PERF_TROUBLESHOOTING.md §5 Track E #2. Enum 0=disabled,
+; 1=screen-tearing-prevention (engine-decides), 2=adaptive. Was
+; DisplayServer.VSYNC_ENABLED; off lets the 30 Hz physics tick be
+; the actual rate cap rather than the 60 Hz monitor cap. With
+; vsync on, the perf_hud's FPS readout was being pinned to 60 even
+; on a 3.75-fps scene (see §10.1) - turning it off lets the
+; readout report the real cost. Re-enable (set to 1 or 2) if the
+; visible tearing on 60 Hz monitors is unacceptable.
+window/vsync/vsync_mode=0
 
 [filesystem]
 
@@ -60,7 +69,12 @@ theme/custom="res://resources/bomber_theme.tres"
 [rendering]
 
 textures/vram_compression/import_etc2_astc=true
-; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. Enum 0=off, 1=2x, 2=4x, 3=8x.
-; Was 2 (4x); 4x MSAA at 1920x1080 measured ~31% of frame time on an empty map.
-; Halved to 2x. See docs/RENDER_SETTINGS.md for the budget rationale.
-anti_aliasing/quality/msaa_3d=1
+; SKIRMISH_PERF_TROUBLESHOOTING.md §5 Track E #1. Enum 0=off, 1=2x, 2=4x, 3=8x.
+; Was 2 (4x); 4x MSAA at 1920x1080 measured ~31% of frame time on
+; an empty map. Then 1 (2x). Now 0 (off) - the §13.1 capture at 2x
+; was hitting 110 ms/frame in the renderer with 17+ units; the
+; next step on the Track E sweep is to drop MSAA entirely. Combined
+; with vsync off (above), the perf_hud will read the true frame
+; rate. Re-enable (set to 1 or 2) if aliasing on a 30 fps display
+; is unacceptable.
+anti_aliasing/quality/msaa_3d=0

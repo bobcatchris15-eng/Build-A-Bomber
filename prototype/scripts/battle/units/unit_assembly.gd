@@ -334,6 +334,78 @@ static func _add_selection_proxy(body: CharacterBody3D, hull_node: Node3D,
 # passing in tests that attached the script by hand.
 #
 # Returns the longest reach mounted, which is what an ATTACK order closes to.
+# MAIN WEAPON. The single module type the unit carries that outputs
+# the most total DPS, summed across every mount of that type. A unit
+# with 2x basic_cannon (80 DPS total) and 1x gauss_railgun (70 DPS
+# single, 70 DPS total) has main weapon = basic_cannon: 80 > 70, so
+# the unit closes to the cannon's range, not the gauss's. The user
+# spec is "the single module type it carries that outputs the most
+# DPS in total" - "in total" is the key word, this is argmax over
+# types not argmax over individual mounts.
+#
+# Returns a Dictionary { type_id, total_dps, range, count } for the
+# top type, or an empty Dictionary if the unit has no weapons (which
+# harvesters and scouts can be).
+#
+# Ties broken by fire_range (lower first) so a unit with two weapon
+# types at the same total DPS picks the closer one, which is the
+# intuitive choice for "main weapon". A deterministic seed is not
+# needed - the iteration order over a Dictionary in GDScript is
+# insertion order in Godot 4.x, and two types at the exact same
+# total DPS do not naturally arise in the bundled module catalog.
+#
+# Walks the same children that attach_weapons() walks and reads the
+# same `module_data` meta, so a "this module does not get a weapon
+# script" filter on one side is a filter on the other.
+static func compute_main_weapon(hull_node: Node3D) -> Dictionary:
+	if not is_instance_valid(hull_node):
+		return {}
+	# Group mounts by type, summing DPS. The per-mount DPS comes from
+	# the module catalog's "dps" field on the type's data dictionary.
+	var by_type: Dictionary = {}
+	for child in hull_node.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		# data is a ModuleData Resource (set by visual_builder.gd:582 and
+		# module_placer.gd:1087), not a Dictionary. Resource has typed
+	# property access (data.type_id, data.get_dps()) - its `get()` only
+	# takes a property name, not a key+default pair. Fields not on
+	# the Resource (fire_range is catalog-only) come from the
+	# module catalog via ModuleCatalog.get_module_data().
+		var data = child.get_meta("module_data")
+		if data == null or not ModuleCatalog.needs_combat_script(data.type_id):
+			continue
+		var type_id: String = data.type_id
+		# get_dps() is the volume-scaled runtime DPS (base_dps * volume
+	# factor * tweak multiplies). It is what the weapon actually
+	# produces, which is what the user spec asks for - "the most
+	# DPS in total". For a unit with 2x twin-linked cannon, the
+	# tweaks are already baked into each module's get_dps() value, so
+	# the per-type total is the right number.
+		var dps: float = float(data.get_dps())
+		# fire_range is on the catalog (module_catalog.gd's
+	# WEAPON_FIRE_PROFILES dict), not on the Resource. The weapon
+	# child carries the runtime value (auto_weapon.gd:31) but the
+	# child might be a non-weapon module (sensor/generator) which
+	# has no fire_range. The catalog is the safe source for all
+	# module types; non-weapons default to 0.0 which we treat as
+	# "not a weapon" downstream.
+		var fire_range: float = float(ModuleCatalog.get_module_data(type_id).get("fire_range", 0.0))
+		if not by_type.has(type_id):
+			by_type[type_id] = {"type_id": type_id, "count": 0, "dps_per": dps, "range": fire_range}
+		by_type[type_id]["count"] += 1
+	# Pick the type with the highest TOTAL DPS. Ties broken by range
+	# (lower first) so a unit with two equal-DPS types picks the
+	# closer main weapon, which is the intuitive "main" choice.
+	var best: Dictionary = {}
+	for type_id in by_type:
+		var entry: Dictionary = by_type[type_id]
+		var total_dps: float = float(entry["dps_per"]) * int(entry["count"])
+		if best.is_empty() or total_dps > float(best.get("total_dps", 0.0)):
+			best = {"type_id": type_id, "total_dps": total_dps, "range": float(entry["range"]), "count": int(entry["count"])}
+	return best
+
+
 static func attach_weapons(hull_node: Node3D) -> float:
 	if not is_instance_valid(hull_node):
 		return 0.0

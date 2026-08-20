@@ -104,6 +104,16 @@ var fog_hidden: bool = false
 # Longest reach of anything mounted on this unit, and the range an ATTACK order
 # closes to. Derived from the weapons at assembly time.
 var attack_range: float = 0.0
+# The single module type the unit carries that outputs the most
+# total DPS, summed across every mount of that type. The user
+# (playtest 2026-08-20): the unit should close to the main
+# weapon's standoff, not the longest weapon's reach. A unit with
+# 2x basic_cannon (80 DPS total, 38 m range) closes to 30 m, not
+# 58 m just because it also has a gauss_railgun. The longest
+# weapon is rarely the highest-DPS weapon. The field is set in
+# setup() from AssemblyScript.compute_main_weapon() and falls
+# back to attack_range if the lookup fails.
+var main_weapon_range: float = 0.0
 
 # How far this unit can SEE, which is a different number from how far it can
 # shoot - weapons routinely out-range their own sight, which is what makes
@@ -212,6 +222,47 @@ const MINE_DROP_DISTANCE_MULT: float = 4.5
 # in a typical Skirmish, plus the hull_node.has_meta reads).
 var _has_mine_layer: bool = false
 
+# SKIRMISH_PERF_TROUBLESHOOTING.md §10.2 + §12 + §14. DISTANT PHYSICS CULL.
+#
+# The dominant per-frame cost in a late-game Skirmish is the unit tick, and
+# the dominant part of that is `unit.move_and_slide` against the heightmap
+# collider. With 22-39 units each doing 17 ms of physics per frame (the
+# 2026-08-20T15-38-42 log), the bucket hits 390-700 ms of wall clock per
+# second of physics time, which is the whole 30 Hz budget before the
+# renderer has even started.
+#
+# Standard RTS cull: a unit that is far from the camera AND not in active
+# combat AND not the player's currently-selected unit can have its physics
+# tick skipped. It still exists in the world, still has its `current_order`
+# and `order_queue` intact, and still renders (its GeometryInstance3D
+# `visibility_range_end` already handles the render-side cull at 110 m
+# upstream, see UNIT_VISIBILITY_END below). When the player moves the
+# camera close enough, the next physics tick runs the full tick and the
+# unit resumes; its order is one frame older, which is invisible.
+#
+# Why 90 m, not the 110 m render end. The render cull is purely a draw
+# cost; the physics cull skips the WHOLE `_physics_process` including the
+# order advance, separation force, and the move_and_slide sweep. Setting
+# the physics cull inside the render cull means a unit the player can
+# still see on screen has stopped moving, which is the failure case to
+# avoid. 90 m is just outside the typical Skirmish base-to-base distance
+# on lake_crossing (240 half-extent, bases at z=±102, so the line of
+# sight across the map is ~200 m and most play is within 80-100 m of a
+# unit the player is paying attention to).
+#
+# Why not gated on `fog_hidden`. `fog_hidden` is the LOCAL team view of
+# whether this unit is visible; it changes when the player loses or
+# gains vision, not on camera motion. The cull we want is on CAMERA
+# distance, which is independent. A unit the player has just spotted
+# but not yet moved the camera to is the EXACT unit we want to keep
+# simulating, because the AI is about to issue a counter-order.
+const CULL_DISTANCE := 90.0
+# If a future map actually needs a different cull distance, promote this
+# to a map_def field the same way `disable_ambient_scatter` is. For now,
+# a constant is the right shape: Test Range is 80x80 so the camera is
+# always within 30 m and the cull never fires there.
+var _culled_by_distance: bool = false
+
 
 func _ready() -> void:
 	add_to_group("units")
@@ -260,6 +311,13 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	_p = Profiler.start()
 	attack_range = AssemblyScript.attach_weapons(hull_node)
 	Profiler.stop("spawn.weapons", _p)
+	# Main weapon - the dominant weapon by total DPS. Drives
+	# _engagement_distance() so the unit closes to the main gun's
+	# standoff, not the longest weapon's reach. Falls back to
+	# attack_range on miss (no weapons, or the catalog look-up
+	# failed for every type).
+	var main_weapon: Dictionary = AssemblyScript.compute_main_weapon(hull_node)
+	main_weapon_range = float(main_weapon.get("range", attack_range))
 	_hull_type = facts["hull_type"]
 	# PR5 (2026-08-15). Cache the mine_layer presence at spawn so the per-tick
 	# distance tracker can short-circuit without re-walking the hull subtree.
@@ -572,23 +630,53 @@ func _physics_process(delta: float) -> void:
 	_tick_economy(delta)
 	Profiler.stop("unit.tick_economy", _p)
 
-	# Tick boost controller - must run before _apply_movement so its multiplier
+	# Boost controller - must run before _apply_movement so its multiplier
 	# applies to this frame's speed.
 	var boost_mult: float = 1.0
 	if boost_controller != null:
 		boost_mult = boost_controller.tick(delta)
 	_update_boost_vfx(delta, boost_mult > 1.0)
 
-	_apply_movement(delta, boost_mult)
-	_apply_vertical(delta)
-	_tick_mine_layer_tracking(delta)
-	# Kept as its own section: this call was 52 ms of a 56 ms frame until
-	# _resolve_terrain_collision() landed, and it is the one line here whose
-	# cost is set by physics state rather than by anything visible in this
-	# file - so if unit cost ever climbs again, this is the first read.
-	var _s := Profiler.start()
-	move_and_slide()
-	Profiler.stop("unit.move_and_slide", _s)
+	# DISTANT PHYSICS CULL (see CULL_DISTANCE header). A single distance test
+	# against the active camera is the whole gate; the cost is one Vector3
+	# subtraction + length_squared + a float compare, vs the ~17 ms of
+	# move_and_slide the tick would otherwise pay. The cull flips to off
+	# the moment the camera comes back in range, and the next tick runs
+	# the full body. harvesters are excluded by the `not is_harvester`
+	# clause below: an ore truck parked on a far field still has to
+	# tick its cargo loop and the dock reservation dance, and the perf
+	# win from culling it is smaller than the correctness risk of a
+	# stuck harvester.
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var cull_now: bool = false
+	if cam != null and not is_harvester:
+		var d2: float = global_position.distance_squared_to(cam.global_position)
+		cull_now = d2 > CULL_DISTANCE * CULL_DISTANCE
+	if cull_now != _culled_by_distance:
+		_culled_by_distance = cull_now
+	if cull_now:
+		# DISTANT-UNIT FAST PATH. The cull's perf win is the kinematic
+		# sweep (move_and_slide, 17 ms/frame at 22-39 units). The cheap
+		# tick sections (tick_power, terrain_speed, advance_orders,
+		# tick_economy, boost_controller) and the velocity application
+		# (_apply_movement, _apply_vertical) all run above. We do all
+		# of it, then apply the velocity DIRECTLY to global_position
+		# without a collision check. The unit will not push other units
+		# and may clip through geometry while culled, but its order
+		# still progresses and the unit visibly arrives at its
+		# destination. The next frame of full physics (when the camera
+		# comes within CULL_DISTANCE) resolves any clipping via the
+		# normal sweep.
+		_apply_movement(delta, boost_mult)
+		_apply_vertical(delta)
+		global_position += velocity * delta
+	else:
+		_apply_movement(delta, boost_mult)
+		_apply_vertical(delta)
+		_tick_mine_layer_tracking(delta)
+		var _s := Profiler.start()
+		move_and_slide()
+		Profiler.stop("unit.move_and_slide", _s)
 	Profiler.stop("units", _t)
 
 
@@ -1005,11 +1093,19 @@ func _steer_direction(slot: Vector3) -> Vector3:
 const ENGAGEMENT_RANGE_FRACTION := 0.85
 
 func _engagement_distance() -> float:
-	# An unarmed unit has no standoff to keep, so it closes all the way. Harvesters
-	# and scouts get an arrive distance rather than parking at range zero forever.
-	if attack_range <= 0.0:
+	# Main weapon range is the user-visible concept: the standoff of
+	# the dominant weapon. A unit with 2x basic_cannon (80 DPS total,
+	# 38 m range) closes to 30 m, not 58 m just because it also has
+	# a gauss_railgun. The longest weapon is rarely the highest-DPS
+	# weapon; ENGAGEMENT_RANGE_FRACTION is the same for both so the
+	# gameplay reads as "unit closes to its main gun's effective
+	# reach". Falls back to attack_range (the longest weapon) when
+	# the main-weapon lookup failed, and to _arrive_distance() for
+	# the unarmed case the old comment described.
+	var reach: float = main_weapon_range if main_weapon_range > 0.0 else attack_range
+	if reach <= 0.0:
 		return _arrive_distance()
-	return maxf(attack_range * ENGAGEMENT_RANGE_FRACTION, _arrive_distance())
+	return maxf(reach * ENGAGEMENT_RANGE_FRACTION, _arrive_distance())
 
 
 # True when the unit should keep driving toward its ATTACK target, having set

@@ -30,9 +30,16 @@ const LiveryScript = preload("res://scripts/livery.gd")
 const SmokeVolumeScript = preload("res://scripts/smoke_volume.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 
-# Vision scans on a timer, not per frame. Visibility changing 3x a second is
-# imperceptible and the scan is O(viewers x targets) per team.
-const TICK_INTERVAL := 0.3
+# SKIRMISH_PERF_TROUBLESHOOTING.md §12.6. Vision scans on a timer, not per frame.
+# Visibility changing 2x a second is imperceptible and the scan is O(viewers x targets)
+# per team. Was 0.3 s (= 3.33 Hz); doubled to 0.6 s (= 1.67 Hz) because the §12.1
+# capture's `vision` section went 21 ms mean -> 56 ms mean after the cull landed
+# and stopped hiding behind 4-7 fps render frames. Halving the per-second
+# cost directly halves the per-second vision budget. The cache TTL (§_LOS_CACHE_TTL_MS
+# below) was sized 2.5x against the OLD TICK_INTERVAL (0.75s / 0.3s = ~2.5 ticks);
+# against the new interval it is now 1.25x, which is still warm across one
+# TICK_INTERVAL and improves the hit rate rather than degrading it.
+const TICK_INTERVAL := 0.6
 
 # Height the LOS ray is cast at, so a unit in a shallow dip is not blindfolded by
 # the lip of it.
@@ -99,9 +106,22 @@ var _los_cache: Dictionary = {}
 # in `invalidate_los_cache` is just a defensive backup.
 var _los_geom_version: int = 0
 
-# Shroud resolution and the two dimmed states. Unexplored is opaque; explored is
-# partly lifted and never returns to full black once seen.
-const GRID_CELL := 4.0
+# SKIRMISH_PERF_TROUBLESHOOTING.md §12.6. Shroud resolution and the two dimmed
+# states. Unexplored is opaque; explored is partly lifted and never returns to
+# full black once seen.
+#
+# §12.6 made this 6.0 m (was 4.0 m). The 4 m resolution was a screen-space fog
+# convention from the era when the shroud was a flat plane and needed fine
+# subdivision to avoid the "stair-step" edge as a unit walked a vision boundary.
+# Since §11 the shroud is a fullscreen depth-buffer pass (see the SHROUD IS
+# SCREEN-SPACE block below), so the per-cell resolution no longer drives edge
+# appearance; the cells are only the buckets the visibility logic writes into.
+# Coarsening to 6 m drops per-viewer cell count from 729 to ~441 (a viewer with
+# 50 m vision covers a 13x13 box at 4 m vs 9x9 at 6 m), saving ~40% of the
+# _update_shroud scan. The shroud image is 120x120 -> 80x80 on lake_crossing;
+# the minimap re-samples it (its own texture, see hud_minimap.gd) so the
+# change is invisible to the player.
+const GRID_CELL := 6.0
 # Playtest: "the VISION needs to be brighter in comparison to the non-visible
 # parts of the explored map." Currently-visible ground is alpha 0 - fully clear,
 # and already as bright as the terrain itself gets - so the contrast has to come
@@ -314,6 +334,11 @@ func is_visible_to_team(c, viewing_team: int) -> bool:
 func invalidate_los_cache() -> void:
 	_los_geom_version += 1
 	_los_cache.clear()
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §12.6. The shroud fast path is keyed
+	# on viewer position; a structure event can change which cells are
+	# visible even with no viewer moving. Forcing the count to -1 makes
+	# the next _inputs_unchanged check fail and the cell scan to run once.
+	_last_constructs_count = -1
 
 
 # Illumination ammo and sensor beacons. A flare is simply a stationary observer
@@ -514,9 +539,22 @@ func _world_to_cell(x: float, z: float) -> Vector2i:
 
 
 # Only cells that CHANGE STATE are written, so cost scales with how much vision
-# moved this tick rather than with the size of the map.
+# moved this tick rather than with the size of the map. SKIRMISH_PERF_TROUBLESHOOTING.md
+# §12.6: the cell-scan IS skipped when the input is identical to last tick (the
+# _inputs_unchanged check below), so the cost scales with how much vision MOVED
+# THIS TICK rather than with N viewers x cells x sqrt. Both lines of defence are
+# needed: the early-exit at the top avoids the scan; the `changed` flag at the
+# bottom guards the set_pixel writes.
 func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 	if _texture == null:
+		return
+	# Fast path. The cell-visiting loop below is the 56 ms mean in the §12.1
+	# capture, and it runs on EVERY tick. When the player has held position for
+	# ten seconds, no viewer has moved more than a couple of metres, no beacon
+	# has changed, and the cell set we already wrote to _prev_cells is still
+	# correct. The hash below is a fixed-size fingerprint of the input, O(N) in
+	# the number of viewers, and a hit returns before the cell scan starts.
+	if _inputs_unchanged(local_constructs, beacons):
 		return
 	var viewers: Array = []
 	for o in local_constructs:
@@ -566,8 +604,62 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 		# minimap builds a re-shaded one) can skip rebuilding on the many ticks
 		# where nothing moved far enough to uncover a new cell.
 		shroud_version += 1
+	# Cache the just-computed input for next tick's fast-path compare.
+	# Done at the end (not at the start) so we record what was actually
+	# processed; identical to what was passed in today, but the invariant
+	# is documented at the call site rather than in a comment that could
+	# drift. O(N) on local_constructs; cheap relative to the 16k cell scan
+	# above that we just skipped on the fast path.
+	_last_constructs_count = local_constructs.size()
+	_last_beacons_count = beacons.size()
+	_last_constructs_fingerprint.clear()
+	for c in local_constructs:
+		if is_instance_valid(c):
+			_last_constructs_fingerprint.append(c.global_position)
 
 
+# SKIRMISH_PERF_TROUBLESHOOTING.md §12.6. Input fingerprint for the _update_shroud
+# fast path. Stores a quantized (x, z) per viewer at 0.5 m resolution, the
+# vision radius truncated to an int, and the beacon count. Compared with
+# `==` against the new input; a hit means "nothing the scan would care
+# about changed", so the cell scan can be skipped entirely.
+#
+# 0.5 m is well under the new GRID_CELL (6.0 m), so a viewer that moved
+# inside its own cell still passes. A viewer that moved past a cell
+# boundary fails, which is the right answer - the cell set WILL differ.
+#
+# `_last_input_hash` is parallel to the LOS cache: both are invalidated
+# wholesale on structure events. The LOS cache goes via
+# invalidate_los_cache(); this one is bumped in the same place, see
+# _on_structure_event below.
+var _last_constructs_count: int = -1
+var _last_beacons_count: int = -1
+var _last_constructs_fingerprint: Array = []
+
+
+func _inputs_unchanged(local_constructs: Array, beacons: Array) -> bool:
+	if local_constructs.size() != _last_constructs_count:
+		return false
+	if beacons.size() != _last_beacons_count:
+		return false
+	# Compare each viewer's quantised (x, z) and vision. A failure on
+	# any one viewer fails the whole check (cheaper than tracking a
+	# fine-grained "which ones moved" diff - the cell scan is the
+	# expensive part, and if ANY viewer moved, the cell set might
+	# differ and we have to scan).
+	for i in range(local_constructs.size()):
+		var c: Node = local_constructs[i]
+		if not is_instance_valid(c):
+			return false
+		var p: Vector3 = c.global_position
+		var prev: Vector3 = _last_constructs_fingerprint[i]
+		# 0.5 m cell quantisation; well under GRID_CELL=6.0.
+		if int(p.x * 2.0) != int(prev.x * 2.0):
+			return false
+		if int(p.z * 2.0) != int(prev.z * 2.0):
+			return false
+		continue
+	return true
 # Whether a map cell has ever been seen. Exposed for the minimap, which draws
 # terrain only where the player has been.
 func cell_explored(x: float, z: float) -> bool:

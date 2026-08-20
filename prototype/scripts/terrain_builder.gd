@@ -2644,6 +2644,15 @@ const AMBIENT_ORE_MAX_COUNT: int = 440   # = 20 clusters * 22 items ceiling
 
 static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0) -> Array:
 	var half: float = map_def.get("map_half_extents", 80.0)
+	# SKIRMISH_PERF_TROUBLESHOOTING.md §12. Per-map density multiplier.
+	# Multiplies both the cluster count and the per-cluster item cap,
+	# so the prop total scales as density^2. Default 1.0; lake_crossing
+	# ships at 0.5 to halve the scatter cost.
+	var density: float = clampf(float(map_def.get("ambient_scatter_density", 1.0)), 0.1, 2.0)
+	var cluster_count: int = int(round(float(AMBIENT_TREE_CLUSTER_COUNT) * density))
+	var items_max: int = int(round(float(AMBIENT_TREE_ITEMS_MAX) * density))
+	var items_min: int = int(round(float(AMBIENT_TREE_ITEMS_MIN) * density))
+	var max_count: int = cluster_count * items_max
 
 	# Avoidance set, identical to _spawn_grassland_clutter() so the two
 	# passes can't disagree on "where is it legal to put a prop."
@@ -2663,20 +2672,20 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 	# so an ore and a tree never overlap.
 	var placed_positions: Array = []
 	var clusters := _pick_cluster_centers(
-		rng, half, AMBIENT_TREE_CLUSTER_COUNT, AMBIENT_TREE_CLUSTER_AVOID_RADIUS,
+		rng, half, cluster_count, AMBIENT_TREE_CLUSTER_AVOID_RADIUS,
 		avoid_points, bridge_rects, surface_rects)
 	for cluster_center in clusters:
-		var items := rng.randi_range(AMBIENT_TREE_ITEMS_MIN, AMBIENT_TREE_ITEMS_MAX)
+		var items := rng.randi_range(items_min, items_max)
 		var placed_in_cluster := _place_in_cluster(
 			rng, cluster_center, AMBIENT_TREE_CLUSTER_RADIUS, items,
 			avoid_points, bridge_rects, surface_rects,
-			AMBIENT_TREE_AVOID_RADIUS, AMBIENT_TREE_MAX_COUNT - placed)
+			AMBIENT_TREE_AVOID_RADIUS, max_count - placed)
 		for pos in placed_in_cluster:
 			pos.y = terrain_height_at(map_def, pos)
 			TerrainGreeblesScript.spawn_ambient_tree(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_TREE_AMOUNT)
 			placed_positions.append(pos)
 			placed += 1
-			if placed >= AMBIENT_TREE_MAX_COUNT:
+			if placed >= max_count:
 				return placed_positions
 	return placed_positions
 
@@ -2697,6 +2706,14 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 #     never draw the same RNG sequence for the same attempt.
 static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0, ambient_tree_positions: Array = []):
 	var half: float = map_def.get("map_half_extents", 80.0)
+	# Same density multiplier as the trees, so a 0.5 map cuts the ore
+	# scatter by the same proportion (see the _spawn_ambient_trees
+	# header for the math).
+	var density: float = clampf(float(map_def.get("ambient_scatter_density", 1.0)), 0.1, 2.0)
+	var cluster_count: int = int(round(float(AMBIENT_ORE_CLUSTER_COUNT) * density))
+	var items_max: int = int(round(float(AMBIENT_ORE_ITEMS_MAX) * density))
+	var items_min: int = int(round(float(AMBIENT_ORE_ITEMS_MIN) * density))
+	var max_count: int = cluster_count * items_max
 
 	# Same avoidance set as the trees, plus the trees themselves (an
 	# ore and a tree are NOT allowed to overlap - a 2x2 metre stack
@@ -2711,19 +2728,19 @@ static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale:
 	rng.seed = hash(map_def.get("name", "ambient_ore")) + 0xB5C6D7E8
 	var placed = 0
 	var clusters := _pick_cluster_centers(
-		rng, half, AMBIENT_ORE_CLUSTER_COUNT, AMBIENT_ORE_CLUSTER_AVOID_RADIUS,
+		rng, half, cluster_count, AMBIENT_ORE_CLUSTER_AVOID_RADIUS,
 		avoid_points, bridge_rects, surface_rects)
 	for cluster_center in clusters:
-		var items := rng.randi_range(AMBIENT_ORE_ITEMS_MIN, AMBIENT_ORE_ITEMS_MAX)
+		var items := rng.randi_range(items_min, items_max)
 		var placed_in_cluster := _place_in_cluster(
 			rng, cluster_center, AMBIENT_ORE_CLUSTER_RADIUS, items,
 			avoid_points, bridge_rects, surface_rects,
-			AMBIENT_ORE_AVOID_RADIUS, AMBIENT_ORE_MAX_COUNT - placed)
+			AMBIENT_ORE_AVOID_RADIUS, max_count - placed)
 		for pos in placed_in_cluster:
 			pos.y = terrain_height_at(map_def, pos)
 			TerrainGreeblesScript.spawn_ambient_ore(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_ORE_AMOUNT)
 			placed += 1
-			if placed >= AMBIENT_ORE_MAX_COUNT:
+			if placed >= max_count:
 				return
 
 # --- Slope-driven rock exposure ---

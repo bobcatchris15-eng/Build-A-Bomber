@@ -1,8 +1,10 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/battle/match_director.gd" id="1_director"]
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="2_rtscam"]
 [ext_resource type="Script" path="res://scripts/chase_camera.gd" id="3_chasecam"]
+[ext_resource type="Script" path="res://scripts/light_cap.gd" id="4_lightcap"]
+
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_bt"]
 sky_top_color = Color(0.36, 0.40, 0.44, 1)
@@ -99,3 +101,6 @@ shape = SubResource("BoxShape3D_ground")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
 mesh = SubResource("BoxMesh_ground")
+
+[node name="LightCap" type="Node" parent="."]
+script = ExtResource("4_lightcap")

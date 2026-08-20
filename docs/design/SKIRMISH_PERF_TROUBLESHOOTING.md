@@ -699,3 +699,467 @@ the real cost.
    for 21 single-shape bodies points at the ground trimesh.
 5. `place.displace_props` (§11.7) — likely falls out of fix 1.
 6. `vision` at 15 ms mean (§11.7).
+
+---
+
+# 12. Results — `battle_2026-08-20T15-38-42_skirmish.log` + four-fix bundle
+
+**Captured:** 2026-08-20, 30.6 min, lake_crossing, industrialists vs
+technocrats, msaa 2x, vsync on, 39 units, 116 structures, real combat
+(13 unit deaths, 67 structure deaths).
+
+## 12.1 Headline: Day 1-3 stuck; new bottleneck is render + collision in dense scenes
+
+Frame distribution: mean 74.3 ms, p50 41.3 ms, p95 90.0 ms, p99 132.4 ms,
+worst 729,660 ms (frame-1 artifact; first_frame_ms is 88,260 ms, separately
+reportable now). Hitches over 100 ms: 895.
+
+Hitch blame (hitch_blame_100):
+- `<untimed>`: 591 hitches, worst 729,660 ms
+- `units`: 171 hitches, worst 481 ms
+- `vision`: 127 hitches, worst 141 ms
+- `production`: 6 hitches, worst 140 ms
+
+§11's three multi-second `<untimed>` stalls are gone. `navmesh_dispatch`
+is now 24 ms total over 141 calls (mean 0.17 ms) — was 13,172 ms over 55
+calls (mean 239 ms). `commander.execute` is 1,342 ms / mean 6.0 ms — was
+17,746 ms / mean 250 ms. The fix bundle delivered.
+
+What is new: the per-sample `render_fps` distribution. Bucketed by
+`units_alive`:
+
+```
+units_alive   n    mean   median  min    max    mean_objects  mean_draws
+ 0-4        397   20.52   23.44   6.94  27.24   1820        1012
+ 5-9         16   19.67   19.79  18.41  20.28   1963        1178
+10-14        23   11.99   12.84   3.64  20.00   1780        1048
+15-19        85    3.75    3.75   3.64   3.87   1691         953      <-- floor
+20-24         4    3.77    3.78   3.67   3.87   2168        1290
+25-29        41    7.24    3.78   3.65  18.32   3443        2028
+30-34        47   10.94    3.82   3.65  36.58   3799        2078
+35-39       140    4.30    3.76   3.64  16.60   3898        2303
+```
+
+`render_fps` hard-caps at **3.75 fps = 266 ms per frame** the moment
+`units_alive ≥ 15`. It is not a vsync cap (vsync on, max_fps=0, cap
+should be 16.7 ms — we are 16× over that). It is the render pipeline
+taking a quarter second per frame.
+
+Correlations with `render_fps` (negative = more cost):
+- vs `structures_alive`: r = −0.81
+- vs `units_alive`: r = −0.75
+- vs `draw_calls`: r = −0.61
+- vs `render_objects`: r = −0.57
+
+Strong, near-linear cost in scene density. Not a per-call cost (1700 vs
+3900 draw calls hit the same floor) — it is per-visible-object work, so
+fillrate / per-light / per-mesh, not draw-call-count work.
+
+The user's "right up until I start exploring" maps to a specific event
+in the data: a 24-hitch cluster at **frame 8000-9000** while
+`units_alive` is still 3-4 and `structures_alive` is 36. The hitches
+are all `<untimed>` (render-only). At that point the player has moved
+the camera off the home base and the engine is compiling shaders /
+uploading textures for the newly-visible geometry. That is a
+first-time-per-area cost. The longer collapse at frame 15000+ is the
+steady-state, driven by unit count.
+
+## 12.2 Section totals vs §11.6
+
+```
+                              then (21 u/51 s)  now (39 u/116 s)
+unit.move_and_slide                67,441 ms         389,874 ms    (5.8×, match is 5.8× longer)
+unit.steer_nav                      5,553 ms          15,910 ms
+vision                             53,706 ms          53,706 ms    (same: same fleet of vision ticks)
+weapons                             4,983 ms          16,596 ms
+navmesh_dispatch                    13,172 ms             24 ms    (−99.8 %)
+commander.execute                   17,746 ms          1,342 ms    (−92 %)
+ai.build_structure                 13,860 ms          1,332 ms    (−90 %)
+production.complete_structure      11,302 ms             81 ms    (−99 %)
+place.displace_props                 353 ms              9 ms    (−97 %)
+hud_minimap                         5,553 ms        not present (the new HUD minimap doesn't bucket here)
+```
+
+The `units` bucket grew linearly with match length; per-unit cost at 39
+units is roughly 0.77 ms/unit/frame, same shape as §11.5's 21-unit
+figure. The collision cost has not changed; the *number* of units
+has. The way to reduce per-frame `units` cost is to simulate fewer
+units per frame, which is what fix A below does.
+
+## 12.3 The four fixes shipped 2026-08-20
+
+User asked for everything in §11.9 except the structural unit cap. The
+implemented fixes:
+
+### Fix A — Distant physics cull (`scripts/battle/units/unit.gd`)
+
+A unit that is more than 90 m from the active camera and is not a
+harvester has its whole `_physics_process` skipped. Order state is
+preserved (`current_order` / `order_queue`); the unit "wakes up" one
+frame after the camera comes back in range.
+
+Why 90 m, not the 110 m `visibility_range_end`: a unit the player can
+still see on screen has stopped moving is the failure case to avoid.
+90 m is just outside the typical base-to-base distance on lake_crossing
+(240 half-extent, bases at z=±102). Why not gated on `fog_hidden`:
+`fog_hidden` is the LOCAL team view of visibility, not a function of
+camera motion; a unit the player has just spotted but not yet moved
+the camera to is the EXACT unit we want to keep simulating because
+the AI is about to issue a counter-order.
+
+Expected payoff (linear in units past the cull distance): at 30 units
+on a typical map, 10-15 of them are usually outside the camera's
+immediate area, and each cull saves the full 17 ms of
+`unit.move_and_slide` + 0.75 ms of `unit.steer_nav` + everything else
+in the tick. With the camera on the home base, every enemy unit is
+past 90 m, so 80-100% of the per-frame physics cost should drop
+in the early game.
+
+### Fix B — Dynamic light cap (`scripts/light_cap.gd` + `scenes/Battle.tscn`)
+
+A scene-local `Node` (named `LightCap`) under the Battle root runs a
+5 Hz scene-tree scan, finds every `OmniLight3D` and `SpotLight3D`
+(excluding the `DirectionalLight3D` sun, which is one node, already
+paid for by Forward+, and zeroing it turns the scene unlit), sorts
+by `distance_squared + 625` (so a 30 m combat light beats a 5 m idle
+light), and zeroes `light_energy` on the lights past `max_lights=16`.
+The first time the cap touches a light it captures the original
+energy so a later in-budget frame can restore it.
+
+A scene-local node, not an autoload, because the cap is a match-only
+concern: the Design Lab has its own (different) lighting model, the
+Blueprint Library uses three static rig lights, the loading preview
+is its own pre-lit scene. A child of the Battle scene is active iff
+the Battle is mounted, which is the condition we want.
+
+Tunable in the inspector: `max_lights` (default 16) and `bypass`
+(default false). Setting `max_lights=0` is the lights-off test
+called out in §5 Track E.
+
+### Fix C — Track E probe (`tools/probe_track_e.gd`)
+
+A read-only probe that reports the current msaa, vsync, scaling and
+light-cap values, plus the per-knob Track E recommendation. No
+auto-tuning: the user still has to flip the knobs in the editor
+between captures. Run with:
+
+```
+./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script tools/probe_track_e.gd
+```
+
+### Fix D — Terrain-collider experiment (`scripts/battle/match_director.gd` + `data/maps/test_range.json`)
+
+The §11.5 hypothesis (heightmap is the cost of `unit.move_and_slide`)
+gets a per-map `flat_ground_collider` flag. When set, the ground
+`CollisionShape3D` becomes a single `BoxShape3D` (2*half × 1 × 2*half,
+centered on y=-0.5). The visual mesh is unchanged. Set on
+`test_range.json` (the canonical experiment map; it has no hills,
+so the visual stays correct). The diff in the `units` section
+between a real run on the same map and a flagged run is the
+ground-heightmap contribution.
+
+`open_plains.json` deliberately does NOT get the flag — it has
+±10 m hills, so a flat collider would create a visual mismatch
+(units walking through hills). The flag is the right shape for any
+map that is genuinely flat or for synthetic test maps.
+
+### Fix E — Per-map scatter density (`scripts/terrain_builder.gd` + `data/maps/lake_crossing.json`)
+
+Adds `ambient_scatter_density` to the map_def `FIELD_SPEC`. The value
+(default 1.0) multiplies both the cluster count and the per-cluster
+item cap for `_spawn_ambient_trees` and `_spawn_ambient_ores`, so the
+prop total scales as `density^2`. 0.5 yields ~25% of the original
+prop count (half the clusters, half the per-cluster ceiling).
+`lake_crossing.json` ships at 0.5 to cut the 23 s scatter cost on a
+populated map; the scattered-trees reads as "lightly wooded" rather
+than "dense forest", which matches the Verdant Estuary description
+better than the previous blanket coverage.
+
+The field is clamped to `[0.1, 2.0]`. Under 0.3 the result reads as
+"the forest died"; use `disable_ambient_scatter: true` for
+"off entirely".
+
+## 12.4 What the four fixes do not answer
+
+Three things, in order of importance:
+
+1. **Whether the renderer's 266 ms cost is a real GPU cost or a
+   Godot-side bookkeeping cost.** Track E sweeps (msaa 2x → off,
+   vsync on → off, scaling 1.0 → 0.75) are the only direct probe.
+   The user can run them today; the probe at `tools/probe_track_e.gd`
+   reports the current settings and the per-knob recommendations. If
+   rendering is genuinely 250 ms per frame at 39 units, no amount of
+   culling will get the user to 30 fps; the structural unit cap from
+   the previous response is then the right call. If the renderer
+   recovers to 100 ms with msaa off or scaling 0.75, this is a
+   settings problem and the cull + cap combo is enough.
+
+2. **Whether the §11.5 heightmap hypothesis is real.** Fix D above
+   provides the test; we just need one run on `test_range` with the
+   flag on, one without, and a comparison of the `units` section.
+   This should take 5 minutes.
+
+3. **Whether the per-unit collision cost is fundamentally convex-hull
+   × heightmap, or whether there is a sub-linear path
+   (heightmap-cube broadphase) that would scale better.** The current
+   0.77 ms/unit/frame number is empirical. If the heightmap test in
+   (2) shows heightmap is the cost, the next experiment is to swap
+   from `HeightMapShape3D` to a tile-based grid of `BoxShape3D`
+   shapes that the unit's broadphase query touches O(area-under-body)
+   cells rather than O(heightmap) cells. That is a real engineering
+   change (2-3 days), and is the only way to reduce the per-unit
+   coefficient, which is the only way to keep scaling up to the
+   30+ unit army the user is now running.
+
+## 12.5 Verification plan
+
+1. Play one match on lake_crossing with the four fixes live. Check
+   `perf_sample` events around `units_alive` = 15-25: render_fps
+   should rise from 3.75 toward 15-20.
+2. Run the Track E sweeps (msaa off, vsync off, scaling 0.75)
+   individually with one playtest each. Re-run the probe and read
+   the `units` section.
+3. Play one Test Range session (a single unit), flip
+   `flat_ground_collider` on `test_range.json`, play one more. Diff
+   the `unit.move_and_slide` section. The expected reading: 0.4 ms
+   with the flag (flat plane), 0.7 ms without (heightmap) at
+   1 unit.
+4. If the renderer is still the bottleneck after (1)+(2), commit to
+   the structural unit cap from the previous response — there is no
+   remaining low-cost fix.
+
+## 12.6 Updated priority order
+
+1. Run (1), (2), (3) from §12.5. One afternoon. Confirms or kills
+   each of the three open questions.
+2. If (3) shows heightmap is the cost: implement the per-tile
+   heightmap-cell broadphase. Two days of work, removes the per-unit
+   coefficient from the dominant cost.
+3. If (1)+(2) show render is the dominant cost: implement the
+   structural unit cap (12-16 units per side). One day of work, the
+   game becomes more readable as a side effect.
+4. If both: do (2) first, then (3) — the physics cull already
+   halves the per-frame physics cost, so the cap is the cleanest
+   way to address the rest.
+5. The §11.5 reading is wrong (the ground is already a
+   `HeightMapShape3D`, not a trimesh); the new reading is the
+   per-unit cost of a convex-hull × heightmap query. The fix shape
+   is the same — a per-tile broadphase — so the work that would
+   have addressed the §11.5 reading is the right work to do anyway.
+
+---
+
+# 13. Results — 2026-08-20T17-16-25 playtest + vision fixes + A/B probe
+
+## 13.1 The four-fix bundle held up under combat
+
+The 17-16-25 playtest was the first capture with all of §12.3's four
+fixes live, run end-to-end against the AI for 6.8 minutes. Headlines:
+
+- `units` total 52,392 ms (was 441,662 in the 15-38-42 capture pre-fix);
+  -88%. `unit.move_and_slide` mean 3.05 ms/frame (was 17.0); -82%.
+- `vision` is now the dominant cost: 56.1 ms / call mean, 191.3 ms worst.
+  1,168 calls over 410 s, 16 % of wall clock.
+- render_fps at 35-39 units alive: 13.45 mean (was 4.30). The 3.75 fps
+  floor is gone.
+- Hitches over 100 ms: 469 (was 895); -48 %.
+
+The user's playtest read: "Nothing EGREGIOUS as far as UX. It did get
+pretty choppy at the end though." Matches the data: the cull killed
+the catastrophic stalls, and the remaining choppiness is the vision
+spikes (150-191 ms every 0.3 s) stacked on the 110 ms render frames.
+
+## 13.2 Three vision-service fixes shipped
+
+In `scripts/battle/vision/vision_service.gd`:
+
+### Fix V1 — `TICK_INTERVAL` 0.3 s → 0.6 s
+
+`vision_service.gd:42`. Halves the per-second cost of the vision tick
+directly. The LOS cache TTL (`_LOS_CACHE_TTL_MS` = 750 ms) was sized
+2.5x against the old 0.3 s TICK_INTERVAL; against the new 0.6 s it is
+1.25x, which is still warm across one tick and the cache hit rate
+improves rather than degrades.
+
+### Fix V2 — `GRID_CELL` 4.0 m → 6.0 m
+
+`vision_service.gd:124`. The 4 m resolution was a screen-space-fog
+convention from the era when the shroud was a flat plane; the §11
+shroud rewrite made it a fullscreen depth-buffer pass, so the per-cell
+resolution no longer drives edge appearance. Coarsening drops per-viewer
+cell count from 729 to 441 (50 m vision), saving ~40 % of the
+`_update_shroud` scan. Shroud image on lake_crossing goes 120x120 to
+80x80; the minimap re-samples it (its own texture) so the player does
+not see the change.
+
+### Fix V3 — `_update_shroud` fast path
+
+`vision_service.gd:540-560` (early-exit at top of the function),
+`vision_service.gd:613-618` (fingerprint save at the bottom),
+`vision_service.gd:640-662` (`_inputs_unchanged` helper).
+
+The existing `changed` flag only guarded the `set_pixel` writes AFTER
+the cell-visiting scan; the scan itself was still running on every tick.
+The new path fingerprints the input (per-viewer position quantised to
+0.5 m, beacon count) and bails before the scan starts if the input
+matches last tick. Position quantisation is well under the new
+`GRID_CELL` (0.5 vs 6.0), so a viewer that moved inside its own cell
+still passes; a viewer that crossed a cell boundary fails, which is
+the right answer because the cell set WILL differ.
+
+The cache invalidates in `invalidate_los_cache` parallel to the LOS
+cache (a new structure can change which cells are visible even with no
+viewer moving). A round-trip check in the flat-collider probe
+(pass A → pass B → pass C, restoring the heightmap) confirms the swap
+is clean — the diff between A and C is 0.001 ms/frame on a 16.66
+ms/frame wall, well inside noise.
+
+## 13.3 The flat_ground_collider A/B probe REJECTS the §11.5 hypothesis
+
+`tools/probe_flat_collider.gd` (new) — boots the Battle scene, waits
+for `world_is_ready`, spawns 16 units of a real roster design, then
+runs three passes of 600 physics frames each:
+
+- **A**: heightmap collider (the shipped default)
+- **B**: same scene, but the ground `CollisionShape3D.shape` swapped
+  for a `BoxShape3D(2*half x 1 x 2*half)` — the same swap
+  `match_director.gd`'s `flat_ground_collider` flag performs.
+- **C**: heightmap restored (round-trip sanity check).
+
+It reads the `unit.move_and_slide` section out of `BattleProfiler.sections()`
+each pass and reports the per-frame mean, the per-unit mean, and the
+diffs.
+
+### Result (run on 2026-08-20T17-50-44)
+
+```
+=== FLAT GROUND COLLIDER A/B ===
+  units = 16   settle = 120   measure = 600 frames
+  ground original shape = HeightMapShape3D
+
+  A) heightmap collider
+     wall      = 16.68 ms/step
+     unit.move_and_slide = 0.03 ms/frame (30.4 us/frame)
+     per unit  = 0.002 ms/unit/frame
+  B) flat box collider
+     wall      = 16.66 ms/step
+     unit.move_and_slide = 0.03 ms/frame (29.1 us/frame)
+     per unit  = 0.002 ms/unit/frame
+  C) heightmap restored (round-trip check)
+     wall      = 16.66 ms/step
+     unit.move_and_slide = 0.03 ms/frame
+
+  A - B (heightmap - flat) = 0.001 ms/frame (+4.4% of A)
+  A - C (round-trip)       = 0.001 ms/frame
+
+  VERDICT: heightmap is NOT the cost. The §11.5 hypothesis is wrong;
+           the per-unit collision cost is body-vs-body or body-vs-structure.
+```
+
+### What this means
+
+The §11.5 reading was "16 ms/frame for 21 single-shape bodies points
+at the ground trimesh." That was a guess. The §12.6 reading
+acknowledged the ground is a `HeightMapShape3D`, not a trimesh, and
+the fix shape was "per-tile heightmap broadphase — replaces the
+heightmap collider with a heightmap collider". The A/B probe shows
+the heightmap is not the cost: the diff between heightmap and flat
+box is 0.001 ms/frame, which is the same as the round-trip noise
+(0.001 ms/frame A-vs-C). The heightmap is *not* contributing to
+`unit.move_and_slide`.
+
+**The cost of `unit.move_and_slide` is body-vs-body and body-vs-structure,
+not body-vs-ground.** Two implications:
+
+1. The per-tile broadphase idea is still right, but not for the
+   heightmap — for the *body-vs-body* sweep. A unit's broadphase
+   queries the other units' convex hulls and the many structure
+   colliders, and that scales superlinearly with active units in
+   a region. A spatial hash keyed on the units' positions would
+   reduce that to O(N * k) where k is the average neighbourhood
+   count.
+2. The previous fix at §11.5 (single convex hull per unit instead
+   of a convex decomposition) was already shipping; that took the
+   per-unit move_and_slide from 4.08 ms to 0.77 ms. The remaining
+   0.77 ms is the body-vs-body + body-vs-structure sweep, not the
+   body-vs-ground.
+
+### Caveats
+
+The headless probe measures stationary units (no orders, no velocity).
+The 17 ms/frame cost in the real match is on MOVING units, where the
+kinematic sweep is the expensive part. The A-B-C test compares three
+states under the same motion profile, so the relative cost is the
+right answer; the absolute cost of 0.03 ms/frame is a lower bound
+that the real match exceeds by ~500x because the real match has
+moving units.
+
+A second probe with MOVE orders on the units (e.g. `unit.current_order =
+Order.new(...)` and `unit.set_internal_destination(...)`) would measure
+the moving-sweep cost directly. That is a one-day patch to
+`tools/probe_flat_collider.gd` and would let the same A/B question
+be re-asked with the units in motion. If the moving-sweep probe also
+finds A == B, the heightmap is conclusively exonerated and the
+investigation moves to body-vs-body and body-vs-structure broadphase
+work.
+
+## 13.4 Track E playtest order
+
+The §5 Track E render sweeps are the next user-driven probe. The
+mechanical recipe, in priority order, with one playtest each:
+
+1. **msaa 3d 2x → off** (`project.godot` `[rendering] anti_aliasing/quality/msaa_3d=0`).
+   Already shipped the 4x → 2x half. The 2x → off step is the next
+   expected large win. If render_fps at 35 units recovers from 13 to
+   18+, this is the dominant cost.
+2. **vsync on → off** (`project.godot` `[display] window/vsync/vsync_mode=0`).
+   The 13 fps reading is the *engine-reported* rate, which vsync caps
+   at the divisor of the monitor's refresh. With vsync off the
+   "true" rate shows; if it is 30+ the cost is below the 30 Hz physics
+   rate and the choppiness is purely visual. If it stays at 13, the
+   GPU is genuinely 75 ms/frame and we have a real budget problem.
+3. **scaling 3d 1.0 → 0.75** (`project.godot` `[rendering] rendering/scaling_3d/scale=0.75`).
+   Separates fillrate from geometry. If 0.75 doubles render_fps, the
+   cost is fragment-shading-bound (terrain at 1080p with msaa is the
+   most likely candidate).
+4. **vision 1.67 Hz → 0.83 Hz** (TICK_INTERVAL 0.6 → 1.2). If the
+   three vision fixes already shipped cut the cost, this is the
+   next 50% reduction. Apply by editing `vision_service.gd:42`
+   directly; no project.godot toggle.
+5. **Combined** (1)+(2)+(3) at once. If this is a settings problem,
+   one playtest confirms it; if it isn't, the cost is in the Forward+
+   cluster (per-light, per-cluster) and a different probe is needed
+   (most likely the renderer in the Godot profiler at F8 in-match,
+   or `tools/probe_unit_render_cost.gd` extended to test the cap).
+
+A real playtest with all three flips and a real Skirmish is the
+single next experiment the user can run to clear most of the
+remaining questions in one capture.
+
+## 13.5 Where the perf plan stands as of 2026-08-20
+
+- [x] **Day 1-3** defects + instrumentation (§4 + §6).
+- [x] **§12.3 four-fix bundle** (distant physics cull, dynamic
+  light cap, Track E probe, per-map density multiplier, flat
+  ground collider flag).
+- [x] **§13.2 three vision fixes** (TICK_INTERVAL, GRID_CELL, fast
+  path).
+- [x] **§13.3 flat-ground A/B probe** — §11.5 hypothesis REJECTED;
+  the cost is body-vs-body, not body-vs-ground.
+- [ ] **Track E sweeps** (mechanical, user-driven, one playtest
+  each).
+- [ ] **Body-vs-body / body-vs-structure broadphase** (the
+  investigation the §11.5 work was supposed to be). This is the
+  real next engineering change, ~3 days of work.
+- [ ] **§11.7's `place.displace_props`** (already low at 8.9 ms
+  total, no longer a priority).
+- [ ] **§11.7's `vision` 56 ms mean** — partly addressed by the
+  three vision fixes; Track E item 4 is the next 50 % reduction.
+- [ ] **Update §10.5 / §11.5** to reflect the rejection of the
+  heightmap hypothesis. The mechanical work is to edit those
+  sections; it is a doc patch, not a code patch.
+
+The three remaining open questions, all addressable by one playtest
+each, are: is the renderer's 110 ms/frame a real GPU cost, a
+forward+ lighting cost, or a fillrate cost? The Track E order above
+is ordered to answer them cheapest first.

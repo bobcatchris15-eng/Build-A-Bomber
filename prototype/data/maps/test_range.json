@@ -5,6 +5,7 @@
 	"map_half_extents": 40.0,
 	"ground_color": [0.36, 0.34, 0.30],
 	"disable_ambient_scatter": true,
+	"flat_ground_collider": true,
 	"base_zones": [],
 	"water_areas": [],
 	"hills": [],

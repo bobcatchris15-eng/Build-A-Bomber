@@ -28,6 +28,17 @@ extends RefCounted
 const C = preload("res://scripts/battle/ai/considerations.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+
+# SKIRMISH_PERF_TROUBLESHOOTING.md §14. Cap the rate at which the AI
+# issues the same structure type. The 20:49:15 capture showed 14
+# power plants in 1000 frames (1 every 16 frames = 0.5 s), each
+# placement driving a 320-368 ms units-bucket hitch. The cap is
+# per TYPE, so the AI can still place a refinery while the power
+# plant is rate-limited. The cap is at execute() not decide() so
+# the AI's score for a structure doesn't decay just because the
+# build itself was rate-limited - it keeps choosing the best
+# action; the cap drops the actual placement call.
+const BUILD_RATE_CAP_SECONDS := 2.0
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 # SKIRMISH_PERF_TROUBLESHOOTING.md §5 Track B / §6 item 1.
 # Profiler sections are added INSIDE this class so the per-step
@@ -127,6 +138,12 @@ const PLANNING_HORIZON := 30.0
 const MIN_DECISION_INTERVAL := 0.5
 
 var team: int = 1
+# SKIRMISH_PERF_TROUBLESHOOTING.md §14. Last placement time per
+# structure type, in milliseconds (Time.get_ticks_msec()). Empty
+# until the first placement of each type; the cap check is
+# `now - last < BUILD_RATE_CAP_SECONDS * 1000` so a missing key
+# (treated as 0) lets the first placement through.
+var _last_build_at_ms: Dictionary = {}
 var difficulty: String = "normal"
 
 var _world = null
@@ -485,9 +502,11 @@ func _execute(action: int, state: Dictionary) -> void:
 		Action.EXPAND_ECONOMY:
 			_world.ai_build_unit(team, "harvester")
 		Action.ADD_REFINERY:
-			_world.ai_build_structure(team, "refinery")
+			if _build_rate_ok("refinery"):
+				_world.ai_build_structure(team, "refinery")
 		Action.ADD_POWER:
-			_world.ai_build_structure(team, "power_plant")
+			if _build_rate_ok("power_plant"):
+				_world.ai_build_structure(team, "power_plant")
 		Action.ADD_PRODUCTION:
 			# The director picks WHICH manufactory - it knows about hull tiers and
 			# this does not need to.
@@ -504,6 +523,19 @@ func _execute(action: int, state: Dictionary) -> void:
 			_world.ai_build_defence(team)
 		Action.PUSH:
 			_world.ai_push(team, state["combat"])
+
+
+# SKIRMISH_PERF_TROUBLESHOOTING.md §14. Per-type build rate cap. The
+# first placement of a type (last_ms == 0) always passes; subsequent
+# placements need BUILD_RATE_CAP_SECONDS since the last one. Returns
+# true and records the timestamp on pass, returns false on block.
+func _build_rate_ok(type: String) -> bool:
+	var now_ms: int = Time.get_ticks_msec()
+	var last_ms: int = int(_last_build_at_ms.get(type, 0))
+	if now_ms - last_ms < int(BUILD_RATE_CAP_SECONDS * 1000.0):
+		return false
+	_last_build_at_ms[type] = now_ms
+	return true
 
 
 # Does this design answer `role`? The blueprint's own module list is the source
