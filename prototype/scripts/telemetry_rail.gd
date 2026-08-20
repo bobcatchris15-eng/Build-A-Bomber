@@ -5,7 +5,6 @@ const DesignStatsScript = preload("res://scripts/design_stats.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
-const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
 const DrivetrainScript = preload("res://scripts/drivetrain.gd")
 const WeaponAlphaScript = preload("res://scripts/weapon_alpha.gd")
 const PhosphorPanelScript = preload("res://scripts/ui/phosphor_panel.gd")
@@ -375,7 +374,7 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 		tech_req_label.visible = true
 		var names: Array = []
 		for r in req_buildings:
-			names.append(ProductionHUDScript._format_building_name(r))
+			names.append(str(r).replace("_", " ").capitalize())
 		tech_req_label.text = "Required Buildings: %s" % ", ".join(names)
 
 	# LAST, and that is the whole reason it is down here rather than up with the

@@ -6,8 +6,10 @@ extends Control
 # StampedLabel are no longer battle-specific chrome - the design lab's new
 # bottom toolboxes (see ui_design_lab_toolboxes.gd) want the same chamfered
 # metal and the same enamel lettering. The class_name is unchanged so every
-# existing caller (battle/hud/production_hud.gd, battle/hud/admin_menu.gd,
-# and the new design-lab widget) keeps compiling.
+# existing caller keeps compiling. NOTE 2026-08-20: production_hud.gd is gone
+# (the battle HUD was rebuilt into scripts/hud/, which uses flat StyleBoxFlat
+# panels and none of this chrome), so the remaining callers are admin_menu.gd
+# and the design-lab widget - both out-of-match.
 #
 # WHY THIS IS A CUSTOM _draw() AND NOT A StyleBoxFlat. Chris asked for "heavily
 # chamfered corners". StyleBoxFlat cannot do that - it offers `corner_radius`,

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>alert</title>
+  <path fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" d="M32 8 L58 54 L6 54 Z"/>
+  <path fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" d="M32 24 L32 38"/>
+  <circle cx="32" cy="46" r="3" fill="#ffffff" stroke="none"/>
+</svg>

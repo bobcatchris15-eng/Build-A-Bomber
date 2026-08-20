@@ -9,7 +9,7 @@ extends "res://tests/suite_base.gd"
 # accident.
 
 const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
-const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
+const HUDMinimapScript = preload("res://scripts/hud/hud_minimap.gd")
 const BattleLayersScript = preload("res://scripts/battle/battle_layers.gd")
 const SmokeVolumeScript = preload("res://scripts/smoke_volume.gd")
 const StructureScript = preload("res://scripts/battle/buildings/structure.gd")
@@ -464,24 +464,30 @@ func test_shroud_grid_cell_scales_keeping_image_size_bounded() -> bool:
 
 # --- Minimap -----------------------------------------------------------------
 
-# The minimap is a real Image specifically so this assertion can exist: headless
-# never rasterizes a SubViewport, so a render-to-texture minimap would be
+# The tactical map bakes a real Image specifically so this assertion can exist:
+# headless never rasterizes a SubViewport, so a render-to-texture map would be
 # untestable. Reading a pixel back is the payoff for that decision.
+#
+# WHAT MOVED. These two suites used to drive BattleHUD, which is retired. Blips
+# and the camera frustum are no longer pixels in this image - hud_minimap.gd
+# draws them as vector shapes on an overlay Control at display resolution - so
+# what is asserted here is what the image is still responsible for: the terrain
+# bake, the three fog states, and bounded coordinate mapping.
 func test_minimap_bakes_terrain_and_draws_blips() -> bool:
-	print("Running Test Suite: HUD - minimap pixel readback...")
+	print("Running Test Suite: HUD - tactical map pixel readback...")
 	_cleanup()
-	var hud = BattleHUDScript.new()
-	root.add_child(hud)
+	var map_node = HUDMinimapScript.new()
+	root.add_child(map_node)
 	var map: Dictionary = MapCatalog.get_map(MapCatalog.DEFAULT_MAP_ID)
-	hud.setup(_controller(), TEAM_A, map)
+	map_node.setup(_controller(), TEAM_A, map)
 
-	var image: Image = hud.minimap_image()
+	var image: Image = map_node.map_image()
 	if image == null or image.get_width() <= 0:
-		print("  [FAIL] the minimap produced no image")
-		hud.queue_free()
+		print("  [FAIL] the tactical map produced no image")
+		map_node.queue_free()
 		return false
 
-	# The static bake must not be a flat fill - a single-colour minimap is
+	# The bake must not be a flat fill - a single-colour map is
 	# indistinguishable from a broken one at a glance.
 	var first: Color = image.get_pixel(0, 0)
 	var varied := false
@@ -494,59 +500,94 @@ func test_minimap_bakes_terrain_and_draws_blips() -> bool:
 			break
 	if not varied:
 		print("  [FAIL] the baked terrain is a single flat colour")
-		hud.queue_free()
+		map_node.queue_free()
 		return false
 
-	# Cell mapping must be bounded for anything, including well off-map, or a
-	# stray unit writes outside the image.
-	for probe in [Vector2(0, 0), Vector2(9999, 9999), Vector2(-9999, -9999)]:
-		var cell: Vector2i = hud.world_to_cell(probe.x, probe.y)
-		if cell.x < 0 or cell.x >= image.get_width() \
-				or cell.y < 0 or cell.y >= image.get_height():
-			print("  [FAIL] world_to_cell(%s) escaped the image: %s" % [str(probe), str(cell)])
-			hud.queue_free()
+	# World-to-map is used for DRAWING, so it is allowed to return an
+	# off-rect point (the Control clips it). The inverse is used for CLICKS and
+	# must clamp, or a click on the panel border issues an order off the map.
+	var half: float = map.get("map_half_extents", 80.0)
+	for probe in [Vector2(-9999, -9999), Vector2(9999, 9999), Vector2(0, 0)]:
+		var w: Vector3 = map_node._to_world(probe)
+		if absf(w.x) > half + 0.001 or absf(w.z) > half + 0.001:
+			print("  [FAIL] _to_world(%s) escaped the map bounds: %s" % [str(probe), str(w)])
+			map_node.queue_free()
 			return false
-	hud.queue_free()
-	print("  [PASS] minimap bake and bounds")
+	map_node.queue_free()
+	print("  [PASS] tactical map bake and click-coordinate bounds")
 	return true
 
 
-func test_minimap_cell_scales_keeping_image_size_bounded() -> bool:
-	print("Running Test Suite: HUD - Minimap Grid Cell Scales With world_scale, Keeping Image Size Bounded (Chunk 17)...")
+# The three fog states have to be DISTINGUISHABLE in the composited image, not
+# merely present in the shroud. That is the whole feature: somewhere you have
+# never been reads differently from somewhere you have been but cannot currently
+# see, which reads differently again from what you are looking at right now.
+func test_minimap_composites_three_distinct_fog_states() -> bool:
+	print("Running Test Suite: HUD - tactical map fog has three distinct states...")
 	_cleanup()
+	var map_node = HUDMinimapScript.new()
+	root.add_child(map_node)
+	var map: Dictionary = {
+		"map_half_extents": 200.0, "world_scale": 1.0,
+		"ground_color": Color(0.4, 0.5, 0.3),
+	}
+	var controller = _controller()
+	map_node.setup(controller, TEAM_A, map)
 
-	# EXPLICIT world_scale=1.0 - Chunk 19 moved DEFAULT_WORLD_SCALE off
-	# 1.0, so a map with no key no longer means "1.0" and would silently
-	# break the expected_dim_1x formula below.
-	var hud_1x = BattleHUDScript.new()
-	root.add_child(hud_1x)
-	var map_1x: Dictionary = {"map_half_extents": 200.0, "world_scale": 1.0, "ground_color": Color(0.2, 0.25, 0.2)}
-	hud_1x.setup(_controller(), TEAM_A, map_1x)
-	var image_1x: Image = hud_1x.minimap_image()
-	var dim_1x := image_1x.get_width()
-	var expected_dim_1x: int = maxi(1, int(ceil((200.0 * 2.0) / BattleHUDScript.CELL)))
-	if dim_1x != expected_dim_1x:
-		print("  [FAIL] At world_scale=1.0, minimap dim should match the unscaled formula, expected ", expected_dim_1x, ", got ", dim_1x)
-		hud_1x.queue_free()
+	var terrain := Color(0.4, 0.5, 0.3)
+	# Reproduce what _composite_fog does to a terrain pixel in each state rather
+	# than arranging real vision over three specific cells: the shading curve is
+	# the thing under test and it is a pure function of the darkening constants.
+	# _over() blends the same way Image.blend_rect does - src over dst by alpha.
+	var void_c: Color = HUDStyle.VOID
+	var visible := terrain
+	var explored := _over(void_c, HUDMinimapScript.FOG_EXPLORED_DARKEN, terrain)
+	var unexplored := _over(void_c, HUDMinimapScript.FOG_UNEXPLORED_DARKEN, terrain)
+
+	var pairs := [
+		["visible", visible, "explored", explored],
+		["explored", explored, "unexplored", unexplored],
+		["visible", visible, "unexplored", unexplored],
+	]
+	for pair in pairs:
+		var d: float = absf(pair[1].r - pair[3].r) + absf(pair[1].g - pair[3].g) \
+			+ absf(pair[1].b - pair[3].b)
+		# 0.08 total channel distance is about the point where the two states
+		# stop being tellable apart on a 240 px map.
+		if d < 0.08:
+			print("  [FAIL] %s and %s render too similarly (distance %.3f)" % [
+				pair[0], pair[2], d])
+			map_node.queue_free()
+			return false
+
+	# And the ordering has to be monotonic: further from vision is darker.
+	if not (visible.get_luminance() > explored.get_luminance()
+			and explored.get_luminance() > unexplored.get_luminance()):
+		print("  [FAIL] fog states are not monotonically darker: %.3f / %.3f / %.3f" % [
+			visible.get_luminance(), explored.get_luminance(), unexplored.get_luminance()])
+		map_node.queue_free()
 		return false
 
-	# world_scale=4.0 on a map 4x as large (the realistic pairing - Chunk 12
-	# scales map_half_extents alongside world_scale): the baked image should
-	# come out roughly the SAME size, not 4x larger in each dimension (16x
-	# the pixels) for no visible benefit on a fixed-size UI element.
-	var hud_4x = BattleHUDScript.new()
-	root.add_child(hud_4x)
-	var map_4x: Dictionary = {"map_half_extents": 800.0, "world_scale": 4.0, "ground_color": Color(0.2, 0.25, 0.2)}
-	hud_4x.setup(_controller(), TEAM_A, map_4x)
-	var image_4x: Image = hud_4x.minimap_image()
-	var dim_4x := image_4x.get_width()
-	if dim_4x != expected_dim_1x:
-		print("  [FAIL] Scaling both map_half_extents and world_scale by 4x should hold minimap dim roughly constant, expected ", expected_dim_1x, ", got ", dim_4x)
-		hud_1x.queue_free()
-		hud_4x.queue_free()
+	# The composited image itself must be BAKE_DIM square regardless of map
+	# size. This is what the old cell-scaling suite was protecting, now true by
+	# construction rather than by a formula that had to track world_scale.
+	var image: Image = map_node.map_image()
+	if image.get_width() != HUDMinimapScript.BAKE_DIM \
+			or image.get_height() != HUDMinimapScript.BAKE_DIM:
+		print("  [FAIL] map image is %dx%d, expected %d square" % [
+			image.get_width(), image.get_height(), HUDMinimapScript.BAKE_DIM])
+		map_node.queue_free()
 		return false
 
-	hud_1x.queue_free()
-	hud_4x.queue_free()
-	print("  [PASS] The minimap's grid cell scales with world_scale, keeping baked image size bounded regardless of map size.")
+	map_node.queue_free()
+	print("  [PASS] the three fog states are distinct and monotonically darker, "
+		+ "and the baked image size is independent of map size")
 	return true
+
+
+# src-over-dst with an explicit source alpha, matching Image.blend_rect.
+func _over(src: Color, alpha: float, dst: Color) -> Color:
+	return Color(
+		src.r * alpha + dst.r * (1.0 - alpha),
+		src.g * alpha + dst.g * (1.0 - alpha),
+		src.b * alpha + dst.b * (1.0 - alpha))

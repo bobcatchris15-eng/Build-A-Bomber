@@ -815,7 +815,11 @@ func test_workbench_backdrop_split() -> bool:
 	# in-match screens added to the project should be added here.
 	const IN_MATCH := [
 		"res://scripts/battle/match_director.gd",
-		"res://scripts/battle/hud/battle_hud.gd",
+		"res://scripts/hud/hud_root.gd",
+		"res://scripts/hud/hud_style.gd",
+		"res://scripts/hud/hud_production_deck.gd",
+		"res://scripts/hud/hud_minimap.gd",
+		"res://scripts/hud/hud_command_card.gd",
 	]
 	for path in IN_MATCH:
 		var src := FileAccess.get_file_as_string(path)
@@ -1047,6 +1051,171 @@ func test_pointer_gain_precision_mode() -> bool:
 	return true
 
 
+# --- Battle HUD ---------------------------------------------------------------
+
+# THE REGRESSION THIS EXISTS FOR. The HUD this replaced had, live and on screen
+# simultaneously: two production interfaces (ProductionHUD's five accordion
+# toolboxes and CommandConsole's tab bar + drawer), three minimap instances (one
+# inlined in BattleHUD, one BattleHUD child, one CommandConsole child), and four
+# panels competing for the bottom-right corner - right_rail.gd was built
+# specifically to work around its own siblings overlapping by ~150 px at
+# 1920x1080. None of that was catchable by a test, because nothing asserted on
+# how many of each thing existed or where they landed.
+func test_hud_has_one_region_of_each_kind() -> bool:
+	print("Running Test Suite: Battle HUD - exactly one of each region, no duplicates...")
+	var HUDRootScript = load("res://scripts/hud/hud_root.gd")
+	var hud = HUDRootScript.new()
+	root.add_child(hud)
+	await tree.process_frame
+
+	# Count by script, over the WHOLE subtree - a duplicate nested three levels
+	# down is exactly how the old tree ended up with three minimaps.
+	var want := {
+		"res://scripts/hud/hud_minimap.gd": 1,
+		"res://scripts/hud/hud_production_deck.gd": 1,
+		"res://scripts/hud/hud_command_card.gd": 1,
+		"res://scripts/hud/hud_resource_ribbon.gd": 1,
+		"res://scripts/hud/hud_alert_log.gd": 1,
+	}
+	var found := {}
+	for path in want:
+		found[path] = 0
+	var stack: Array = [hud]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		var sc = n.get_script()
+		if sc != null and found.has(sc.resource_path):
+			found[sc.resource_path] += 1
+		for c in n.get_children():
+			stack.append(c)
+
+	for path in want:
+		if found[path] != want[path]:
+			print("  [FAIL] expected %d instance(s) of %s, found %d"
+				% [want[path], path, found[path]])
+			hud.queue_free()
+			return false
+	hud.queue_free()
+	print("  [PASS] one tactical map, one production deck, one command card, "
+		+ "one ribbon, one alert log")
+	return true
 
 
+# The three bottom-band regions must not overlap at any window size the game can
+# be run at. This is the assertion right_rail.gd's header describes needing and
+# never got.
+func test_hud_band_regions_never_overlap() -> bool:
+	print("Running Test Suite: Battle HUD - band regions never overlap...")
+	var HUDRootScript = load("res://scripts/hud/hud_root.gd")
+	for vp_size in [Vector2(1280, 720), Vector2(1920, 1080), Vector2(2560, 1080),
+			Vector2(3440, 1440)]:
+		var hud = HUDRootScript.new()
+		root.add_child(hud)
+		hud.layout_for(vp_size)
+		await tree.process_frame
+		await tree.process_frame
 
+		# The column caps at the design width and stays centred, so an ultrawide
+		# gets a symmetric gutter rather than a stretched HUD.
+		var col: Control = hud.column
+		var want_w: float = minf(vp_size.x, hud.COLUMN_MAX_WIDTH)
+		if absf(col.size.x - want_w) > 1.0:
+			print("  [FAIL] at %s, column is %.0f wide, expected %.0f"
+				% [str(vp_size), col.size.x, want_w])
+			hud.queue_free()
+			return false
+		var want_x: float = floorf((vp_size.x - want_w) * 0.5)
+		if absf(col.position.x - want_x) > 1.0:
+			print("  [FAIL] at %s, column x is %.0f, expected %.0f (not centred)"
+				% [str(vp_size), col.position.x, want_x])
+			hud.queue_free()
+			return false
+
+		var regions := [["minimap", hud.minimap], ["deck", hud.deck],
+			["command_card", hud.command_card]]
+		for entry in regions:
+			var n: Control = entry[1]
+			if n.size.x < 1.0 or n.size.y < 1.0:
+				print("  [FAIL] at %s, %s is zero-sized (%s)"
+					% [str(vp_size), entry[0], str(n.size)])
+				hud.queue_free()
+				return false
+			# Fully inside the viewport, not merely intersecting it: a panel half
+			# off the right edge still "intersects".
+			var r := Rect2(n.global_position, n.size)
+			if r.position.x < -0.5 or r.end.x > vp_size.x + 0.5 					or r.position.y < -0.5 or r.end.y > vp_size.y + 0.5:
+				print("  [FAIL] at %s, %s escapes the viewport: %s"
+					% [str(vp_size), entry[0], str(r)])
+				hud.queue_free()
+				return false
+		for i in range(regions.size()):
+			for j in range(i + 1, regions.size()):
+				var a := Rect2(regions[i][1].global_position, regions[i][1].size)
+				var b := Rect2(regions[j][1].global_position, regions[j][1].size)
+				if a.intersects(b):
+					print("  [FAIL] at %s, %s and %s overlap by %s"
+						% [str(vp_size), regions[i][0], regions[j][0],
+							str(a.intersection(b).size)])
+					hud.queue_free()
+					return false
+		hud.queue_free()
+		await tree.process_frame
+	print("  [PASS] map / deck / command card stay inside the viewport and clear "
+		+ "of each other from 1280x720 to 3440x1440")
+	return true
+
+
+# Every icon the HUD asks for by name has a file. A missing one degrades to text
+# rather than crashing, which means a typo would otherwise ship silently.
+func test_hud_icons_all_resolve() -> bool:
+	print("Running Test Suite: Battle HUD - every declared icon asset exists...")
+	var Icons = load("res://scripts/hud/hud_icons.gd")
+	var missing: Array = Icons.missing()
+	if not missing.is_empty():
+		print("  [FAIL] %d declared HUD icon(s) have no SVG in assets/hud/icons/: %s"
+			% [missing.size(), ", ".join(missing)])
+		return false
+	# And they must actually load as textures, not merely exist on disk.
+	for name in Icons.NAMES:
+		if Icons.get_icon(name) == null:
+			print("  [FAIL] %s.svg exists but did not load as a Texture2D "
+				% name + "(missing .import sidecar? run --editor --import)")
+			return false
+	print("  [PASS] all %d HUD icons resolve and load" % Icons.NAMES.size())
+	return true
+
+
+# The battle HUD must not reach into the out-of-match chrome library. Those
+# scripts generate textures at runtime (bakelite, CRT phosphor, aluminium trim,
+# folded paper) and hud_style.gd exists precisely so the in-match surface does
+# not pay for that. A single stray preload undoes the whole split.
+func test_hud_does_not_use_out_of_match_chrome() -> bool:
+	print("Running Test Suite: Battle HUD - no out-of-match chrome dependencies...")
+	# res:// paths and the theme hook, NOT bare filenames. hud_style.gd's own
+	# header names these files in prose to explain why it does not use them, and a
+	# bare-filename search would fail on the explanation rather than on a
+	# dependency. A real reference is always a res:// path or a
+	# theme_type_variation (which is how the old HUD reached bomber_theme.tres).
+	var banned := [
+		"res://scripts/ui/bakelite_panel.gd", "res://scripts/ui/crt_readout.gd",
+		"res://scripts/ui/aluminum_trim.gd",
+		"res://scripts/ui/folded_paper_panel.gd",
+		"res://scripts/ui/phosphor_panel.gd", "res://scripts/ui_tokens.gd",
+		"res://scripts/ui_shell.gd", "res://scripts/ui_toolbox_plate.gd",
+		"res://resources/bomber_theme.tres", "theme_type_variation",
+	]
+	var dir := DirAccess.open("res://scripts/hud")
+	if dir == null:
+		print("  [FAIL] res://scripts/hud does not exist")
+		return false
+	for f in dir.get_files():
+		if not f.ends_with(".gd"):
+			continue
+		var src := FileAccess.get_file_as_string("res://scripts/hud/" + f)
+		for b in banned:
+			if src.find(b) >= 0:
+				print("  [FAIL] scripts/hud/%s references %s - the in-match HUD "
+					% [f, b] + "must not depend on out-of-match chrome")
+				return false
+	print("  [PASS] scripts/hud/ is free of out-of-match chrome dependencies")
+	return true

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>hold</title>
+  <path fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" d="M14 12 L14 52 M50 12 L50 52"/>
+  <rect x="26" y="26" width="12" height="12" rx="2" fill="#ffffff" stroke="none"/>
+</svg>

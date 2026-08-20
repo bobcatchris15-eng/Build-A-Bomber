@@ -58,7 +58,6 @@ const SUITE_FILES := {
 	"battle_vision": preload("res://tests/battle/test_battle_vision.gd"),
 	"battle_ai": preload("res://tests/battle/test_battle_ai.gd"),
 	"battle_placement": preload("res://tests/battle/test_battle_placement.gd"),
-	"battle_hud": preload("res://tests/battle/test_battle_hud.gd"),
 	"battle_perf": preload("res://tests/battle/test_battle_perf.gd"),
 	"operations_setup": preload("res://tests/battle/test_operations_setup.gd"),
 	"after_action_report": preload("res://tests/battle/test_after_action_report.gd"),
@@ -74,7 +73,6 @@ const SUITE_FILES := {
 	"ui_prop_stage": preload("res://tests/test_ui_prop_stage.gd"),
 	"module_action_ring": preload("res://tests/test_module_action_ring.gd"),
 	"marking_menu": preload("res://tests/test_marking_menu.gd"),
-	"selection_panel": preload("res://tests/test_selection_panel.gd"),
 	"livery_customization": preload("res://tests/test_livery_customization.gd"),
 	"armor_paint": preload("res://tests/test_armor_paint.gd"),
 }
@@ -310,6 +308,10 @@ const SUITE_ORDER := [
 	["designer_lab", "test_hull_collider_rebuilt_on_scale"],
 	["base_building", "test_ui_flyout_placement"],
 	["ui_and_camera", "test_ui_no_overflow_or_offscreen"],
+	["ui_and_camera", "test_hud_has_one_region_of_each_kind"],
+	["ui_and_camera", "test_hud_band_regions_never_overlap"],
+	["ui_and_camera", "test_hud_icons_all_resolve"],
+	["ui_and_camera", "test_hud_does_not_use_out_of_match_chrome"],
 	["ui_and_camera", "test_ui_audit_has_real_teeth"],
 	["ui_and_camera", "test_ui_dock_state_cycle"],
 	["ui_and_camera", "test_ui_tone_no_decorative_glyphs"],
@@ -403,7 +405,7 @@ const SUITE_ORDER := [
 	["battle_vision", "test_elevation_bonus_scales_cap_with_world_scale_but_not_its_maximum"],
 	["battle_vision", "test_shroud_grid_cell_scales_keeping_image_size_bounded"],
 	["battle_vision", "test_minimap_bakes_terrain_and_draws_blips"],
-	["battle_vision", "test_minimap_cell_scales_keeping_image_size_bounded"],
+	["battle_vision", "test_minimap_composites_three_distinct_fog_states"],
 	["battle_ai", "test_considerations_stay_normalised"],
 	["battle_ai", "test_a_zero_consideration_vetoes_the_action"],
 	["battle_ai", "test_opening_move_is_not_a_deadlock"],
@@ -419,19 +421,6 @@ const SUITE_ORDER := [
 	["battle_placement", "test_ai_siting_and_player_ghost_share_one_rule_set"],
 	["battle_placement", "test_expanded_build_radius_tripled"],
 	["battle_placement", "test_structure_construction_animation_lifecycle"],
-	["battle_hud", "test_every_queue_has_a_visible_toolbox"],
-	["battle_hud", "test_the_build_bar_is_actually_on_screen"],
-	["battle_hud", "test_opening_a_queue_is_an_accordion"],
-	["battle_hud", "test_the_readout_tracks_progress"],
-	["battle_hud", "test_idle_toolboxes_retreat_and_busy_ones_do_not"],
-	# 2026-08-18: right_rail and selection_dock must build their
-	# bodies in _init, not _ready, so the BattleHUD's setup() can
-	# populate them synchronously. The widget-level tests
-	# (right_rail, ui_dock) run first because they fail with a
-	# tighter stack trace; the integration test runs last.
-	["battle_hud", "test_right_rail_body_is_synchronous_after_add_child"],
-	["battle_hud", "test_ui_dock_body_is_synchronous_after_add_child"],
-	["battle_hud", "test_battle_hud_chrome_parents_into_their_containers"],
 	["battle_perf", "test_heightmap_authority_removes_terrain_from_the_collision_mask"],
 	["battle_perf", "test_a_unit_with_no_controller_keeps_terrain_collision"],
 	["operations_setup", "test_operations_engagement_count_spans_three_to_twelve"],
@@ -518,10 +507,6 @@ const SUITE_ORDER := [
 	["marking_menu", "test_marking_menu_short_stroke_cancels"],
 
 	# Phase 9 SelectionPanel (Tactile Interface Programme Part 4 Phase 9, D8, D15)
-	["selection_panel", "test_selection_panel_aggregates_rows_by_design"],
-	["selection_panel", "test_selection_panel_ctrl_shift_deselect_group"],
-	["selection_panel", "test_selection_panel_priority_order"],
-	["selection_panel", "test_selection_panel_thumbnail_cache"],
 
 	# Phase 11 PointerGain (Tactile Interface Programme Part 4 Phase 11, D17)
 	["ui_and_camera", "test_pointer_gain_is_strictly_monotonic"],

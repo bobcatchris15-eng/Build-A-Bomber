@@ -36,7 +36,7 @@ The wrapper reimports assets (regenerates the import cache) then runs the full h
 ### Test Architecture
 
 - `run_tests.gd` is only the driver — it owns the retry quarantine, the ordered manifest (`SUITE_ORDER`), the pass/fail tally, and the exit code.
-- The 211 test suites live in `prototype/tests/` (split from the original 16,000-line monolith), grouped by area, all extending `tests/suite_base.gd`.
+- The test suites live in `prototype/tests/` (split from the original 16,000-line monolith), grouped by area, all extending `tests/suite_base.gd`.
 - `SUITE_ORDER` is explicit because several navmesh/Recast suites flake depending on what ran before them — the order is deliberately pinned rather than derived.
 - To add a suite: write the function in an area file **and** add it to `SUITE_ORDER` in `run_tests.gd`.
 
@@ -51,7 +51,7 @@ The wrapper reimports assets (regenerates the import cache) then runs the full h
 | `test_sim_and_stats.gd` | 18 | stat math, traits, combat sim, evasion, audio, parse checks |
 | `test_locomotion.gd` | 18 | all locomotion types, layout fixtures, drivetrain, animation |
 | `test_ai_and_win.gd` | 13 | enemy AI, waves, fog of war, team targeting, win condition |
-| `test_ui_and_camera.gd` | 13 | theme, icons, overflow, dock/flyout, RTS camera, control groups |
+| `test_ui_and_camera.gd` | 13 | theme, icons, overflow, dock/flyout, RTS camera, control groups, in-match material split |
 | `test_base_building.gd` | 12 | placement legality, footprints, buildable area, ghost refunds |
 | `test_hull_and_armor.gd` | 9 | hull greebles, decals, foundations, factions, materials |
 
@@ -111,8 +111,71 @@ cd prototype
 - **Layers are the trap here.** `UNIT_MODULES` (128) is deliberately not the Lab's modules bit (2), which is in `auto_weapon`'s LOS mask — a hit volume must not double as an occluder. `HULL_SURFACE` (256) is deliberately not `hull_surface.gd`'s own default (16), which is `RESOURCE_NODES` in a match.
 - Hull colliders are three tiers: the baked convex decomposition (`assets/models/hulls/<id>_collision.res`), else a single `create_convex_shape()` fit, else a box. See the Art Pipeline section for baking.
 
-**UI System** (`ui_shell.gd`, `ui_dock.gd`, `ui_flyout.gd`, `ui_theme.gd`, `ui_tokens.gd`, `bomber_theme.tres`)
-- Asymmetric command deck UI with animated cards, dock/flyout panels, control groups (assign/recall/double-tap recenter).
+**Battle HUD** (`scripts/hud/`)
+- **`scripts/hud/` is the only battle HUD.** `scripts/battle/hud/` now holds nothing but
+  the two dev tools (`admin_menu.gd`, `debug_overlay.gd`). Anything in-match goes in
+  `scripts/hud/`.
+- Deliberately **does not** use `ui_tokens.gd`, `bomber_theme.tres`, or any of the
+  `scripts/ui/` runtime-texture skins (`bakelite_panel`, `crt_readout`, `aluminum_trim`,
+  `folded_paper_panel`, `phosphor_panel`). Those are the out-of-match / Design Lab
+  language. `hud_style.gd` is the whole in-match vocabulary: flat fills, 1 px edges,
+  no texture generation at runtime.
+- Icons are **authored SVGs** in `assets/hud/icons/`, monochrome white, tinted with
+  `modulate`. Editable in Inkscape; `assets/hud/icons/_author_icons.py` laid the set
+  down originally but the SVGs are the asset — edit them, do not re-run it.
+  `hud_icons.gd` declares every name the HUD asks for, and a missing icon degrades to
+  text rather than failing the build.
+
+| File | Owns |
+|---|---|
+| `hud_root.gd` | Layout, the single refresh clock, hotkeys, camera focus. A new region goes in `_build_layout()` or it does not exist. |
+| `battle/hud/admin_menu.gd` | Session menu (pause / abandon / quit). Kept in `battle/hud/` because its lifetime is the match, but restyled to `hud_style.gd` and parented into the HUD column. |
+| `hud_style.gd` | Palette, metrics, type, and the panel/label/button/bar factories. |
+| `hud_icons.gd` | SVG icon loading and tinting. |
+| `hud_minimap.gd` | Tactical map: terrain bake, three-state fog, blips, frustum, click-to-jump, right-click orders. |
+| `hud_production_deck.gd` | The five queues as five tabs, queue strip, build palette, tech gating. |
+| `hud_command_card.gd` | Selection aggregated by design, order buttons, stance. |
+| `hud_resource_ribbon.gd` | Credits, income, power, army count, clock. |
+| `hud_alert_log.gd` | Transient top-right events, click to jump. |
+
+Three things about it are load-bearing and were each a bug in the version it replaced:
+
+- **One instance of each region.** The old tree had `BattleHUD` build a `CommandConsole`
+  *and* a `MinimapOverlay`, `CommandConsole` build a second `MinimapOverlay`, and
+  `BattleHUD` also carry an inlined third copy of the whole minimap; separately
+  `match_director` built a `ProductionHUD` whose five accordion toolboxes duplicated
+  `CommandConsole`'s tab bar and drawer. Two production interfaces and three minimaps
+  were on screen at once.
+- **Raster and vector are split in the minimap.** The texture (terrain + fog) is
+  rebuilt only when `VisionService.shroud_version` changes; blips, selection rings,
+  the camera frustum and alert pings are `_draw()` calls on an overlay `Control` at
+  display resolution. The old version wrote blips as pixels into a low-res image and
+  uploaded a texture every tick whether anything had moved or not.
+- **The HUD drives itself.** `hud_root._process()` is the only clock — map at 20 Hz,
+  panels at 5 Hz. `match_director` no longer refreshes it from the vision tick, and
+  `battle_hud.refresh()` is a deliberate no-op kept for the old call contract.
+- **Everything lives in `HUDRoot.column`**, which is the viewport width capped at
+  `COLUMN_MAX_WIDTH` (1920) and centred. At 1920 wide it is the whole screen; wider
+  than that and the surplus becomes a symmetric gutter of battlefield rather than a
+  stretched HUD. `layout_for(size)` is the single entry point — `fit_to_viewport()`
+  calls it with the viewport size, and the tests call it directly to assert the
+  layout at 1280x720 through 3440x1440 without resizing a window. Anything else that
+  needs to sit in the same column (the session menu, the debug overlay) goes in via
+  `attach_to_column()`, never onto the raw `CanvasLayer`.
+
+To look at it, use the capture harness (needs a real window, not `--headless`):
+
+```bash
+cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --path . res://tools/capture_hud.tscn
+```
+
+It selects units, queues jobs, prints a per-region rect report plus an overlap check
+and a fog-band histogram, and writes `visual_regression/captures/hud_full.png` and
+`hud_structures_tab.png`. `tools/capture_battle.gd` renders the world **without** the
+HUD layer — use this one for interface work.
+
+**Out-of-match UI** (`ui_shell.gd`, `ui_dock.gd`, `ui_flyout.gd`, `ui_theme.gd`, `ui_tokens.gd`, `bomber_theme.tres`)
+- Menus, Design Lab, blueprint library. Animated cards, dock/flyout panels, control groups (assign/recall/double-tap recenter).
 - Theme system with tokens for spacing, colors, typography. No decorative glyphs/emoji in UI text.
 
 ### Key Data Files

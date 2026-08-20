@@ -1,10 +1,24 @@
 class_name AdminMenu
 extends Control
-# The administrative toolbox: pause and the ways out of a match.
+# The session menu: pause, and the ways out of a match.
 #
-# Sits under the minimap on the right, in the same chamfered-plate language as
-# the production toolboxes along the bottom, so the two read as the same kind of
-# object - one is what you build with, one is what you do to the session.
+# WHERE IT SITS, AND WHY THAT CHANGED. It used to be a chamfered bakelite plate
+# pinned at `TOP_OFFSET = 64 + 180 + 20` down the right-hand edge of the
+# viewport - a hard-coded number derived from the OLD minimap, which was a 180 px
+# square in the top-right corner. The minimap is now a 224 px square in the
+# bottom-left, so that offset left a MENU plate floating unattached in the middle
+# of the right-hand side of the screen with nothing above or below it.
+#
+# It is now anchored to the top-right of HUDRoot's column (see
+# HUDRoot.attach_to_column), which means it shares the centred, width-capped
+# layout with every other region and sits directly above the alert log - which
+# reserves HUDRoot.MENU_STRIP_HEIGHT for exactly this.
+#
+# THE CHROME IS hud_style.gd NOW, not ToolboxPlate + StampedLabel. Those generate
+# a chamfered metal plate and enamel lettering at runtime; the in-match HUD
+# deliberately does not use them (see hud_style.gd's header). A single panel in
+# the out-of-match language sitting on an otherwise flat HUD read as a leftover
+# from a different game, which is precisely what it was.
 #
 # OPENING IT PAUSES. That is the normal contract for a menu in a real-time game
 # and the reason to have it at all: the alternative is a player reading a list of
@@ -20,138 +34,109 @@ extends Control
 # - not in the battle layer, not in the old runtime, nowhere - so there is
 # nothing for them to call. They are shown greyed with a reason rather than
 # omitted, because "can I save?" is a question the player will ask on their own
-# and an empty menu answers it worse than a disabled row does. Wiring them to
-# something that silently did nothing, or that wrote a file that could not be
-# loaded, would be worse than either.
+# and an empty menu answers it worse than a disabled row does.
 
-const Tokens = preload("res://scripts/ui_tokens.gd")
-const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
-const ToolboxPlateScript = preload("res://scripts/ui_toolbox_plate.gd")
-const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
+const Style = preload("res://scripts/hud/hud_style.gd")
 
 signal main_menu_requested
 signal quit_requested
 
-const WIDTH := 200.0
-const PLATE_PADDING := 10.0
-const CONTENT_WIDTH := WIDTH - PLATE_PADDING * 2.0
-const HEADER_HEIGHT := 40.0
-const HEADER_FONT_SIZE := 17
-# Clears the minimap. BattleHUD puts it at TOP_STRIP_HEIGHT + 8 with a 180px
-# side, and this hangs below it with a gap.
-const TOP_OFFSET := 64.0 + 180.0 + 20.0
+const WIDTH := 168.0
+# Matches HUDRoot.MENU_STRIP_HEIGHT. The alert log below is positioned off that
+# constant, so the two must agree or they overlap or leave a gap.
+const HEADER_HEIGHT := 28.0
+const ROW_HEIGHT := 30.0
 
-var _plate: Control = null
-var _slot: VBoxContainer = null
-var _body: VBoxContainer = null
 var _header: Button = null
-var _panel: Control = null
+var _panel: PanelContainer = null
+var _body: VBoxContainer = null
 var _open: bool = false
 
 
 func _ready() -> void:
 	# Runs while paused, or the menu that caused the pause freezes with it.
+	# PROCESS_MODE_ALWAYS is absolute, so this holds even though the parent
+	# (HUDRoot's column) inherits.
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	set_anchors_preset(Control.PRESET_TOP_LEFT)
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	fit_to_viewport()
-	var vp := get_viewport()
-	if vp != null and not vp.size_changed.is_connected(fit_to_viewport):
-		vp.size_changed.connect(fit_to_viewport)
+	# Anchored to the top-right of whatever it is parented to. When that is
+	# HUDRoot's column it inherits the ultrawide-capped layout for free; when it
+	# is a bare CanvasLayer (a test, or a rule set with the HUD off) it falls back
+	# to the viewport, which is the old behaviour minus the magic number.
+	set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	offset_left = -(WIDTH + Style.SP_MD)
+	offset_right = -Style.SP_MD
+	offset_top = Style.SP_MD
+	offset_bottom = Style.SP_MD + HEADER_HEIGHT
+	# PASS, not IGNORE: the header takes clicks, the empty area below the closed
+	# header must not eat them.
+	mouse_filter = Control.MOUSE_FILTER_PASS
 	_build()
 
 
-# Same hand-sizing as the other HUD layers, for the same reason: a Control
-# parented to a CanvasLayer has no parent rect for its anchors to resolve
-# against, so it stays at size (0,0) and everything in it collapses onto the
-# origin.
-func fit_to_viewport() -> void:
-	var vp := get_viewport()
-	if vp == null:
-		return
-	position = Vector2.ZERO
-	size = vp.get_visible_rect().size
-	_layout()
-
-
 func _build() -> void:
-	_plate = ToolboxPlateScript.new()
-	add_child(_plate)
-
-	_slot = VBoxContainer.new()
-	_slot.custom_minimum_size = Vector2(CONTENT_WIDTH, 0)
-	_slot.add_theme_constant_override("separation", 0)
-	_slot.mouse_filter = Control.MOUSE_FILTER_PASS
-	add_child(_slot)
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	col.add_theme_constant_override("separation", Style.SP_XS)
+	col.mouse_filter = Control.MOUSE_FILTER_PASS
+	add_child(col)
 
 	_header = Button.new()
+	_header.name = "MenuHeader"
+	_header.text = "MENU"
 	_header.toggle_mode = true
-	_header.focus_mode = Control.FOCUS_NONE
 	_header.custom_minimum_size = Vector2(0, HEADER_HEIGHT)
-	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
-		_header.add_theme_stylebox_override(state, StyleBoxEmpty.new())
-	_slot.add_child(_header)
-	UIFeedbackScript.wire(_header, "select")
-
-	var stamp: Control = StampedLabelScript.new()
-	stamp.text = "MENU"
-	stamp.font_size = HEADER_FONT_SIZE
-	stamp.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_header.add_child(stamp)
+	Style.style_button(_header)
 	_header.toggled.connect(_set_open)
+	col.add_child(_header)
 
-	var panel := PanelContainer.new()
-	panel.visible = false
-	var well := StyleBoxFlat.new()
-	well.bg_color = Tokens.BASE_900
-	well.border_color = Tokens.BASE_500
-	well.set_border_width_all(Tokens.BORDER_HAIRLINE)
-	well.set_content_margin_all(Tokens.SPACE_XS)
-	panel.add_theme_stylebox_override("panel", well)
-	_slot.add_child(panel)
+	_panel = PanelContainer.new()
+	_panel.visible = false
+	Style.apply_panel(_panel, false, Style.EDGE_BRIGHT)
+	col.add_child(_panel)
 
 	_body = VBoxContainer.new()
-	_body.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	panel.add_child(_body)
+	_body.add_theme_constant_override("separation", Style.SP_XS)
+	_panel.add_child(_body)
 
 	_add_action("RESUME", _close)
 	# The two that have nothing to call. The reason rides on the tooltip AND the
 	# label, because a disabled button with no explanation reads as a bug.
 	_add_disabled("SAVE - UNAVAILABLE", "No save system exists in this build.")
 	_add_disabled("LOAD - UNAVAILABLE", "No save system exists in this build.")
-	_add_action("ABANDON - MAIN MENU", func(): _leave(main_menu_requested))
-	_add_action("EXIT TO DESKTOP", func(): _leave(quit_requested))
+	_add_action("ABANDON MATCH", func(): _leave(main_menu_requested))
+	# The only destructive row, so it is the only one that carries the warning
+	# accent - a red MENU list would make every option look dangerous.
+	_add_action("EXIT TO DESKTOP", func(): _leave(quit_requested), Style.BAD)
 
-	_panel = panel
-	_layout()
 
-
-func _add_action(label: String, action: Callable) -> void:
-	var btn := Button.new()
-	btn.text = label
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.custom_minimum_size = Vector2(0, 34)
+func _add_action(label: String, action: Callable, accent: Color = Style.TEAM_FRIENDLY) -> void:
+	var btn := Style.button(label, accent)
+	btn.custom_minimum_size = Vector2(0, ROW_HEIGHT)
 	_body.add_child(btn)
-	UIFeedbackScript.wire(btn)
 	btn.pressed.connect(action)
 
 
 func _add_disabled(label: String, why: String) -> void:
-	var btn := Button.new()
-	btn.text = label
+	var btn := Style.button(label)
+	btn.custom_minimum_size = Vector2(0, ROW_HEIGHT)
 	btn.disabled = true
 	btn.tooltip_text = why
-	btn.custom_minimum_size = Vector2(0, 34)
 	_body.add_child(btn)
 
 
 func _set_open(open: bool) -> void:
 	_open = open
 	_panel.visible = open
+	# Grow the control's own rect when open, so the panel below the header is
+	# inside it and takes its own clicks. Anchored top-right, so only the bottom
+	# offset moves.
+	offset_bottom = Style.SP_MD + HEADER_HEIGHT
+	if open:
+		offset_bottom += Style.SP_XS + _body.get_combined_minimum_size().y \
+			+ Style.SP_MD * 2.0
 	# The pause itself. Set here rather than in the caller so every route into
 	# the menu - header click, Escape, a future hotkey - pauses identically.
 	get_tree().paused = open
-	_layout()
 
 
 func _close() -> void:
@@ -175,14 +160,3 @@ func toggle() -> void:
 func _leave(what: Signal) -> void:
 	get_tree().paused = false
 	what.emit()
-
-
-func _layout() -> void:
-	if _slot == null:
-		return
-	_slot.size = Vector2(CONTENT_WIDTH, _slot.get_combined_minimum_size().y)
-	_slot.position = Vector2(
-		size.x - WIDTH - float(Tokens.SPACE_MD) + PLATE_PADDING, TOP_OFFSET)
-	_plate.position = _slot.position - Vector2(PLATE_PADDING, PLATE_PADDING)
-	_plate.size = _slot.size + Vector2(PLATE_PADDING, PLATE_PADDING) * 2.0
-	_plate.queue_redraw()
