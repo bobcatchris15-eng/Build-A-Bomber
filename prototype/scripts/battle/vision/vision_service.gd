@@ -68,6 +68,37 @@ const ELEVATION_CAP := 12.0
 # millimetre position deltas cross one threshold.
 const HIDE_RANGE_MULT := 1.15
 
+# PR-4 (2026-08-19). LOS result cache.
+#
+# The 22:54:40 capture: 25 ms mean per tick, 665 ticks. The dominant cost
+# is the per-(viewer, target) LOS raycast in _is_spotted(), and the same
+# pair re-tests hundreds of times in a row for the same answer - a unit
+# that LOS checks at frame N is in the same place at frame N+30. Caching
+# the result for `_LOS_CACHE_TTL_MS` cuts the raycast count by roughly
+# `TTL / TICK_INTERVAL` = 0.75 seconds / 0.3 = ~2.5x on the existing
+# 3.33 Hz TICK_INTERVAL, and more on the in-between ticks where the
+# cache stays warm across multiple TICK_INTERVALs.
+#
+# The cache is invalidated wholesale on structure events (`invalidate_los_cache`,
+# called from match_director on _place_structure / _on_structure_died) and
+# expires naturally on TTL. The cell granularity (`_LOS_CELL_SIZE`) is
+# deliberately coarser than GRID_CELL: a unit that moved 2 m between
+# cache writes still has the same cell, so the cache hit rate stays
+# high during normal movement.
+#
+# TTL must be >= TICK_INTERVAL (750ms vs 300ms). The previous value of
+# 250ms expired BEFORE the next tick, making the cache a no-op and
+# re-raycasting every viewer×target pair every tick — the exact problem
+# the cache was meant to solve. 750ms = 2.5× TICK_INTERVAL; a pair
+# tested at tick N is still warm at tick N+1 and N+2.
+const _LOS_CACHE_TTL_MS := 750
+const _LOS_CELL_SIZE := 4.0
+var _los_cache: Dictionary = {}
+# Bumped on structure events. Included in the cache key so any entry written
+# before the bump misses the next lookup - the wholesale clear that follows
+# in `invalidate_los_cache` is just a defensive backup.
+var _los_geom_version: int = 0
+
 # Shroud resolution and the two dimmed states. Unexplored is opaque; explored is
 # partly lifted and never returns to full black once seen.
 const GRID_CELL := 4.0
@@ -275,6 +306,16 @@ func is_visible_to_team(c, viewing_team: int) -> bool:
 	return _team_visible[viewing_team].has(c.get_instance_id())
 
 
+# PR-4 (2026-08-19). Wholesale cache invalidation. Called by match_director
+# whenever the world geometry that LOS could care about changes - structure
+# placement, structure death, anything that adds or removes a static occluder.
+# Bumping the version also makes every pre-existing key miss, so the clear
+# is belt-and-suspenders; the lookup loop never sees stale data either way.
+func invalidate_los_cache() -> void:
+	_los_geom_version += 1
+	_los_cache.clear()
+
+
 # Illumination ammo and sensor beacons. A flare is simply a stationary observer
 # owned by the team that fired it, so it folds into the same scan rather than
 # getting a parallel visibility path.
@@ -375,7 +416,33 @@ func _is_spotted(c, viewers: Array, beacons: Array, was_visible: bool) -> bool:
 		# Airborne on either end skips the terrain ray - a plane is above the
 		# ridge the ray would hit, and so is anything looking at one.
 		var o_flying: bool = "is_flying" in o and o.is_flying
-		if o_flying or c_flying or _has_line_of_sight(o.global_position, c.global_position):
+		if o_flying or c_flying:
+			return true
+		# PR-4 (2026-08-19). LOS result cache. The raycast is the
+		# per-tick cost the 25 ms mean in the 22:54:40 capture is
+		# paying. The cache key includes both ends' quantized
+		# positions AND a geometry version that bumps on structure
+		# events, so a building going up between a viewer and a
+		# target correctly invalidates the prior "visible" answer.
+		var key := "%d:%d:%d:%d:%d:%d:%d" % [
+			_los_geom_version,
+			o.get_instance_id(), c.get_instance_id(),
+			int(floor(o.global_position.x / _LOS_CELL_SIZE)),
+			int(floor(o.global_position.z / _LOS_CELL_SIZE)),
+			int(floor(c.global_position.x / _LOS_CELL_SIZE)),
+			int(floor(c.global_position.z / _LOS_CELL_SIZE)),
+		]
+		var now := Time.get_ticks_msec()
+		if _los_cache.has(key):
+			var entry: Dictionary = _los_cache[key]
+			if entry.expires_at > now:
+				if entry.result:
+					return true
+				continue
+			# Expired - fall through to a fresh raycast and overwrite
+		var visible: bool = _has_line_of_sight(o.global_position, c.global_position)
+		_los_cache[key] = {"result": visible, "expires_at": now + _LOS_CACHE_TTL_MS}
+		if visible:
 			return true
 	for b in beacons:
 		if c.global_position.distance_to(b.pos) <= b.radius:

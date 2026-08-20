@@ -44,6 +44,8 @@ const TYPE_PYRAMID := 15
 const TYPE_FENDER := 16
 const TYPE_CANOPY := 17
 const TYPE_RING := 18
+const TYPE_INNER_CORNER := 19
+const TYPE_OUTER_CORNER := 20
 
 # Primitive types whose surface normals are inherently curved (radial,
 # spherical, toroidal). Vertices on these surfaces keep their natural SDF
@@ -1084,6 +1086,8 @@ static func _scaled_sdf(p: Vector3, h: Vector3, type: int) -> float:
 			var r_out: float = min(h.x, h.z)
 			var r_in: float = r_out * 0.6
 			return _sdf_ring(p, r_out, r_in, h.y)
+		TYPE_INNER_CORNER, TYPE_OUTER_CORNER:
+			return _sdf_wedge(p, h)
 		_:
 			return _sdf_box(p, h)
 

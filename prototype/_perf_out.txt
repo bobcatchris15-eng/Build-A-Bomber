@@ -1,0 +1,271 @@
+﻿Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+
+=== SECTIONS (sorted by total ms) ===
+section                        total ms    mean ms     max ms   frames
+units                          202621.2     44.240     562.04     4580
+unit.move_and_slide            179892.3     39.278     222.16     4580
+navmesh_dispatch                42667.8    699.472     984.28       61
+commander.execute               30610.5    364.411     957.15       84
+ai.build_structure              30594.2    566.559     957.14       54
+ai.build_production             29539.5    602.847     943.12       49
+vision                          28882.6     56.856     137.25      508
+production                      12324.9      2.691    1004.98     4580
+production.complete_structure      11301.5    191.551    1004.82       59
+unit.steer_nav                   7689.5      2.199     391.65     3497
+hud_minimap                      5553.3     10.932      27.96      508
+weapons                          4982.9      1.088       6.21     4580
+unit.terrain_speed               2180.4      0.476       3.29     4580
+unit.tick_economy                1200.2      0.262       8.71     4580
+squads                            797.3      0.174       2.53     4580
+unit.separation                   724.6      0.207       1.03     3497
+resource_field                    637.9      0.139       2.24     4580
+unit.tick_power                   604.8      0.132       0.81     4580
+production.complete_unit          508.0     25.399     109.07       20
+spawn_unit                        502.4     25.121     108.70       20
+ai_placement_site                 402.4      7.452      18.15       54
+spawn.assemble                    377.5     18.874      99.08       20
+place_structure                   353.5      6.427      32.12       55
+neighbour_grid                    320.9      0.070       0.97     4580
+place.setup                       318.1      5.784      30.50       55
+unit.advance_orders               280.3      0.061       0.34     4580
+battle_resource_load              116.4      2.117       5.13       55
+audio                              70.4      0.015       0.28     4580
+commander.read_state               58.3      0.694       3.45       84
+economy                            42.4      0.009       0.14     4580
+production.exit_blockers           36.2      0.138       0.33      262
+place.dust                         24.9      0.454       1.18       55
+stats                              18.7      0.004       0.12     4580
+ai.design_for_role                 14.0      0.167       0.37       84
+navmesh_invalidate                 12.3      0.201       0.60       61
+navmesh                            10.7      0.002       0.13     4580
+render_frame                       10.2      0.004       0.06     2574
+spawn.selection_ring                7.6      0.380       0.46       20
+commander.decide                    7.1      0.085       0.19       84
+spawn.weapons                       6.6      0.330       0.41       20
+place.displace_props                6.0      0.110       0.28       55
+ai.build_unit                       4.1      0.511       0.70        8
+navmesh_callback                    3.3      0.055       0.42       60
+place.visibility_range              1.8      0.032       0.09       55
+spawn.nav_agent                     0.7      0.034       0.05       20
+
+=== HITCHES (frames >= 100ms) BY DOMINANT SECTION ===
+  units                   1196
+  vision                    95
+  commander.execute         44
+  production                14
+  <untimed>                 13
+  navmesh_dispatch           4
+
+=== TOP 20 WORST HITCHES (by frame_ms) ===
+  frame  4525   1327.6 ms  dom=production     dom_ms= 1005.0  units=22.0 structs=57.0 miss=0.0
+  frame  4581   1211.1 ms  dom=production     dom_ms=  918.2  units=22.0 structs=61.0 miss=0.0
+  frame  4565   1195.3 ms  dom=production     dom_ms=  931.8  units=22.0 structs=60.0 miss=0.0
+  frame  4549   1163.8 ms  dom=production     dom_ms=  893.6  units=22.0 structs=59.0 miss=0.0
+  frame  4517   1145.7 ms  dom=production     dom_ms=  878.4  units=22.0 structs=57.0 miss=0.0
+  frame  4557   1143.2 ms  dom=production     dom_ms=  850.1  units=22.0 structs=59.0 miss=0.0
+  frame  4533   1122.5 ms  dom=production     dom_ms=  834.8  units=22.0 structs=58.0 miss=0.0
+  frame  4580   1112.8 ms  dom=commander.execute dom_ms=  957.2  units=22.0 structs=61.0 miss=0.0
+  frame  4541   1105.3 ms  dom=production     dom_ms=  832.4  units=22.0 structs=58.0 miss=0.0
+  frame  4516   1053.5 ms  dom=production     dom_ms=  870.0  units=22.0 structs=57.0 miss=0.0
+  frame  2656   1045.7 ms  dom=commander.execute dom_ms=  943.1  units=14.0 structs=56.0 miss=0.0
+  frame  3616   1041.3 ms  dom=production     dom_ms=  889.6  units=22.0 structs=56.0 miss=0.0
+  frame  2716    916.4 ms  dom=production     dom_ms=  877.4  units=14.0 structs=56.0 miss=0.0
+  frame  2476    895.7 ms  dom=commander.execute dom_ms=  794.5  units=14.0 structs=53.0 miss=0.0
+  frame  2116    890.1 ms  dom=commander.execute dom_ms=  795.5  units=14.0 structs=47.0 miss=0.0
+  frame  2416    879.8 ms  dom=commander.execute dom_ms=  855.7  units=14.0 structs=52.0 miss=0.0
+  frame  2056    878.6 ms  dom=commander.execute dom_ms=  851.2  units=14.0 structs=46.0 miss=0.0
+  frame  2536    874.7 ms  dom=commander.execute dom_ms=  848.8  units=14.0 structs=54.0 miss=0.0
+  frame  2596    872.1 ms  dom=commander.execute dom_ms=  859.1  units=14.0 structs=55.0 miss=0.0
+  frame  1774    869.6 ms  dom=commander.execute dom_ms=  788.7  units=14.0 structs=41.0 miss=0.0
+
+=== UNIT SPAWNS (frame, name, kind) ===
+  frame     0  team=0  name=ClayBellows Mk XII              kind=halvorsen_transport_b
+  frame     0  team=1  name=Magpie Ore Hauler               kind=orrin_transport_a
+  frame  1191  team=0  name=DitchLoader No. 34              kind=orrin_light_a
+  frame  1209  team=0  name=DitchLoader No. 34              kind=orrin_light_a
+  frame  1230  team=0  name=DitchLoader No. 34              kind=orrin_light_a
+  frame  1250  team=0  name=DitchLoader No. 34              kind=orrin_light_a
+  frame  1448  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  1486  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  1516  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  1543  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  1573  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  1600  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  1630  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  1657  team=0  name=ScrubMarshal No. 33             kind=orrin_scout_a
+  frame  2716  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+  frame  2776  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+  frame  2836  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+  frame  2896  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+  frame  2956  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+  frame  3016  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+  frame  3076  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+  frame  3136  team=1  name=Breaker TD                      kind=brenntal_heavy_c
+
+=== STRUCTURES BUILT: 61 total ===
+  frame    0-  29  count=2
+  frame   30-  59  count=2
+  frame   90- 119  count=1
+  frame  150- 179  count=1
+  frame  210- 239  count=1
+  frame  270- 299  count=1
+  frame  330- 359  count=1
+  frame  390- 419  count=1
+  frame  420- 449  count=2
+  frame  480- 509  count=1
+  frame  540- 569  count=1
+  frame  600- 629  count=2
+  frame  660- 689  count=1
+  frame  720- 749  count=1
+  frame  750- 779  count=2
+  frame  810- 839  count=1
+  frame  870- 899  count=1
+  frame  900- 929  count=3
+  frame  960- 989  count=1
+  frame 1020-1049  count=1
+  frame 1080-1109  count=2
+  frame 1110-1139  count=1
+  frame 1170-1199  count=1
+  frame 1230-1259  count=1
+  frame 1290-1319  count=1
+  frame 1350-1379  count=1
+  frame 1410-1439  count=1
+  frame 1470-1499  count=1
+  frame 1530-1559  count=1
+  frame 1590-1619  count=1
+  frame 1650-1679  count=1
+  frame 1710-1739  count=1
+  frame 1770-1799  count=1
+  frame 1800-1829  count=1
+  frame 1860-1889  count=1
+  frame 1920-1949  count=1
+  frame 1980-2009  count=1
+  frame 2040-2069  count=1
+  frame 2100-2129  count=1
+  frame 2160-2189  count=1
+  frame 2220-2249  count=1
+  frame 2280-2309  count=1
+  frame 2340-2369  count=1
+  frame 2400-2429  count=1
+  frame 2460-2489  count=1
+  frame 2520-2549  count=1
+  frame 2580-2609  count=1
+  frame 2640-2669  count=1
+  frame 4500-4529  count=1
+  frame 4530-4559  count=2
+  frame 4560-4589  count=2
+
+=== UNTIMED GAP ANALYSIS (worst 15 frames where frame_ms - section_sum is largest) ===
+  frame  1792  total=  131.2 ms  section_sum=  108.6 ms  untimed_gap=   22.6 ms
+  frame  2260  total=  106.4 ms  section_sum=   84.1 ms  untimed_gap=   22.3 ms
+  frame  2620  total=  112.9 ms  section_sum=   90.8 ms  untimed_gap=   22.2 ms
+  frame  2323  total=  106.2 ms  section_sum=   84.1 ms  untimed_gap=   22.1 ms
+  frame  2584  total=  102.8 ms  section_sum=   80.8 ms  untimed_gap=   22.1 ms
+  frame  2692  total=  118.8 ms  section_sum=   97.0 ms  untimed_gap=   21.8 ms
+  frame  2332  total=  106.3 ms  section_sum=   84.7 ms  untimed_gap=   21.6 ms
+  frame  2566  total=  110.6 ms  section_sum=   89.8 ms  untimed_gap=   20.8 ms
+  frame  2755  total=  105.7 ms  section_sum=   87.9 ms  untimed_gap=   17.7 ms
+  frame  2818  total=  125.8 ms  section_sum=  111.1 ms  untimed_gap=   14.7 ms
+  frame  2791  total=  118.0 ms  section_sum=  104.3 ms  untimed_gap=   13.7 ms
+  frame  2827  total=  117.1 ms  section_sum=  103.7 ms  untimed_gap=   13.4 ms
+  frame  2836  total=  118.4 ms  section_sum=  105.7 ms  untimed_gap=   12.7 ms
+  frame  2872  total=  121.1 ms  section_sum=  109.3 ms  untimed_gap=   11.8 ms
+  frame  2881  total=  120.6 ms  section_sum=  108.8 ms  untimed_gap=   11.7 ms
+
+=== FRAMES WHERE unit.move_and_slide EXCEEDED 20ms (top 15) ===
+  frame  3433   222.16 ms
+  frame  3373   217.86 ms
+  frame  3325   216.72 ms
+  frame  3420   212.22 ms
+  frame  3434   211.42 ms
+  frame  3391   210.57 ms
+  frame  3455   208.27 ms
+  frame  3435   204.45 ms
+  frame  3419   204.28 ms
+  frame  3367   198.05 ms
+  frame  3475   196.14 ms
+  frame  3417   195.67 ms
+  frame  3451   195.01 ms
+  frame  3389   193.27 ms
+  frame  3432   193.27 ms
+
+=== FRAMES WHERE units (whole section) EXCEEDED 30ms (top 15) ===
+  frame  4526   562.04 ms
+  frame  4574   545.49 ms
+  frame  3622   515.33 ms
+  frame  4566   511.83 ms
+  frame  4550   502.87 ms
+  frame  4534   498.37 ms
+  frame  4518   488.68 ms
+  frame  4558   474.49 ms
+  frame  4542   456.75 ms
+  frame  4398   317.16 ms
+  frame  4390   300.64 ms
+  frame  4438   293.68 ms
+  frame  4334   290.70 ms
+  frame  3287   254.57 ms
+  frame  3433   230.33 ms
+
+=== UNITS_ALIVE PROGRESSION (from hitch log snapshots) ===
+  frame    16  units=2.0  structs=2.0
+  frame    43  units=2.0  structs=4.0
+  frame   103  units=2.0  structs=5.0
+  frame   163  units=2.0  structs=6.0
+  frame   223  units=2.0  structs=7.0
+  frame   283  units=2.0  structs=8.0
+  frame   343  units=2.0  structs=9.0
+  frame   403  units=2.0  structs=10.0
+  frame   427  units=2.0  structs=12.0
+  frame   487  units=2.0  structs=13.0
+  frame   547  units=2.0  structs=14.0
+  frame   602  units=2.0  structs=16.0
+  frame   662  units=2.0  structs=17.0
+  frame   722  units=2.0  structs=18.0
+  frame   763  units=2.0  structs=20.0
+  frame   823  units=2.0  structs=21.0
+  frame   883  units=2.0  structs=22.0
+  frame   902  units=2.0  structs=24.0
+  frame   978  units=2.0  structs=26.0
+  frame  1038  units=2.0  structs=27.0
+  frame  1098  units=2.0  structs=28.0
+  frame  1114  units=2.0  structs=30.0
+  frame  1174  units=2.0  structs=31.0
+  frame  1192  units=3.0  structs=31.0
+  frame  1234  units=5.0  structs=32.0
+  frame  1294  units=6.0  structs=33.0
+  frame  1354  units=6.0  structs=34.0
+  frame  1414  units=6.0  structs=35.0
+  frame  1474  units=7.0  structs=36.0
+  frame  1534  units=9.0  structs=37.0
+  frame  1594  units=11.0  structs=38.0
+  frame  1654  units=13.0  structs=39.0
+  frame  1714  units=14.0  structs=40.0
+  frame  1774  units=14.0  structs=41.0
+  frame  1816  units=14.0  structs=42.0
+  frame  1876  units=14.0  structs=43.0
+  frame  1936  units=14.0  structs=44.0
+  frame  1996  units=14.0  structs=45.0
+  frame  2056  units=14.0  structs=46.0
+  frame  2116  units=14.0  structs=47.0
+  frame  2176  units=14.0  structs=48.0
+  frame  2236  units=14.0  structs=49.0
+  frame  2296  units=14.0  structs=50.0
+  frame  2356  units=14.0  structs=51.0
+  frame  2416  units=14.0  structs=52.0
+  frame  2476  units=14.0  structs=53.0
+  frame  2536  units=14.0  structs=54.0
+  frame  2596  units=14.0  structs=55.0
+  frame  2656  units=14.0  structs=56.0
+  frame  2718  units=15.0  structs=56.0
+  frame  2782  units=16.0  structs=56.0
+  frame  2845  units=17.0  structs=56.0
+  frame  2899  units=18.0  structs=56.0
+  frame  2962  units=19.0  structs=56.0
+  frame  3025  units=20.0  structs=56.0
+  frame  3080  units=21.0  structs=56.0
+  frame  3142  units=22.0  structs=56.0
+  frame  4516  units=22.0  structs=57.0
+  frame  4532  units=22.0  structs=58.0
+  frame  4548  units=22.0  structs=59.0
+  frame  4564  units=22.0  structs=60.0
+  frame  4580  units=22.0  structs=61.0

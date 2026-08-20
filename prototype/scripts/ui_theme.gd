@@ -36,6 +36,7 @@ const MATERIALS = [
 	"cutting_mat", "cardboard", "kraft", "cork", "chipboard",
 	# L1 equipment
 	"powdercoat", "steel", "moulded", "canvas", "carbon", "fiberglass", "toolbox",
+	"bakelite",
 ]
 
 const FIELD_DIR = "res://assets/textures/ui/"
@@ -71,6 +72,8 @@ const MATERIAL_DEFAULTS = {
 	# shader's luminance scuff on top of them just washes the enamel out. grime
 	# runs high instead - a toolbox collects dirt in every recess.
 	"toolbox":    {"wear": 0.05, "grime": 0.34, "scale": 1.0, "vignette": 0.34},
+	# Commander's desk surface - warm bakelite plastic. Slightly worn, grimey.
+	"bakelite":   {"wear": 0.15, "grime": 0.25, "scale": 1.0, "vignette": 0.35, "brightness": 0.75},
 }
 
 static var _field_cache: Dictionary = {}

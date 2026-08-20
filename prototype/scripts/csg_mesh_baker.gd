@@ -69,6 +69,8 @@ const TYPE_PYRAMID := 15
 const TYPE_FENDER := 16
 const TYPE_CANOPY := 17
 const TYPE_RING := 18
+const TYPE_INNER_CORNER := 19
+const TYPE_OUTER_CORNER := 20
 
 # Geometric tolerance. Coordinates here are hull-space metres (hulls run ~2-16
 # units), so 1e-5 is comfortably below any authored feature yet far above float
@@ -375,6 +377,10 @@ static func _primitive_to_pieces(prim: Dictionary, facets: int, chamfer_pct: flo
 			return [_ellipsoid(pos, basis, h, seg, false)]
 		TYPE_RING, TYPE_TORUS, TYPE_FENDER:
 			return _annulus(pos, basis, h, seg, int(prim.type))
+		TYPE_INNER_CORNER:
+			return [_inner_corner(pos, basis, h)]
+		TYPE_OUTER_CORNER:
+			return [_outer_corner(pos, basis, h)]
 		_:
 			return [_box(pos, basis, h)]
 
@@ -393,6 +399,26 @@ static func _box(pos: Vector3, basis: Basis, h: Vector3) -> Array:
 		_plane_from(Vector3(0, -1, 0), Vector3(0, -h.y, 0), pos, basis),
 		_plane_from(Vector3(0, 0, 1), Vector3(0, 0, h.z), pos, basis),
 		_plane_from(Vector3(0, 0, -1), Vector3(0, 0, -h.z), pos, basis),
+	]
+
+
+static func _inner_corner(pos: Vector3, basis: Basis, h: Vector3) -> Array:
+	return [
+		_plane_from(Vector3(0, 1, 0), Vector3(0, h.y, 0), pos, basis),
+		_plane_from(Vector3(0, -1, 0), Vector3(0, -h.y, 0), pos, basis),
+		_plane_from(Vector3(-1, 0, 0), Vector3(-h.x, 0, 0), pos, basis),
+		_plane_from(Vector3(0, 0, -1), Vector3(0, 0, -h.z), pos, basis),
+		_plane_from(Vector3(1.0 / h.x, 0.0, 1.0 / h.z), Vector3(h.x, 0, -h.z), pos, basis),
+	]
+
+
+static func _outer_corner(pos: Vector3, basis: Basis, h: Vector3) -> Array:
+	return [
+		_plane_from(Vector3(0, 1, 0), Vector3(0, h.y, 0), pos, basis),
+		_plane_from(Vector3(0, -1, 0), Vector3(0, -h.y, 0), pos, basis),
+		_plane_from(Vector3(1, 0, 0), Vector3(h.x, 0, 0), pos, basis),
+		_plane_from(Vector3(0, 0, 1), Vector3(0, 0, h.z), pos, basis),
+		_plane_from(Vector3(-1.0 / h.x, 0.0, -1.0 / h.z), Vector3(h.x, 0, -h.z), pos, basis),
 	]
 
 

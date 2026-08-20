@@ -105,6 +105,12 @@ const GROUPS := [
 				"scene": "res://scenes/HullBuilder.tscn",
 				"badge": "CAD // MESH"
 			},
+			{
+				"title": "BLOCK HULL BUILDER",
+				"desc": "Modular grid-based brick hull suite with strict snapping and CSG weld.",
+				"scene": "res://scenes/ModularHullBuilder.tscn",
+				"badge": "CAD // BLOCKS (NEW)"
+			},
 		],
 	},
 	{

@@ -103,7 +103,8 @@ func setup(director: Node) -> void:
 	if vp != null and not vp.size_changed.is_connected(fit_to_viewport):
 		vp.size_changed.connect(fit_to_viewport)
 	_build_toolbar()
-	_director.production.queue_changed.connect(_on_queue_changed)
+	if _director.production != null:
+		_director.production.queue_changed.connect(_on_queue_changed)
 	# Re-evaluate every build button's tech-tree gate when a structure
 	# goes live or dies. The buttons were created with `disabled = true`
 	# if their gate wasn't met at the time; a placed tech_lab resolves
@@ -488,7 +489,11 @@ func _process(delta: float) -> void:
 		_refresh_acc = 0.0
 		_refresh_all()
 
-	var mouse := get_global_mouse_position()
+	# Guard: get_viewport() is null in headless test context and crashes
+	# Godot 4's get_global_mouse_position() which internally dereferences it.
+	var mouse := Vector2(-1, -1)
+	if get_viewport() != null:
+		mouse = get_global_mouse_position()
 	var moved := false
 	for queue_name in _slots:
 		var entry: Dictionary = _slots[queue_name]

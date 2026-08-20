@@ -1,0 +1,1 @@
+& 'E:\Kitbash-Command\prototype\Godot_v4.7.1-stable_win64_console.exe' --headless --script tools/analyze_perf_log.gd --path 'E:\Kitbash-Command\prototype' -- 'C:\Users\Chris\AppData\Roaming\Godot\app_userdata\Kitbash Command Prototype\logs\battle_2026-08-20T00-22-49_skirmish.log' 2>&1 | Out-File 'E:\Kitbash-Command\prototype\_perf_out.txt' -Encoding utf8

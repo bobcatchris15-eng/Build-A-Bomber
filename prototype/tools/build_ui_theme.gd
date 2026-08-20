@@ -237,6 +237,14 @@ const VARIATION_BASES = {
 	"HintLabel": "Label",
 	"HUDValueLabel": "Label",
 	"StatLabel": "Label",
+	# Command Console additions
+	"BakelitePanel": "PanelContainer",
+	"FoldedPaperPanel": "PanelContainer",
+	"CRTReadout": "PanelContainer",
+	"DrawerTab": "Button",
+	"AlertIcon": "Button",
+	"QuickJumpPill": "Button",
+	"QueueItemButton": "Button",
 }
 
 func _register_variations(theme: Theme) -> void:
@@ -321,6 +329,19 @@ func _build_panels(theme: Theme) -> void:
 	# a strip inside this plate.
 	theme.set_stylebox("panel", "CalloutPanel",
 		_plate("canvas", "normal", Tokens.SPACE_XS, 2))
+
+	# BakelitePanel - commander's desk surface. Warm plastic with baked bevel.
+	theme.set_stylebox("panel", "BakelitePanel",
+		_plate("bakelite", "normal", Tokens.SPACE_MD, Tokens.SPACE_MD))
+
+	# FoldedPaperPanel - slide-up drawer panels. Canvas/duck cloth texture.
+	theme.set_stylebox("panel", "FoldedPaperPanel",
+		_plate("canvas", "pressed", Tokens.SPACE_MD, Tokens.SPACE_MD))
+
+	# CRTReadout - phosphor display panel. Uses shader, not plate.
+	var crt = _flat(Tokens.PHOSPHOR_GLASS, Color(0, 0, 0, 0), 0, 0)
+	_pad(crt, Tokens.BEZEL_INSET, Tokens.BEZEL_INSET)
+	theme.set_stylebox("panel", "CRTReadout", crt)
 
 
 func _build_buttons(theme: Theme) -> void:
@@ -508,6 +529,69 @@ func _build_buttons(theme: Theme) -> void:
 	theme.set_color("font_color", "ListButton", Tokens.TEXT_SECONDARY)
 	theme.set_color("font_hover_color", "ListButton", Tokens.TEXT_PRIMARY)
 	theme.set_color("font_pressed_color", "ListButton", Tokens.TEXT_PRIMARY)
+
+	# DrawerTab - context drawer tab buttons. Canvas material, flat at rest,
+	# lifted on active with hazard bottom edge.
+	var drawer_normal = _plate("canvas", "normal", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var drawer_hover = _plate("canvas", "hover", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var drawer_active = _flat(Tokens.BASE_600, Tokens.SIGNAL_HAZARD, 0, 0)
+	drawer_active.border_width_bottom = 3
+	_pad(drawer_active, Tokens.SPACE_MD, Tokens.SPACE_SM)
+	theme.set_stylebox("normal", "DrawerTab", drawer_normal)
+	theme.set_stylebox("hover", "DrawerTab", drawer_hover)
+	theme.set_stylebox("pressed", "DrawerTab", drawer_active)
+	theme.set_stylebox("disabled", "DrawerTab", drawer_normal)
+	theme.set_color("font_color", "DrawerTab", Tokens.TEXT_SECONDARY)
+	theme.set_color("font_pressed_color", "DrawerTab", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_hover_color", "DrawerTab", Tokens.TEXT_PRIMARY)
+
+	# AlertIcon - small icon buttons in desk bar alert stack. Transparent at rest,
+	# hazard tint on active/flash.
+	var alert_normal = _flat(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, Tokens.RADIUS_CONTROL)
+	var alert_hover = _flat(Tokens.BASE_700, Color(0, 0, 0, 0), 0, Tokens.RADIUS_CONTROL)
+	var alert_pressed = _flat(Tokens.SIGNAL_HAZARD_DIM, Tokens.SIGNAL_HAZARD, Tokens.BORDER_HAIRLINE, Tokens.RADIUS_CONTROL)
+	_pad(alert_normal, Tokens.SPACE_XS, Tokens.SPACE_XS)
+	_pad(alert_hover, Tokens.SPACE_XS, Tokens.SPACE_XS)
+	_pad(alert_pressed, Tokens.SPACE_XS, Tokens.SPACE_XS)
+	theme.set_stylebox("normal", "AlertIcon", alert_normal)
+	theme.set_stylebox("hover", "AlertIcon", alert_hover)
+	theme.set_stylebox("pressed", "AlertIcon", alert_pressed)
+	theme.set_stylebox("disabled", "AlertIcon", alert_normal)
+	theme.set_color("icon_normal_color", "AlertIcon", Tokens.TEXT_SECONDARY)
+	theme.set_color("icon_hover_color", "AlertIcon", Tokens.SIGNAL_HAZARD)
+	theme.set_color("icon_pressed_color", "AlertIcon", Color(1, 1, 1))
+
+	# QuickJumpPill - small pills in context drawer STATUS tab for quick tab switching.
+	var pill_normal = _flat(Tokens.BASE_600, Color(0, 0, 0, 0), 0, Tokens.RADIUS_CONTROL)
+	var pill_hover = _flat(Tokens.BASE_500, Tokens.SIGNAL_HAZARD, Tokens.BORDER_HAIRLINE, Tokens.RADIUS_CONTROL)
+	var pill_pressed = _flat(Tokens.SIGNAL_HAZARD_DIM, Tokens.SIGNAL_HAZARD, Tokens.BORDER_EMPHASIS, Tokens.RADIUS_CONTROL)
+	_pad(pill_normal, Tokens.SPACE_SM, Tokens.SPACE_XS)
+	_pad(pill_hover, Tokens.SPACE_SM, Tokens.SPACE_XS)
+	_pad(pill_pressed, Tokens.SPACE_SM, Tokens.SPACE_XS)
+	theme.set_stylebox("normal", "QuickJumpPill", pill_normal)
+	theme.set_stylebox("hover", "QuickJumpPill", pill_hover)
+	theme.set_stylebox("pressed", "QuickJumpPill", pill_pressed)
+	theme.set_stylebox("disabled", "QuickJumpPill", pill_normal)
+	theme.set_color("font_color", "QuickJumpPill", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_hover_color", "QuickJumpPill", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_pressed_color", "QuickJumpPill", Color(1, 1, 1))
+	theme.set_font_size("font_size", "QuickJumpPill", Tokens.FONT_SMALL)
+
+	# QueueItemButton - production drawer item buttons. Canvas material, full width.
+	var qi_normal = _plate("canvas", "normal", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var qi_hover = _plate("canvas", "hover", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var qi_pressed = _plate("canvas", "pressed", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var qi_disabled = _plate("canvas", "disabled", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	theme.set_stylebox("normal", "QueueItemButton", qi_normal)
+	theme.set_stylebox("hover", "QueueItemButton", qi_hover)
+	theme.set_stylebox("pressed", "QueueItemButton", qi_pressed)
+	theme.set_stylebox("disabled", "QueueItemButton", qi_disabled)
+	theme.set_color("font_color", "QueueItemButton", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_hover_color", "QueueItemButton", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_pressed_color", "QueueItemButton", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_disabled_color", "QueueItemButton", Tokens.TEXT_DISABLED)
+	theme.set_color("icon_normal_color", "QueueItemButton", Color.WHITE)
+	theme.set_color("icon_disabled_color", "QueueItemButton", Color(0.45, 0.45, 0.45, 0.7))
 
 
 func _build_labels(theme: Theme, stencil: FontFile, ui_bold: FontFile, mono: FontFile) -> void:

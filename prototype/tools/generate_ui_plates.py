@@ -146,6 +146,9 @@ SHADOW_ASSIGNMENT = {
     # resting on a panel, so it casts the heaviest tier available.
     ("toolbox", "normal"): "floating",
     ("toolbox", "hover"): "floating",
+    # Bakelite desk surface - raised like powdercoat panels.
+    ("bakelite", "normal"): "raised",
+    ("bakelite", "hover"): "raised",
 }
 
 # Warm near-black, matching ui_tokens.gd SHADOW_COLOR. A neutral or cool shadow
@@ -349,6 +352,31 @@ def mat_moulded(h, w, rng):
     return rgb, gloss
 
 
+def mat_bakelite(h, w, rng):
+    """
+    Warm bakelite/phenolic plastic. The commander's desk surface.
+
+    Dark marbled phenolic with fine isotropic stipple. Unlike the moulded
+    polymer (mat_moulded), bakelite has visible depth - a subtle low-frequency
+    marble/swirl from the resin flow during curing, plus a fine bead-blast
+    texture. It is warmer (amber-biased) than the neutral greys of steel and
+    powdercoat, and reads as an aged, authoritative surface.
+    """
+    # Low-frequency marble/swirl from resin flow - the signature of phenolic.
+    marble = fbm(h, w, octaves=3, base=4, rng=rng)
+    # Fine isotropic stipple - bead blasted finish.
+    stipple = fbm(h, w, octaves=4, base=48, rng=rng)
+    micro = fbm(h, w, octaves=2, base=96, rng=rng)
+
+    # Warm dark amber-brown base. BASE_800 warmed toward amber.
+    base = np.array([0.125, 0.105, 0.075])
+    lum = 1.0 + (marble - 0.5) * 0.18 + (stipple - 0.5) * 0.085 + (micro - 0.5) * 0.045
+    rgb = base[None, None, :] * lum[:, :, None]
+    # Slight sheen - cured phenolic has a subtle gloss.
+    gloss = np.full((h, w), 0.35) + (stipple - 0.5) * 0.10
+    return rgb, gloss
+
+
 def mat_canvas(h, w, rng):
     """Cotton duck. Visible warp/weft weave, matte."""
     yy, xx = _coords(h, w)
@@ -544,6 +572,7 @@ MATERIALS = {
     "carbon": mat_carbon,
     "fiberglass": mat_fiberglass,
     "toolbox": mat_toolbox,
+    "bakelite": mat_bakelite,
 }
 
 

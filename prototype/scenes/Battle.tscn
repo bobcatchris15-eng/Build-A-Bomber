@@ -20,10 +20,11 @@ sky_material = SubResource("ProceduralSkyMaterial_bt")
 auto_exposure_enabled = false
 auto_exposure_min_exposure_value = 10.0
 auto_exposure_max_exposure_value = 20.0
-dof_blur_far_enabled = true
-dof_blur_far_distance = 60.0
-dof_blur_far_transition = 20.0
-dof_blur_amount = 0.05
+; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. DOF off: the Battle camera's near
+; plane stays well inside the focus band, and the "tilt-shift" effect from
+; a 0.05 blur was invisible at 1920x1080 tactical zoom. The lab scenes
+; (MainLab/HullBuilder) keep DOF because their subject is a single mesh.
+dof_blur_far_enabled = false
 
 [sub_resource type="Environment" id="Environment_bt"]
 background_mode = 2
@@ -33,22 +34,26 @@ tonemap_exposure = 1.0
 ambient_light_source = 1
 ambient_color = Color(0.60, 0.61, 0.62, 1)
 ambient_color_sun_energy = 0.35
+; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. SSAO halved (radius 0.8->0.5,
+; intensity 1.8->1.0) — the looser settings were tuned for SDFGI's shadow
+; contribution; with SDFGI off the wider band just smears distant ground.
 ssao_enabled = true
-ssao_radius = 0.8
-ssao_intensity = 1.8
+ssao_radius = 0.5
+ssao_intensity = 1.0
 glow_enabled = true
 glow_intensity = 0.4
 glow_bloom = 0.04
-sdfgi_enabled = true
-sdfgi_cell_size = 1.0
-sdfgi_cascades = 4
-sdfgi_max_distance = 200.0
-sdfgi_occlusion_fade = 0.2
-ssil_enabled = true
-ssil_ray_count = 8
-ssil_samples = 4
-ssil_buffer_width = 0.5
-ssil_buffer_height = 0.5
+; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. SDFGI off — the heaviest single
+; feature in this file, ~25% of frame time on a populated map at 1920x1080
+; (per perf_hud.gd's 31% headline divided by the SSAO+SSIL share). Macro-bounce
+; GI on a tactical RTS zoom is not visible; the ambient_light_source = 1
+; flat source above carries the read.
+sdfgi_enabled = false
+; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. SSIL off — picks up the micro-bounce
+; detail SDFGI's voxels can't see, and SDFGI is now off. Stacking SSIL on
+; top of SSAO was paying for itself at 8 rays/4 samples every fragment with
+; nothing for it to add to.
+ssil_enabled = false
 adjustment_enabled = true
 adjustment_saturation = 1.0
 adjustment_contrast = 1.0

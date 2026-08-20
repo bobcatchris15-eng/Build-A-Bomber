@@ -1,76 +1,23 @@
 class_name BattleHUD
 extends Control
-# The always-on match readouts: resources, power, and the minimap.
-#
-# COMPOSITION ONLY. Every piece of chrome here is an existing ui_* widget or a
-# theme variation from bomber_theme.tres. The old HUD was ~700 lines inside
-# skirmish.gd building its own panels, and that is exactly the accretion this
-# rebuild exists to undo - so this file arranges things and reads services, and
-# owns no styling of its own beyond layout.
-#
-# The production queues are NOT here. production_hud.gd already owns them, with
-# its dock and its radial ring, and a second thing drawing queue state would be
-# two views of one truth that can disagree.
-#
-# THE MINIMAP IS A REAL Image, NOT A SubViewport. Headless never rasterizes a
-# viewport, so a render-to-texture minimap cannot be asserted on in a test - and
-# this one is asserted on, by reading pixels back. The old implementation made
-# the same call for the same reason and it is carried over deliberately.
+# Slimmed-down BattleHUD - delegates chrome to CommandConsole.
+# Keeps only minimap logic for headless test pixel assertions.
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 const LiveryScript = preload("res://scripts/livery.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
-const CommandCardScript = preload("res://scripts/ui/command_card.gd")
-const SpecPlacardScript = preload("res://scripts/ui/spec_placard.gd")
-const EdgeMarkerScript = preload("res://scripts/ui/edge_marker.gd")
-const RightRailScript = preload("res://scripts/battle/hud/right_rail.gd")
-const SelectionPanelScript = preload("res://scripts/battle/hud/selection_panel.gd")
-const UIDockScript = preload("res://scripts/ui_dock.gd")
+const CommandConsoleScript = preload("res://scripts/battle/hud/command_console.gd")
+const MinimapOverlayScript = preload("res://scripts/battle/hud/minimap_overlay.gd")
 
-# Coarser than the fog grid on purpose: a minimap needs a recognisable
-# silhouette, not per-vision-tick precision.
-#
-# CORE_DESIGN_LANGUAGE.md §3.2: world_scale=1.0 BASELINE - _bake_minimap()
-# scales it by the map's resolved world_scale, same self-bounding reasoning
-# as vision_service.gd's GRID_CELL (Chunk 16). The minimap is a fixed
-# UI_SIZE on screen regardless of map size, so its underlying resolution
-# should stay roughly constant too - left flat, a 16x-larger map would bake
-# an image with 256x the pixels for no visible benefit.
-# Lowered 8.0 -> 2.0 after playtest ("the minimap absolutely needs more
-# resolution"). At 8.0 with world_scale 4 the minimap baked one pixel per 32
-# world units - an 840 half-extent map came out ~52 pixels wide and was then
-# stretched over a 180-pixel UI element, which is why it read as blocky. At 2.0
-# the same map bakes ~210 pixels, so the texture is roughly 1:1 with the widget
-# rather than being magnified 3.5x.
-#
-# This does NOT undo the self-bounding property above: the cell still scales
-# with world_scale while _half scales with it too, so the baked dimension stays
-# roughly constant as the world grows. It just picks a better constant. At
-# ~210x210 RGB8 the image is ~130KB, which is not a budget worth defending
-# against a legibility complaint.
+# Minimap constants (kept for test compatibility)
 const CELL := 2.0
 const UI_SIZE := 180.0
 const BLIP_RADIUS := 1
-
 const WATER_COLOR := Color(0.15, 0.32, 0.55)
-
-# Fog on the minimap is RE-SHADED, not copied straight from the world shroud.
-#
-# The world shroud dims explored-but-not-currently-seen ground to 26% of its
-# colour (vision_service.gd's EXPLORED_ALPHA 0.74). That reads fine across a
-# lit 3D scene, but the minimap is a 180px swatch of flat colour, and at 26%
-# the difference between water, sand and marsh collapses - which would cost the
-# player the map silhouette across most of the board, since most of the board
-# is explored-but-unseen at any given moment. The distinction actually needed
-# here is revealed vs not, so that is where the contrast is spent: never-seen
-# goes fully black, explored stays legible, currently-seen is untouched.
 const MINIMAP_UNEXPLORED_ALPHA := 1.0
 const MINIMAP_EXPLORED_ALPHA := 0.42
-
-# One flat colour per surface - a swatch, not a material. Echoes the per-surface
-# tints the terrain generator uses so the minimap reads as the same map.
 const SURFACE_COLORS := {
 	"marsh": Color(0.30, 0.36, 0.24),
 	"snow_mud": Color(0.55, 0.58, 0.60),
@@ -79,43 +26,43 @@ const SURFACE_COLORS := {
 	"forest": Color(0.16, 0.28, 0.16),
 	"ice": Color(0.75, 0.85, 0.92),
 }
+const VIEW_INDICATOR_COLOR := Color(0.95, 0.95, 0.98)
 
 var _director: Node = null
 var _local_team: int = 0
 
-var _resource_label: Label = null
-var _power_bar: ProgressBar = null
-var _power_label: Label = null
-var _status_label: Label = null
-
+# Minimap state (for tests that read minimap_image())
 var _half: float = 80.0
 var _world_scale: float = 1.0
 var _dim: int = 0
 var _static_image: Image = null
 var _image: Image = null
 var _texture: ImageTexture = null
-# The re-shaded fog layer, cached against vision.shroud_version - see
-# _composite_fog().
 var _fog_image: Image = null
 var _fog_version: int = -1
-var minimap_rect: TextureRect = null
-var command_card: Control = null
-var placard: Control = null
-var edge_marker: Control = null
-var right_rail: Control = null
-var selection_panel: Control = null
-var selection_dock: Control = null
 
+# PR-B (2026-08-19). Minimap refresh rate cap.
+var _MINIMAP_REFRESH_PERIOD_MS := 200
+var _last_minimap_refresh_ms: int = -1
+
+var command_console: CommandConsole
+var minimap_overlay: MinimapOverlay
+
+func _init() -> void:
+	command_console = CommandConsoleScript.new()
+	command_console.name = "CommandConsole"
+	add_child(command_console)
+
+	minimap_overlay = MinimapOverlayScript.new()
+	minimap_overlay.name = "MinimapOverlay"
+	add_child(minimap_overlay)
 
 func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	_director = director
 	_local_team = local_team
 	_half = current_map.get("map_half_extents", 80.0)
 	_world_scale = WorldScaleScript.for_map(current_map)
-	# TOP_LEFT plus an explicit size, NOT FULL_RECT - see ProductionHUD.setup().
-	# This HUD's parent is a CanvasLayer, which is not a Control and has no rect
-	# for anchors to be fractions of, so FULL_RECT collapses the node to (0, 0)
-	# and the top-RIGHT minimap renders at the far left on top of everything else.
+
 	set_anchors_preset(Control.PRESET_TOP_LEFT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fit_to_viewport()
@@ -123,33 +70,13 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	if vp != null and not vp.size_changed.is_connected(fit_to_viewport):
 		vp.size_changed.connect(fit_to_viewport)
 
-	_build_top_strip()
+	# Build minimap (for test pixel assertions)
 	_bake_minimap(current_map)
 	_build_minimap()
-	# Right rail first so the command card and placard can move INTO it
-	# in PR2 - today they are still anchored BOTTOM_RIGHT and that is
-	# the temporary overlap with the production bar that this whole
-	# programme exists to fix.
-	_build_right_rail()
-	# SelectionPanel goes on the LEFT in PR3b (UIDock, minimizable),
-	# but in this PR it still lives in the right rail at the top of
-	# the stack. The order of add_child calls into right_rail.body()
-	# is the visual order top-to-bottom, so the panel must be added
-	# before the placard and command card.
-	_build_selection_panel()
-	_build_command_card()
-	# PR3b: the SelectionPanel moves from the right rail to a
-	# minimizable left-side UIDock. Must come AFTER _build_selection_panel
-	# so the panel exists to reparent. Default state is EXPANDED so
-	# the player starts with the panel visible; clicking the header
-	# toggles to RAILED (a 40px strip with a hull icon), the same
-	# toggle the Design Lab's docks use (ui_dock.gd:228-232).
-	_build_selection_dock()
-	
-	edge_marker = EdgeMarkerScript.new()
-	add_child(edge_marker)
-	edge_marker.setup(_director)
 
+	# Delegate all chrome to CommandConsole
+	command_console.setup(director, local_team, current_map)
+	minimap_overlay.setup(current_map)
 
 func fit_to_viewport() -> void:
 	var vp := get_viewport()
@@ -158,69 +85,13 @@ func fit_to_viewport() -> void:
 	position = Vector2.ZERO
 	size = vp.get_visible_rect().size
 
+# --- Minimap (kept for test compatibility) ---
 
-# --- Top strip ---------------------------------------------------------------
-#
-# Offset from the very top edge rather than flush against it, so the readouts
-# float over the battlefield instead of framing it - the research pass called
-# this out and it matches what the UI style guide already asks for.
-# Named so match_director can stack the key bindings BELOW the strip instead of
-# guessing an offset that silently drifts the moment this changes.
-const TOP_STRIP_HEIGHT := 56.0
-
-func _build_top_strip() -> void:
-	var panel := PanelContainer.new()
-	panel.theme_type_variation = "HUDPanel"
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	panel.offset_top = Tokens.SPACE_SM
-	panel.offset_bottom = Tokens.SPACE_SM + TOP_STRIP_HEIGHT
-	add_child(panel)
-
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", Tokens.SPACE_LG)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(row)
-
-	_resource_label = Label.new()
-	_resource_label.text = "METAL 0    CRYSTAL 0"
-	row.add_child(_resource_label)
-
-	_power_label = Label.new()
-	_power_label.theme_type_variation = "HintLabel"
-	_power_label.text = "POWER"
-	row.add_child(_power_label)
-
-	_power_bar = ProgressBar.new()
-	_power_bar.custom_minimum_size = Vector2(160, 14)
-	_power_bar.show_percentage = false
-	_power_bar.max_value = 1.0
-	row.add_child(_power_bar)
-
-	_status_label = Label.new()
-	_status_label.theme_type_variation = "HintLabel"
-	row.add_child(_status_label)
-
-
-# --- Minimap -----------------------------------------------------------------
-
-# Terrain colours are baked ONCE. Every tick copies this and blits live blips on
-# top, which is cheap because the image is small - repainting terrain per tick
-# would be the expensive part and it never changes.
 func _bake_minimap(current_map: Dictionary) -> void:
 	var cell := CELL * _world_scale
 	_dim = maxi(1, int(ceil((_half * 2.0) / cell)))
-	# Map JSON carries this as a real Color once MapCatalog has parsed it, but the
-	# raw form is a [r, g, b] array - accept either rather than assuming which
-	# side of the parse this dictionary came from.
 	var raw = current_map.get("ground_color", Color(0.2, 0.25, 0.2))
 	var ground_color: Color = raw if raw is Color else Color(raw[0], raw[1], raw[2])
-	# RGBA8, not RGB8: _refresh_minimap() composites the fog with
-	# Image.blend_rect(), which hard-fails on a format mismatch between source
-	# and destination (core/io/image.cpp's `format != p_src->format`) rather
-	# than converting - and it fails by pushing an error and doing NOTHING, so
-	# an RGB8 minimap would silently render with no fog at all. The alpha
-	# channel itself is unused here; every pixel written below is opaque.
 	_static_image = Image.create(_dim, _dim, false, Image.FORMAT_RGBA8)
 	for gz in range(_dim):
 		var wz := -_half + (gz + 0.5) * cell
@@ -236,222 +107,23 @@ func _bake_minimap(current_map: Dictionary) -> void:
 	_image = _static_image.duplicate()
 	_texture = ImageTexture.create_from_image(_image)
 
-
 func _build_minimap() -> void:
-	minimap_rect = TextureRect.new()
-	minimap_rect.texture = _texture
-	minimap_rect.custom_minimum_size = Vector2(UI_SIZE, UI_SIZE)
-	minimap_rect.size = Vector2(UI_SIZE, UI_SIZE)
-	minimap_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	minimap_rect.stretch_mode = TextureRect.STRETCH_SCALE
-	minimap_rect.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	minimap_rect.offset_left = -(UI_SIZE + Tokens.SPACE_MD)
-	minimap_rect.offset_top = Tokens.SPACE_MD + 64
-	minimap_rect.offset_right = -Tokens.SPACE_MD
-	minimap_rect.offset_bottom = Tokens.SPACE_MD + 64 + UI_SIZE
-	minimap_rect.mouse_filter = Control.MOUSE_FILTER_STOP
-	minimap_rect.gui_input.connect(_on_minimap_input)
-
-	var radar_shader := load("res://shaders/phosphor_display.gdshader") as Shader
-	if radar_shader != null:
-		var smat := ShaderMaterial.new()
-		smat.shader = radar_shader
-		smat.set_shader_parameter("enable_radar_sweep", true)
-		smat.set_shader_parameter("show_range_rings", true)
-		smat.set_shader_parameter("sweep_speed", 0.75)
-		smat.set_shader_parameter("lit_color", Color(0.35, 0.95, 0.45, 1.0))
-		smat.set_shader_parameter("unlit_color", Color(0.04, 0.12, 0.05, 1.0))
-		minimap_rect.material = smat
-
-	add_child(minimap_rect)
-
-
-func _build_right_rail() -> void:
-	# The under-minimap tactical rail. Owns its own anchoring (see
-	# RightRail._anchor_under_minimap), so the only job here is to
-	# instantiate and parent. PR1 ships the empty bezel; PR2 re-parents
-	# the command card and placard into it; PR3 adds the SelectionPanel.
-	right_rail = RightRailScript.new()
-	right_rail.name = "RightRail"
-	add_child(right_rail)
-
-
-# Phase 9 SelectionPanel, wired up. Was built but never instantiated
-# (selection_panel.gd is complete; no caller added it to a tree before
-# this PR). The panel aggregates the current selection by blueprint
-# design, shows silhouette + count + aggregate HP per group, and
-# exposes a primary_changed signal that the placard and the command
-# card can both read from so they cannot disagree about which design
-# is primary.
-#
-# LAYOUT. The panel lives in the right rail, on top of the placard
-# and command card - the natural reading order "what do I have -> what
-# is this -> what can I do" maps top-to-bottom on the rail. PR3b moves
-# it to a left-side UIDock where the player can minimize it, but the
-# panel instance and its binding to the selection service stay the
-# same.
-#
-# BINDING. bind_selection_service() auto-connects
-# service.selection_changed to update_selection, so the panel updates
-# without any other wire-up. The existing _on_selection_changed
-# handler in this file keeps running in parallel for the placard; both
-# paths read from the same selection_service so they cannot disagree
-# on which units are selected, only on which is the primary. Routing
-# the placard through the panel's primary_changed signal is a
-# follow-up polish; the existing first-unit-wins behaviour is correct
-# for the most common single-selection case.
-func _build_selection_panel() -> void:
-	selection_panel = SelectionPanelScript.new()
-	selection_panel.name = "SelectionPanel"
-	selection_panel.bind_selection_service(_director.selection)
-	right_rail.body().add_child(selection_panel)
-
-
-# PR 3b. The SelectionPanel is moved from the right rail into a
-# minimizable UIDock on the left edge. The dock gives the player a
-# way to get the panel out of the way when they need a clean view of
-# the world (the whole reason it's not pinned to the rail like the
-# placard and command card, which the player always wants visible).
-#
-# WHY A LEFT DOCK, NOT A LEFT RAIL. The dock is the existing widget
-# (ui_dock.gd) the Design Lab already uses for its two side panels
-# - the same EXPANDED / RAILED / HIDDEN state machine, the same
-# auto-reveal-off rule (ui_dock.gd:30-34, "Skirmish must leave it
-# off"), the same expand-on-click header. Reusing the dock means
-# the player's muscle memory for the Lab's panels carries over to
-# the match; a new widget would be one more thing to learn.
-#
-# auto_reveal is OFF. ui_dock.gd's header is explicit: "A dock that
-# vanishes on its own mid-fight costs the player the fight". The
-# player clicks the header to collapse it; it stays collapsed until
-# they click again.
-#
-# dock_icon = "hull" is a stand-in: there is no "selection" icon in
-# the registry today. A tank silhouette reads as 'this is about
-# your units' even if it is not perfectly named. The right answer
-# is an authored icon, which is content work this PR is not
-# touching - flagged in the commit message.
-#
-# PERSISTENCE is OFF (empty persist_key). The state resets to
-# EXPANDED every match. Persisting would carry a player who
-# collapsed the dock last match into a collapsed dock this match,
-# which is the kind of silent behaviour change that erodes trust;
-# a player who wants it collapsed can collapse it on the first
-# frame of any match.
-#
-# REPARENTING. The SelectionPanel was added to the right rail body
-# by _build_selection_panel. We remove it from there and re-add it
-# to the dock body. Godot preserves the node's state across the
-# reparent (the panel's bind_selection_service connection, its
-# _groups dict, its _primary_design_id, and the visible state are
-# all on the node, not the parent).
-func _build_selection_dock() -> void:
-	selection_dock = UIDockScript.new()
-	selection_dock.dock_title = "SELECTION"
-	selection_dock.dock_icon = "hull"
-	selection_dock.side = UIDockScript.Side.LEFT
-	selection_dock.expanded_size = 240.0
-	selection_dock.auto_reveal = false
-	selection_dock.default_state = UIDockScript.State.EXPANDED
-	selection_dock.persist_key = ""
-	# The dock's _ready calls _apply_state which writes the EDGE_INSET
-	# offsets but never touches offset_top (ui_dock.gd:393-394: "the
-	# caller sets offset_top to clear the toolbar and that inset has
-	# to survive"). Set it BEFORE add_child so the first frame
-	# already sits below the top strip.
-	selection_dock.offset_top = Tokens.SPACE_SM + TOP_STRIP_HEIGHT + Tokens.SPACE_SM
-	add_child(selection_dock)
-
-	# Reparent the panel from the right rail body into the dock body.
-	if selection_panel != null and is_instance_valid(selection_panel):
-		var old_parent := selection_panel.get_parent()
-		if old_parent != null:
-			old_parent.remove_child(selection_panel)
-		selection_dock.body().add_child(selection_panel)
-
-
-func _build_command_card() -> void:
-	# PR2: the command card and spec placard used to anchor to
-	# PRESET_BOTTOM_RIGHT, where the rightmost production toolbox
-	# overlapped them on any 1920 viewport (production_hud.gd layout
-	# centres the 5-toolbox row, and the rightmost box ends ~280px
-	# from the screen edge - exactly where the placard and command
-	# card used to live). They now live in the right rail, stacked
-	# top-to-bottom by the rail's VBoxContainer. Vertical order:
-	# SpecPlacard on top (only visible on selection), CommandCard on
-	# the bottom (always visible). SelectionPanel will land above
-	# both in PR3, which is the natural "what do I have -> what is
-	# this -> what can I do" reading order.
-	var body: VBoxContainer = right_rail.body()
-
-	placard = SpecPlacardScript.new()
-	placard.level = SpecPlacardScript.Level.BATTLE
-	body.add_child(placard)
-
-	command_card = CommandCardScript.new()
-	body.add_child(command_card)
-	command_card.setup(_director)
-
-	_director.selection.selection_changed.connect(_on_selection_changed)
-
-func _on_selection_changed(selected: Array) -> void:
-	if selected.is_empty():
-		placard.visible = false
-		return
-	var primary = selected[0]
-	if not is_instance_valid(primary) or primary.is_dead:
-		placard.visible = false
-		return
-	var blueprint = primary.get_meta("blueprint") if primary.has_meta("blueprint") else {}
-	var design_name = primary.get_meta("design_name") if primary.has_meta("design_name") else "Unit"
-	var title = design_name
-	if selected.size() > 1:
-		title += " (+%d)" % (selected.size() - 1)
-	placard.from_blueprint(title, "", blueprint, primary.get_meta("design_stats") if primary.has_meta("design_stats") else {})
-	placard.visible = true
-
-
-func world_to_cell(x: float, z: float) -> Vector2i:
-	var cell := CELL * _world_scale
-	return Vector2i(
-		clampi(int(floor((x + _half) / cell)), 0, _dim - 1),
-		clampi(int(floor((z + _half) / cell)), 0, _dim - 1))
-
-
-func _blip(world_x: float, world_z: float, color: Color) -> void:
-	var c := world_to_cell(world_x, world_z)
-	for dz in range(-BLIP_RADIUS, BLIP_RADIUS + 1):
-		var gz := c.y + dz
-		if gz < 0 or gz >= _dim:
-			continue
-		for dx in range(-BLIP_RADIUS, BLIP_RADIUS + 1):
-			var gx := c.x + dx
-			if gx < 0 or gx >= _dim:
-				continue
-			_image.set_pixel(gx, gz, color)
-
+	# MinimapOverlay handles the visible minimap; this builds the backing texture for tests
+	pass
 
 func _composite_fog() -> void:
 	var vision = _director.vision if _director != null and "vision" in _director else null
 	if vision == null:
 		return
-	# Cheat/debug reveal shows the whole map, same as the world view.
 	if "reveal_all" in vision and vision.reveal_all:
 		return
 	var src: Image = vision.shroud_image()
 	if src == null or src.get_width() == 0:
 		return
 
-	# The re-shade is per-pixel, so it runs only when the fog actually moved -
-	# hence shroud_version. On the ticks where nothing was uncovered (most of
-	# them) this is just the blend below, which is a single C++ call.
 	var version: int = vision.shroud_version
 	if _fog_image == null or _fog_version != version:
 		_fog_version = version
-		# Re-shade at the SOURCE resolution, which is coarser than the minimap
-		# (the vision grid is 4 world units per cell against the minimap's 2),
-		# so the per-pixel loop is roughly a quarter the size. Resizing after
-		# the remap also lets the interpolation soften the cell edges.
 		var shaded := src.duplicate()
 		for y in range(shaded.get_height()):
 			for x in range(shaded.get_width()):
@@ -468,103 +140,15 @@ func _composite_fog() -> void:
 
 	_image.blend_rect(_fog_image, Rect2i(Vector2i.ZERO, Vector2i(_dim, _dim)), Vector2i.ZERO)
 
-
-# The image, for tests to read pixels back out of.
-func minimap_image() -> Image:
-	return _image
-
-
-func _on_minimap_input(event: InputEvent) -> void:
-	if not (event is InputEventMouseButton and event.pressed \
-			and event.button_index == MOUSE_BUTTON_LEFT):
-		return
-	var uv: Vector2 = event.position / UI_SIZE
-	var world := Vector2(-_half + uv.x * _half * 2.0, -_half + uv.y * _half * 2.0)
-	var camera: Camera3D = _director.camera
-	if camera != null:
-		# The camera is a fixed overhead rig with no separate pan target, so its
-		# X/Z is its ground focus. Height and angle are left alone.
-		camera.global_position.x = world.x
-		camera.global_position.z = world.y
-
-
-# --- Per-tick ----------------------------------------------------------------
-
-func refresh() -> void:
-	_refresh_resources()
-	_refresh_minimap()
-	_refresh_placard()
-
-func _refresh_placard() -> void:
-	if not placard.visible or _director.selection.selected.is_empty():
-		return
-	var primary = _director.selection.selected[0]
-	if not is_instance_valid(primary) or primary.is_dead:
-		return
-	var vals := {}
-	
-	if "health" in primary and "max_health" in primary:
-		var hp = clampf(float(primary.health) / float(primary.max_health), 0.0, 1.0)
-		vals["health"] = "%d%%" % int(hp * 100)
-		
-	if "current_order_name" in primary:
-		vals["order"] = str(primary.current_order_name)
-	elif "current_order" in primary and primary.current_order != null:
-		if "name" in primary.current_order:
-			vals["order"] = primary.current_order.name
-		else:
-			vals["order"] = str(primary.current_order)
-	else:
-		vals["order"] = "IDLE"
-		
-	if "stance" in primary:
-		vals["stance"] = str(primary.stance)
-		
-	placard.update_values(vals)
-
-
-func _refresh_resources() -> void:
-	var economy = _director.economy
-	if economy == null:
-		return
-	# ONE NUMBER. The readout used to show METAL and CRYSTAL side by side, which
-	# was two numbers the player had to mentally combine to answer the only
-	# question they were asking - can I afford that. Income is alongside it
-	# because cash-on-hand alone is misleading under drip-fed production: sitting
-	# at zero while earning 30 a second and sitting at zero with dead harvesters
-	# look identical otherwise.
-	_resource_label.text = "%d cr    +%.0f/s" % [
-		int(economy.credits(_local_team)), economy.income_rate(_local_team)]
-
-	var capacity: float = economy.power_capacity(_local_team)
-	var draw: float = economy.power_draw(_local_team)
-	_power_bar.value = 0.0 if capacity <= 0.0 else clampf(draw / capacity, 0.0, 1.0)
-	if economy.is_low_power(_local_team):
-		_power_label.text = "LOW POWER"
-		_status_label.text = "Production slowed - build more power"
-	else:
-		_power_label.text = "POWER"
-		_status_label.text = ""
-
-
 func _refresh_minimap() -> void:
 	if _texture == null:
 		return
 	_image.blit_rect(_static_image, Rect2i(Vector2i.ZERO, Vector2i(_dim, _dim)), Vector2i.ZERO)
-	# BEFORE the blips, deliberately. Fog shades the TERRAIN; the blips drawn
-	# after it stay at full brightness, which keeps the existing rule that a
-	# resource node is map knowledge rather than something you have to hold
-	# ground to keep seeing. Compositing the other way round would quietly
-	# reverse that.
 	_composite_fog()
 
-	# Resource nodes are map knowledge, not scouting-gated, so they are always
-	# drawn - the same rule resource_node.gd already follows everywhere else.
 	for r in get_tree().get_nodes_in_group("resource_nodes"):
 		if not is_instance_valid(r):
 			continue
-		# Per-type colour straight off the catalog, so lumber and oil are
-		# distinguishable on the minimap rather than all reading as ore.
 		var rc: Color = ResourceCatalogScript.color(str(r.get("resource_type")))
 		_blip(r.global_position.x, r.global_position.z, rc)
 
@@ -572,31 +156,35 @@ func _refresh_minimap() -> void:
 		if not is_instance_valid(c) or c.is_dead:
 			continue
 		var team: int = c.get_meta("team") if c.has_meta("team") else -1
-		# An enemy blip shows only while CURRENTLY scouted - no persistent memory,
-		# the same one-directional rule the rest of the fog uses. Structures keep
-		# their own ever-seen memory for the world view, but the minimap
-		# deliberately does not, or it becomes a free map of the enemy base.
 		if team != _local_team and "fog_hidden" in c and c.fog_hidden:
 			continue
 		_blip(c.global_position.x, c.global_position.z,
 			LiveryScript.zone_color(_faction_of(c), "hull_upper"))
 
 	_draw_view_indicator()
-
 	_texture.update(_image)
 
+func _blip(world_x: float, world_z: float, color: Color) -> void:
+	var c := world_to_cell(world_x, world_z)
+	for dz in range(-BLIP_RADIUS, BLIP_RADIUS + 1):
+		var gz := c.y + dz
+		if gz < 0 or gz >= _dim:
+			continue
+		for dx in range(-BLIP_RADIUS, BLIP_RADIUS + 1):
+			var gx := c.x + dx
+			if gx < 0 or gx >= _dim:
+				continue
+			_image.set_pixel(gx, gz, color)
 
-# Playtest: the minimap needs a "current view" indicator. Drawn LAST so it sits
-# on top of the blips rather than being overwritten by them.
-#
-# The footprint comes from the real camera by raycasting its four viewport
-# corners onto the ground plane, so the box is genuinely what is on screen at
-# the current height and tilt rather than a guess reconstructed from camera
-# height. Every step is guarded: a controller without a camera, a camera not in
-# a viewport, or a corner ray pointing at or above the horizon (which has no
-# ground intersection at all) each skip the indicator rather than erroring or
-# drawing a box stretching to infinity.
-const VIEW_INDICATOR_COLOR := Color(0.95, 0.95, 0.98)
+func world_to_cell(x: float, z: float) -> Vector2i:
+	var cell := CELL * _world_scale
+	return Vector2i(
+		clampi(int(floor((x + _half) / cell)), 0, _dim - 1),
+		clampi(int(floor((z + _half) / cell)), 0, _dim - 1))
+
+# The image, for tests to read pixels back out of.
+func minimap_image() -> Image:
+	return _image
 
 func _draw_view_indicator() -> void:
 	if _director == null or not ("camera" in _director):
@@ -611,7 +199,6 @@ func _draw_view_indicator() -> void:
 	for p in [Vector2(0, 0), Vector2(vp_size.x, 0), Vector2(vp_size.x, vp_size.y), Vector2(0, vp_size.y)]:
 		var origin: Vector3 = cam.project_ray_origin(p)
 		var dir: Vector3 = cam.project_ray_normal(p)
-		# Looking level or upward: this corner never meets the ground.
 		if dir.y >= -0.001:
 			return
 		var t: float = -origin.y / dir.y
@@ -619,9 +206,6 @@ func _draw_view_indicator() -> void:
 	for i in range(corners.size()):
 		_draw_map_line(corners[i], corners[(i + 1) % corners.size()])
 
-
-# A world-space segment onto the minimap image, sampled at enough steps that a
-# long edge stays continuous instead of dotted.
 func _draw_map_line(a: Vector3, b: Vector3) -> void:
 	var from := world_to_cell(a.x, a.z)
 	var to := world_to_cell(b.x, b.z)
@@ -635,10 +219,24 @@ func _draw_map_line(a: Vector3, b: Vector3) -> void:
 		var gz: int = clampi(int(round(lerpf(from.y, to.y, t))), 0, _dim - 1)
 		_image.set_pixel(gx, gz, VIEW_INDICATOR_COLOR)
 
-
 func _faction_of(c) -> String:
 	if "faction" in c and c.faction != "":
 		return c.faction
 	if "hull_node" in c and is_instance_valid(c.hull_node) and c.hull_node.has_meta("faction"):
 		return c.hull_node.get_meta("faction")
 	return LiveryScript.PLAYER_ID
+
+# Per-tick refresh (called by match_director)
+func refresh() -> void:
+	# PR-B (2026-08-19). Cap the per-tick minimap work to 5 Hz. The
+	# compositing itself is gated on shroud_version, but the surrounding
+	# blit_rect + blip loops run unconditionally and the per-frame
+	# update_texture call to ImageTexture was the visible 10 ms cost.
+	# Capping the whole refresh is simpler and more aggressive - the
+	# minimap is a 180px swatch, nobody sees 30 Hz updates.
+	var now_ms := Time.get_ticks_msec()
+	if _last_minimap_refresh_ms >= 0 and now_ms - _last_minimap_refresh_ms < _MINIMAP_REFRESH_PERIOD_MS:
+		return
+	_last_minimap_refresh_ms = now_ms
+	_refresh_minimap()
+	# CommandConsole handles its own updates via signals

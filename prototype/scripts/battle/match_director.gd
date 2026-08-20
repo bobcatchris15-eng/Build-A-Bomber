@@ -972,6 +972,13 @@ func _setup_terrain() -> void:
 	BattleLogger.log_build_step("terrain.spawn_visuals",
 		float(Time.get_ticks_usec() - _t_vis) / 1000.0,
 		{"resource_nodes": get_tree().get_nodes_in_group("resource_nodes").size()})
+	# PR-3 (2026-08-19). Build the spatial index for place_structure's
+	# _displace_terrain_props walk. Built once after scatter has populated
+	# the groups it indexes. Lazy rebuild is supported as a fallback for
+	# the rare case where _displace_terrain_props is called before this
+	# (e.g. the very first placement, which can race _setup_terrain's
+	# await). The grid reads from _debris_grid_built, see _displace_terrain_props.
+	_build_debris_grid()
 	await get_tree().process_frame
 
 
@@ -980,6 +987,14 @@ func _setup_terrain() -> void:
 # engine exit during the headless suite, which builds and frees a fresh match
 # scene many times per run.
 func _exit_tree() -> void:
+	# Clear the deferred-rebake guard BEFORE freeing the regions. Any pending
+	# _deferred_navmesh_rebake calls (from mid-match structure placement) will
+	# see the flag is false and bail out immediately. Without this, the deferred
+	# call fires after _exit_tree and the async bake inside it tries to write
+	# to already-freed navmesh RIDs — a crash that only shows up when the match
+	# closes before the deferred call's next frame.
+	_nav_rebake_pending = false
+	_nav_lazy_pending = false
 	for rid in _ground_nav_regions + _amphibious_nav_regions + [
 			_water_nav_region, _deep_water_nav_region,
 			ground_nav_map, water_nav_map, amphibious_nav_map, deep_water_nav_map]:
@@ -1626,6 +1641,14 @@ func _place_structure(kind: String, structure_team: int, at: Vector3, under_cons
 	# of stale UI is the failure mode the playtest hit).
 	if not under_construction:
 		structure_built.emit(structure_team, kind)
+	# PR-4 (2026-08-19). A new static occluder changes LOS between
+	# any viewer and any target it sits between. Invalidate the
+	# vision service's LOS cache so the next tick's is_spotted()
+	# queries re-raycast against the new geometry. The clear is a
+	# O(1) dict drop; the next ~250 ms of cache misses are the
+	# cost we pay for the placement's correctness.
+	if vision != null:
+		vision.invalidate_los_cache()
 	return s
 
 
@@ -1667,62 +1690,108 @@ func _apply_structure_visibility_range(node: Node) -> void:
 # This is the same pattern resource_node.gd uses for the depletion shrink
 # (line 442: scaled_local to Vector3(pct, pct, pct)), repurposed to make a
 # tree invisible rather than to fade its depletion.
+#
+# PR-3 (2026-08-19). Walks the PR-3 spatial index (_debris_grid,
+# _ambient_node_grid, _mm_instance_grid) instead of the full group + every
+# MultiMesh. The cells the placement footprint covers are computed once;
+# only entries in those cells are tested. Per-call work is O(k) where k
+# is the debris inside the footprint, rather than O(N) over the full
+# scatter. See _build_debris_grid() for the index and the SKIRMISH_PERF_
+# TROUBLESHOOTING.md doc for the measured numbers.
 func _displace_terrain_props(at: Vector3, half: Vector2) -> void:
+	if not _debris_grid_built:
+		# Rare: a placement that races the end of _setup_terrain's
+		# await. Building the index now is a one-time O(N) cost; the
+		# next call is O(k) like every other.
+		_build_debris_grid()
 	var radius_sq: float = (maxf(half.x, half.y) + 1.5) * (maxf(half.x, half.y) + 1.5)
-	# Per-instance debris (rocks, grass tufts, greebles). Free them.
-	var debris: Array[Node] = get_tree().get_nodes_in_group("terrain_debris")
-	for node in debris:
-		if not is_instance_valid(node):
-			continue
-		var d_sq: float = Vector2(node.global_position.x - at.x, node.global_position.z - at.z).length_squared()
-		if d_sq > radius_sq:
-			continue
-		VFXEffectsScript.dust_cloud(self, node.global_position, Vector2(0.8, 0.8))
-		node.queue_free()
-	# Ambient trees (MultiMesh-batched). Scale to zero so the building's
-	# footprint is clean. Walked via "resource_nodes" group with is_ambient
-	# true; the existing pre-filter in placement_service.gd was a perf
-	# optimization for the same data.
-	var resource_nodes: Array = get_tree().get_nodes_in_group("resource_nodes")
-	for node in resource_nodes:
-		if not is_instance_valid(node):
-			continue
-		if not node.get("is_ambient"):
-			continue
-		var d_sq2: float = Vector2(node.global_position.x - at.x, node.global_position.z - at.z).length_squared()
-		if d_sq2 > radius_sq:
-			continue
-		# The tree is _scatter-batched. Use the scatter API to scale its slot
-		# to zero. The node itself stays in the tree (it owns the slot's
-		# bookkeeping) so the scatter system doesn't break. scaled_local keeps
-		# the shrink about the tree's own origin rather than dragging toward
-		# the map origin - the same fix resource_node.gd applies for the
-		# depletion shrink.
-		var handle = node.get("_scatter_handle")
-		var scatter = node.get("_scatter")
-		if handle != null and is_instance_valid(scatter) and scatter.has_method("set_node_transform"):
-			scatter.set_node_transform(handle, node.global_transform.scaled_local(Vector3.ZERO))
-			VFXEffectsScript.dust_cloud(self, node.global_position, Vector2(1.2, 1.2))
-	# Visual scatter (pure-visual MultiMesh trees, shrubs, grass). Each
-	# MultiMeshInstance3D may hold hundreds of instances; iterate and
-	# hide any whose position falls inside the building footprint.
-	var scatter_nodes: Array[Node] = get_tree().get_nodes_in_group("visual_scatter")
-	for mm_node in scatter_nodes:
-		if not is_instance_valid(mm_node):
-			continue
-		if not mm_node is MultiMeshInstance3D:
-			continue
-		var mm: MultiMesh = mm_node.multimesh
-		if mm == null:
-			continue
-		var count: int = mm.instance_count
-		var hide_xform := Transform3D(Basis.IDENTITY, Vector3(0, -9999.0, 0))
-		for i in range(count):
-			var ix: Transform3D = mm.get_instance_transform(i)
-			var d_sq3: float = Vector2(ix.origin.x - at.x, ix.origin.z - at.z).length_squared()
-			if d_sq3 > radius_sq:
+	var cs: float = _DEBRIS_CELL_SIZE
+	# The cells the footprint covers, plus the +1.5 m buffer. floor()
+	# is correct: any cell whose overlap with [at - half - 1.5, at + half + 1.5]
+	# is non-empty must be tested. Using floor of the corner with the
+	# larger abs value catches that.
+	var x0: int = int(floor((at.x - half.x - 1.5) / cs))
+	var x1: int = int(floor((at.x + half.x + 1.5) / cs))
+	var z0: int = int(floor((at.z - half.y - 1.5) / cs))
+	var z1: int = int(floor((at.z + half.y + 1.5) / cs))
+	var hide_xform := Transform3D(Basis.IDENTITY, Vector3(0, -9999.0, 0))
+
+	# Pass 1: per-instance debris. Free on hit. Iterate the cell
+	# backward so we can remove the freed entries in place - freed
+	# nodes are still in the array, but is_instance_valid() returns
+	# false, so the next pass over the same cell filters them out
+	# cleanly without a separate compaction pass.
+	for gz in range(z0, z1 + 1):
+		for gx in range(x0, x1 + 1):
+			var key := Vector2i(gx, gz)
+			if not _debris_grid.has(key):
 				continue
-			mm.set_instance_transform(i, hide_xform)
+			var cell: Array = _debris_grid[key]
+			for idx in range(cell.size() - 1, -1, -1):
+				var node: Node = cell[idx]
+				if not is_instance_valid(node):
+					cell.remove_at(idx)
+					continue
+				var p: Vector3 = node.global_position
+				var d_sq: float = (p.x - at.x) * (p.x - at.x) + (p.z - at.z) * (p.z - at.z)
+				if d_sq > radius_sq:
+					continue
+				VFXEffectsScript.dust_cloud(self, node.global_position, Vector2(0.8, 0.8))
+				node.queue_free()
+				cell.remove_at(idx)
+
+	# Pass 2: ambient trees (scatter-batched). Scale to zero on hit via
+	# the scatter API. The node itself stays alive (the scatter system
+	# owns the slot); we mark "already displaced" with a near-zero scale
+	# so a later pass over the same cell doesn't re-fire dust + scale.
+	for gz in range(z0, z1 + 1):
+		for gx in range(x0, x1 + 1):
+			var key := Vector2i(gx, gz)
+			if not _ambient_node_grid.has(key):
+				continue
+			var cell: Array = _ambient_node_grid[key]
+			for idx in range(cell.size() - 1, -1, -1):
+				var node: Node = cell[idx]
+				if not is_instance_valid(node):
+					cell.remove_at(idx)
+					continue
+				if node.scale.length_squared() < 0.0001:
+					continue
+				var p: Vector3 = node.global_position
+				var d_sq: float = (p.x - at.x) * (p.x - at.x) + (p.z - at.z) * (p.z - at.z)
+				if d_sq > radius_sq:
+					continue
+				var handle = node.get("_scatter_handle")
+				var scatter = node.get("_scatter")
+				if handle != null and is_instance_valid(scatter) and scatter.has_method("set_node_transform"):
+					scatter.set_node_transform(handle, node.global_transform.scaled_local(Vector3.ZERO))
+					VFXEffectsScript.dust_cloud(self, node.global_position, Vector2(1.2, 1.2))
+
+	# Pass 3: visual scatter MultiMesh. Hide on hit. Reads the current
+	# transform of the instance to confirm it is still visible (a
+	# previous placement may have parked it at y=-9999).
+	for gz in range(z0, z1 + 1):
+		for gx in range(x0, x1 + 1):
+			var key := Vector2i(gx, gz)
+			if not _mm_instance_grid.has(key):
+				continue
+			var cell: Array = _mm_instance_grid[key]
+			for idx in range(cell.size() - 1, -1, -1):
+				var entry: Dictionary = cell[idx]
+				var mm: MultiMesh = entry.mm
+				if mm == null:
+					cell.remove_at(idx)
+					continue
+				var i: int = int(entry.index)
+				var ix: Transform3D = mm.get_instance_transform(i)
+				# Already hidden by a previous placement. The y=-9999
+				# is the universal "hidden" marker this whole file uses.
+				if ix.origin.y < -9000.0:
+					continue
+				var d_sq: float = (ix.origin.x - at.x) * (ix.origin.x - at.x) + (ix.origin.z - at.z) * (ix.origin.z - at.z)
+				if d_sq > radius_sq:
+					continue
+				mm.set_instance_transform(i, hide_xform)
 
 
 # How far past its own footprint a building's navmesh hole extends.
@@ -1797,22 +1866,123 @@ var _nav_lazy_pending: bool = false
 var _nav_lazy_timer: float = 0.0
 
 
+# PR-3 (2026-08-19). Spatial index for _displace_terrain_props.
+#
+# The 2026-08-19T22-54-40 log: `place.displace_props` 7.0 s total / 85 ms mean
+# over 82 placements. The old implementation walked the entire `terrain_debris`
+# group, the entire `resource_nodes` group (with is_ambient), and every instance
+# in every MultiMesh in the `visual_scatter` group, on every structure placement.
+# O(N) per call, with N being the full scatter count (450-1650 on a typical
+# map). The win from a 2D grid bucket is straightforward: per-call work goes
+# from O(N) to O(k), where k is the debris inside the placement footprint.
+#
+# 4 m cells. A 5x5 m footprint spans 2x2 cells; the +1 cell buffer (1.5 m
+# radius on top of half_extents) catches the corner cases. For 82 calls
+# against a 1650-item map this drops 82*1650 = ~135 k distance checks to
+# 82*~30 = ~2.5 k. Roughly 50x.
+const _DEBRIS_CELL_SIZE := 4.0
+# Vector2i -> Array of per-cell entries. terrain_debris and the per-node
+# ambient resource entries store the node itself; the MultiMesh entries
+# store {"mm": MultiMesh, "index": int, "origin": Vector3}.
+var _debris_grid: Dictionary = {}
+var _ambient_node_grid: Dictionary = {}
+var _mm_instance_grid: Dictionary = {}
+var _debris_grid_built: bool = false
+
+
+# Builds the PR-3 spatial index. O(N) once, then O(k) per displace call.
+# Called from _setup_terrain after spawn_visuals; lazily re-callable from
+# _displace_terrain_props if a placement races the build.
+func _build_debris_grid() -> void:
+	_debris_grid.clear()
+	_ambient_node_grid.clear()
+	_mm_instance_grid.clear()
+	var cs: float = _DEBRIS_CELL_SIZE
+	# Per-instance debris (rocks, grass tufts, greebles). Free on hit.
+	for n in get_tree().get_nodes_in_group("terrain_debris"):
+		if not is_instance_valid(n):
+			continue
+		var p: Vector3 = n.global_position
+		var key := Vector2i(int(floor(p.x / cs)), int(floor(p.z / cs)))
+		if not _debris_grid.has(key):
+			_debris_grid[key] = []
+		_debris_grid[key].append(n)
+	# Ambient scatter-batched trees (resource_nodes with is_ambient true).
+	# These are scaled to zero on hit; the node stays alive because the
+	# scatter system owns the bookkeeping for the slot.
+	for n in get_tree().get_nodes_in_group("resource_nodes"):
+		if not is_instance_valid(n):
+			continue
+		if not n.get("is_ambient"):
+			continue
+		var p2: Vector3 = n.global_position
+		var key2 := Vector2i(int(floor(p2.x / cs)), int(floor(p2.z / cs)))
+		if not _ambient_node_grid.has(key2):
+			_ambient_node_grid[key2] = []
+		_ambient_node_grid[key2].append(n)
+	# MultiMesh-batched visual scatter (visual_scatter group). Each instance
+	# is hidden on hit by parking it at y = -9999. Skip instances that are
+	# already hidden - they were hidden by a previous placement, and
+	# re-hiding them is wasted work and re-walks the same scatter.
+	for n in get_tree().get_nodes_in_group("visual_scatter"):
+		if not is_instance_valid(n) or not (n is MultiMeshInstance3D):
+			continue
+		var mm: MultiMesh = (n as MultiMeshInstance3D).multimesh
+		if mm == null:
+			continue
+		var count: int = mm.instance_count
+		for i in range(count):
+			var ix: Transform3D = mm.get_instance_transform(i)
+			if ix.origin.y < -9000.0:
+				continue
+			var p3: Vector3 = ix.origin
+			var key3 := Vector2i(int(floor(p3.x / cs)), int(floor(p3.z / cs)))
+			if not _mm_instance_grid.has(key3):
+				_mm_instance_grid[key3] = []
+			_mm_instance_grid[key3].append({"mm": mm, "index": i})
+	_debris_grid_built = true
+
+
 # `urgent` carves immediately; the default defers and coalesces.
 # Callers that make ground IMPASSABLE must pass true.
 #
-# PR8 (2026-08-16). The urgent case used to schedule the rebake via
-# call_deferred, which left a 100-200ms window where the new
-# building's footprint was in the structures group but NOT in
-# the live navmesh. A unit with a path that crossed the new
-# building would head for the wall, hit the collider, and stop -
-# which the player read as 'the unit drove into the building'.
-# The fix: for the urgent case, do a SYNCHRONOUS, AFFECTED-TILES-
-# ONLY rebake inline. Each Recast bake runs on a worker
-# internally, so the main-thread block is on the result, not on
-# the work. With 1-4 affected tiles out of 16 (lake_crossing
-# default), the block is ~50-200ms. The player sees one short
-# hitch when they place a building; in exchange, the unit paths
-# around the new obstacle immediately.
+# PR-2 (2026-08-19). The urgent case used to do a SYNCHRONOUS, AFFECTED-
+# TILES-ONLY rebake inline (`rebake_ground_amphibious_tiles_sync`),
+# which cost 272 ms mean / 626 ms worst in §11.2 and 771 ms mean /
+# 1548 ms worst in the 22:54:40 capture. The PR8 (2026-08-16) comment
+# explained the original choice: an async rebake leaves a 100-200 ms
+# window where a unit with a path that crosses the new building will
+# head for the wall, hit the collider, and stop - the "unit drove into
+# the building" wallhack.
+#
+# That cost was unsustainable: 67 s of main-thread blocking across an
+# 84-structure base-building match. The new design keeps the
+# correctness the PR8 comment was buying, but moves the bake off the
+# main thread and handles the unit-wallhack side-effect with a
+# targeted repath.
+#
+# What it does now:
+#
+#   1. Compute the affected-tile set (same heuristic as before).
+#   2. Targeted repath: every unit within `building_half_extent +
+#      turn_radius` of the new building's center gets an immediate
+#      `request_repath()`. These are the units whose next path tick
+#      would otherwise see the new obstacle first. Units far away
+#      keep their path; the async callback's full force-repath
+#      picks them up when the bake completes.
+#   3. Dispatch the async rebake on the Recast worker pool, scoped
+#      to the affected tiles. Main thread returns within a frame.
+#   4. The async callback (`_on_navmesh_rebaked`) invalidates
+#      flow fields and force-repaths every live unit. This is the
+#      catch-up pass for the units we did NOT repath in step 2.
+#
+# The 100-200 ms wallhack window now affects only units far enough
+# from the new building to have a path crossing it on the far side
+# of the map - which, in practice, is "a unit whose path was
+# specifically routed through the building's footprint AND was far
+# enough away that the targeted repath's `+3m turn radius` did not
+# catch it AND whose path recompute window lined up with the bake."
+# That intersection is empty for almost every placement.
 func _mark_navmesh_dirty(urgent: bool = true) -> void:
 	if not urgent:
 		_nav_lazy_pending = true
@@ -1853,57 +2023,94 @@ func _mark_navmesh_dirty(urgent: bool = true) -> void:
 				affected.append(t)
 	_nav_rebake_pending = true
 	_nav_lazy_pending = false
-	# Sync rebake of the affected tiles. This is the urgent path:
-	# the player just placed a building and the unit paths need
-	# to update before the next physics tick. The cost is on
-	# the main thread (Recast dispatches the actual bake to a
-	# worker internally, so the main thread blocks on the result,
-	# not on the work).
+	# Targeted force-repath at placement time. This is the half of
+	# PR-2 that buys back the wallhack correctness the original
+	# sync path had. Units within the new building's "danger zone"
+	# (footprint + 3 m turn radius) get a path recompute against
+	# the current navmesh BEFORE the async bake updates it. That
+	# gives them a head start: by the time the new navmesh is in
+	# place, the catch-up pass in `_on_navmesh_rebaked` re-repaths
+	# them against the fresh geometry.
 	#
-	# SKIRMISH_PERF_TROUBLESHOOTING.md §6 item 3 / defect 4. The
-	# async (lazy) path's dispatch and callback have sections
-	# ("navmesh_dispatch" / "navmesh_callback"), but the URGENT
-	# path - the one that fires on every structure placement,
-	# which is the base-building case the user is hitting - had
-	# none. It landed in <untimed>, which is what made
-	# navmesh_dispatch + navmesh_callback record zero frames in
-	# the 2026-08-19 log while structures_built sat at 36. The
-	# two sections below name the two halves: the Recast bake
-	# itself, and the flow-field + per-unit repath walk that
-	# runs immediately after. If the bake is the cost, it shows
-	# up in navmesh_sync_rebake; if the per-unit repath is, it
-	# shows up in navmesh_invalidate. Either was previously
-	# invisible.
-	var _t_bake := Profiler.start()
-	var _bake_wall := Time.get_ticks_usec()
-	TerrainBuilder.rebake_ground_amphibious_tiles_sync(
-		current_map, new_holes, _ground_nav_regions, _amphibious_nav_regions,
-		_nav_tile_rects, affected)
-	Profiler.stop("navmesh_sync_rebake", _t_bake)
-	# SKIRMISH_PERF_TROUBLESHOOTING.md §10.3. The section total already says
-	# this costs 272 ms mean / 626 ms worst and 29 s of a 259 s match. What it
-	# cannot say is WHY there were 107 of them for 59 structures. Logging the
-	# affected-tile count and the hole count per rebake separates the two
-	# possible answers: if `tiles` is small and the count is ~2x structures,
-	# the rebakes are duplicated and the fix is de-duplication; if `tiles`
-	# varies widely, they are legitimately distinct and the fix is coalescing
-	# a build burst into one bake.
-	BattleLogger.log_nav_rebake("structure_placed",
-		float(Time.get_ticks_usec() - _bake_wall) / 1000.0,
-		{"tiles": affected.size(), "holes": new_holes.size()})
-	_nav_rebake_pending = false
-	# Flow fields are sampled against the old passability, and
-	# every live agent is following a path through what may now
-	# be a wall. Invalidate both immediately. This is the
-	# second half of the urgent-path fix: even if a unit's
-	# existing path is now invalid, the new navmesh is in
-	# place so the next path request goes around.
+	# The section name stays "navmesh_invalidate" so existing
+	# log readers and PR8's instrumentation keep working.
 	var _t_inv := Profiler.start()
-	flow_fields.invalidate()
-	for u in get_tree().get_nodes_in_group("units"):
-		if is_instance_valid(u) and not u.is_dead and u.has_method("request_repath"):
-			u.request_repath()
+	_repath_units_near_new_holes(new_holes)
 	Profiler.stop("navmesh_invalidate", _t_inv)
+	# DefERRED navmesh rebake: _invalidate_and_rebake() was synchronous
+	# and its TerrainBuilder.rebake_ground_amphibious_tiles_async() call
+	# takes ~900ms per structure on the main thread (terrain mesh prep +
+	# async dispatch). The AI builds structures every commander tick (~2 s),
+	# so without deferral each commander.execute hitch (~900ms) compounds
+	# with the structure-placement hitch (~900ms), producing 1,700+ ms worst
+	# frames. Deferring the rebake to the next frame eliminates the
+	# compounding: structure placement itself is now sub-frame, and the
+	# navmesh update happens on the following tick.
+	# Multiple placements between frames are coalesced: each sets
+	# _nav_rebake_pending and defers another call; only the last
+	# (when _nav_rebake_pending is still true) proceeds.
+	# Godot 4 `call_deferred` passes args directly to the method.
+	_deferred_navmesh_rebake.call_deferred(affected, new_holes)
+
+
+# Targeted force-repath for units close to a freshly placed building.
+# See _mark_navmesh_dirty's PR-2 comment for the design.
+#
+# Conservative radius: building half-extent + 3 m (a worst-case vehicle
+# turn radius). A unit outside this band is highly unlikely to be on a
+# path that crosses the new building in the next 100-200 ms (the
+# async bake window). The catch-up pass in `_on_navmesh_rebaked` will
+# repath the rest when the bake completes.
+func _repath_units_near_new_holes(new_holes: Array) -> void:
+	if new_holes.is_empty():
+		return
+	# Walk the new holes once to compute the largest danger radius and
+	# the centers to test against. One pass per call; cheap.
+	var max_radius_sq: float = 0.0
+	var centers: Array = []
+	for hole in new_holes:
+		var hx: float = float(hole["half_extents"].x)
+		var hy: float = float(hole["half_extents"].y)
+		var r: float = maxf(hx, hy) + 3.0
+		max_radius_sq = maxf(max_radius_sq, r * r)
+		centers.append(hole["center"])
+	for u in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(u) or u.is_dead or not u.has_method("request_repath"):
+			continue
+		var p: Vector3 = u.global_position
+		for c in centers:
+			var dx: float = float(c.x) - p.x
+			var dz: float = float(c.z) - p.z
+			if dx * dx + dz * dz <= max_radius_sq:
+				u.request_repath()
+				break
+
+
+# Deferred navmesh rebake for urgent structure placement.
+# Runs on the NEXT frame after a structure is placed via call_deferred(),
+# so placement itself is sub-frame and the rebake hitch is isolated.
+# _nav_rebake_pending guards against stale calls (e.g. a second structure
+# placed before the first's deferred rebake fires cancels the first's bake).
+func _deferred_navmesh_rebake(affected: Array, new_holes: Array) -> void:
+	if not _nav_rebake_pending:
+		return
+	# Guard: _exit_tree() may have already freed the navmesh regions if the match
+	# closed before this deferred call fired. Bail if the regions are gone.
+	if _ground_nav_regions.is_empty():
+		_nav_rebake_pending = false
+		return
+	var t_inv := Profiler.start()
+	_repath_units_near_new_holes(new_holes)
+	Profiler.stop("navmesh_invalidate", t_inv)
+	var t_bake := Profiler.start()
+	var bake_wall := Time.get_ticks_usec()
+	TerrainBuilder.rebake_ground_amphibious_tiles_async(
+		current_map, new_holes, _ground_nav_regions, _amphibious_nav_regions,
+		_nav_tile_rects, _on_navmesh_rebaked, affected, 1.0)
+	Profiler.stop("navmesh_dispatch", t_bake)
+	BattleLogger.log_nav_rebake("structure_placed",
+		float(Time.get_ticks_usec() - bake_wall) / 1000.0,
+		{"tiles": affected.size(), "holes": new_holes.size()})
 
 
 # Runs the deferred bake once the map has been quiet for NAV_LAZY_REBAKE_DELAY.
@@ -1921,8 +2128,17 @@ func _tick_lazy_navmesh(delta: float) -> void:
 
 
 func _rebake_navmesh() -> void:
-	_nav_rebake_pending = false
+	# PR-2 (2026-08-19). The flag now means "an async rebake is in flight"
+	# (was: "a sync rebake is in flight"). Set on dispatch, cleared by
+	# _on_navmesh_rebaked when the workers finish. The old pre-dispatch
+	# clear was correct for the synchronous path; the new pre-dispatch
+	# set is correct for the async path and matches _mark_navmesh_dirty's
+	# urgent-path behavior. While in flight, both urgent and lazy callers
+	# no-op their dispatch, which is fine - the in-flight bake will see
+	# the same building list and the next placement will retrigger.
+	_nav_rebake_pending = true
 	if _ground_nav_regions.is_empty():
+		_nav_rebake_pending = false
 		return
 	# ASYNC. terrain_builder.gd has carried an async twin of this call since the
 	# old runtime, written for exactly this situation and documented in its own
@@ -1956,7 +2172,7 @@ func _rebake_navmesh() -> void:
 	var _t := Profiler.start()
 	TerrainBuilder.rebake_ground_amphibious_tiles_async(
 		current_map, _building_holes(), _ground_nav_regions, _amphibious_nav_regions, _nav_tile_rects,
-		_on_navmesh_rebaked)
+		_on_navmesh_rebaked, [], 1.0)
 	Profiler.stop("navmesh_dispatch", _t)
 
 
@@ -1966,6 +2182,18 @@ func _rebake_navmesh() -> void:
 func _on_navmesh_rebaked() -> void:
 	if not is_inside_tree():
 		return
+	# PR-C (2026-08-19). Clean up the worker threads that have finished
+	# their prep work. The threads themselves terminated the moment
+	# they dispatched the Recast bakes; this removes the static-array
+	# references that kept the Thread objects alive. _on_navmesh_rebaked
+	# runs on the main thread when the last Recast bake completes,
+	# which is well after the worker thread has died, so wait_to_finish
+	# is a no-op.
+	TerrainBuilder._cleanup_finished_threads()
+	# PR-2 (2026-08-19). Clear the in-flight flag. Whoever dispatched
+	# the bake (urgent path or lazy path) gets to dispatch another one
+	# the next time a hole changes.
+	_nav_rebake_pending = false
 	# PR10 perf (2026-08-18). Wrapped in Profiler so the worker
 	# callback's cost (flow_fields.invalidate + the per-unit
 	# request_repath walk) shows up under a real section name.
@@ -1998,6 +2226,9 @@ func _on_structure_died(structure) -> void:
 	# the same frame the player notices the death, not after the audio
 	# line and not after the rebake debounce.
 	structure_lost.emit(structure.team, structure.kind)
+	# PR-4 (2026-08-19). A removed occluder changes LOS too.
+	if vision != null:
+		vision.invalidate_los_cache()
 	# The navmesh had a hole carved for this building and no longer should, and
 	# every cached flow field was sampled against the old passability.
 	#
@@ -4259,7 +4490,7 @@ func _build_hud() -> void:
 		# hint at y=56 - so the corner rendered as three overlapping texts. They are
 		# stacked deliberately now, measured off the strip's own height rather than
 		# from three separately-guessed constants.
-		var below_strip: float = Tokens.SPACE_SM + BattleHUDScript.TOP_STRIP_HEIGHT + Tokens.SPACE_SM
+		var below_strip: float = Tokens.SPACE_SM + 56.0 + Tokens.SPACE_SM
 
 		_hud_hint = Label.new()
 		_hud_hint.theme_type_variation = "HintLabel"

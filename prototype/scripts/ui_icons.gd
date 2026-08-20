@@ -64,6 +64,16 @@ const ICON_PATHS: Dictionary = {
 	"prim_fender": "res://assets/icons/icon_prim_fender.svg",
 	"prim_canopy": "res://assets/icons/icon_prim_canopy.svg",
 	"prim_ring": "res://assets/icons/icon_prim_ring.svg",
+
+	# Command bar icons — name keys match CommandRegistry.icon field values.
+	"cmd_patrol": "res://assets/icons/icon_cmd_patrol.svg",
+	"cmd_attack_move": "res://assets/icons/icon_cmd_attack_move.svg",
+	"cmd_stop": "res://assets/icons/icon_cmd_stop.svg",
+	"cmd_rally": "res://assets/icons/icon_cmd_rally.svg",
+	"cmd_stance_aggressive": "res://assets/icons/icon_cmd_stance_aggressive.svg",
+	"cmd_stance_return_fire": "res://assets/icons/icon_cmd_stance_return_fire.svg",
+	"cmd_hold": "res://assets/icons/icon_cmd_hold.svg",
+	"cmd_stance_hold": "res://assets/icons/icon_cmd_stance_hold.svg",
 }
 
 static var _cache: Dictionary = {}

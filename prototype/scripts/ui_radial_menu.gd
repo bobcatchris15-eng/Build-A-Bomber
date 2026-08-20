@@ -38,6 +38,7 @@ const UIIcons = preload("res://scripts/ui_icons.gd")
 const RingDraw = preload("res://scripts/ui/ring_draw.gd")
 
 signal action_invoked(action_id: String)
+signal action_invoked_button(action_id: String, button_index: int)
 signal dismissed()
 
 # Geometry, in pixels at 100% scale.
@@ -51,7 +52,7 @@ const RING_OUTER := 84.0
 # Padding beyond RING_OUTER for the legend text, which is drawn outside the
 # ring so it never fights the tick marks for space.
 const LABEL_GAP := 14.0
-const CANVAS_PAD := 56.0
+const CANVAS_PAD := 115.0
 
 const TICK_COUNT := 48
 const TICK_LEN_MINOR := 4.0
@@ -69,7 +70,8 @@ var target_node: Node3D = null
 # Shown in the hub when nothing is hovered. The part's designation.
 var subject_label: String = ""
 
-var _actions: Array = []          # [{id, label, icon, enabled}]
+var _actions: Array = []          # [{id, label, icon, enabled, auto_close}]
+var _satellite_controls: Array[Control] = []
 var _hovered: int = -1
 var _is_open: bool = false
 
@@ -86,18 +88,36 @@ func _init() -> void:
 	# node goes through that helper rather than setting position directly.
 
 
+# Registers a satellite outer control (like RadialDial) orbiting the ring
+func add_satellite_control(ctrl: Control, angle_rad: float, radius: float = 142.0) -> void:
+	_satellite_controls.append(ctrl)
+	add_child(ctrl)
+	var center := size * 0.5
+	var ctrl_pos := center + Vector2(cos(angle_rad), sin(angle_rad)) * radius - ctrl.size * 0.5
+	ctrl.position = ctrl_pos
+
+
 # Registers one wedge. Order is the order they appear, starting at the top and
 # going clockwise - the reading order for a dial.
 #
 # `icon` is a key into UIIcons.ICON_PATHS, or "" for a text-only wedge.
-func add_action(id: String, label: String, icon: String = "", enabled: bool = true) -> void:
+func add_action(id: String, label: String, icon: String = "", enabled: bool = true, auto_close: bool = true) -> void:
 	_actions.append({
 		"id": id,
 		"label": label.to_upper(),
 		"icon": icon,
 		"enabled": enabled,
+		"auto_close": auto_close,
 	})
 	queue_redraw()
+
+
+func set_action_label(id: String, new_label: String) -> void:
+	for a in _actions:
+		if a["id"] == id:
+			a["label"] = new_label.to_upper()
+			queue_redraw()
+			return
 
 
 func is_open() -> bool:
@@ -174,7 +194,14 @@ func _process(delta: float) -> void:
 # its area and would make the viewport behind it feel broken.
 func _has_point(point: Vector2) -> bool:
 	var r := point.distance_to(size * 0.5)
-	return r <= RING_OUTER
+	if r <= RING_OUTER:
+		return true
+	for sat in _satellite_controls:
+		if sat and is_instance_valid(sat) and sat.visible:
+			var sat_rect := Rect2(sat.position, sat.size)
+			if sat_rect.has_point(point):
+				return true
+	return false
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -188,7 +215,7 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 
 	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index != MOUSE_BUTTON_LEFT:
+		if event.button_index != MOUSE_BUTTON_LEFT and event.button_index != MOUSE_BUTTON_RIGHT:
 			return
 		accept_event()
 		var idx := _sector_at(event.position)
@@ -200,10 +227,13 @@ func _gui_input(event: InputEvent) -> void:
 		if not action["enabled"]:
 			return
 		var id: String = action["id"]
-		# Emit BEFORE closing. close() frees the node, and a queued signal
-		# from a freed emitter never arrives.
+		var should_close: bool = action.get("auto_close", true)
 		action_invoked.emit(id)
-		close()
+		action_invoked_button.emit(id, event.button_index)
+		if should_close:
+			close()
+		else:
+			queue_redraw()
 
 
 func _unhandled_input(event: InputEvent) -> void:

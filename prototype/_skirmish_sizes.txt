@@ -1,0 +1,10 @@
+﻿
+Name                                        KB
+----                                        --
+battle_2026-08-20T00-22-49_skirmish.log 6597.7
+battle_2026-08-20T00-13-23_skirmish.log 6333.7
+battle_2026-08-20T04-20-00_skirmish.log  420.8
+battle_2026-08-20T04-17-38_skirmish.log  167.9
+battle_2026-08-20T04-24-09_skirmish.log   48.2
+
+

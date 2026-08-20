@@ -60,4 +60,7 @@ theme/custom="res://resources/bomber_theme.tres"
 [rendering]
 
 textures/vram_compression/import_etc2_astc=true
-anti_aliasing/quality/msaa_3d=2
+; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. Enum 0=off, 1=2x, 2=4x, 3=8x.
+; Was 2 (4x); 4x MSAA at 1920x1080 measured ~31% of frame time on an empty map.
+; Halved to 2x. See docs/RENDER_SETTINGS.md for the budget rationale.
+anti_aliasing/quality/msaa_3d=1

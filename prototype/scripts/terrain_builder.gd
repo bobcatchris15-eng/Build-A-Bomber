@@ -736,7 +736,58 @@ static func _corner_heights(map_def: Dictionary, half: float, cell: float) -> Di
 # no valid path start.
 const HOLE_SUBDIVISION_CELL: float = 1.0
 
-static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) -> PackedVector3Array:
+# PR-2 cleanup (2026-08-19). Hole spatial index for the face-build cell
+# walk.
+#
+# The 23:50:41 playtest: navmesh_dispatch 900 ms mean, 1505 ms max. Per-call
+# cost analysis: 2x face gens at ~400 ms each + bucket + dispatch. The face
+# gen was the bottleneck - and the dominant cost inside it was the per-cell
+# check `for h in col_hard_holes: if z < h.z1 and z1 > h.z0`, which iterates
+# the FULL hole list for every cell.
+#
+# With 107 structures the brute-force walk was:
+#   40 x-columns * 107 holes = 4,280 ops to build col_hard_holes, then
+#   1600 z-cells per map * 1-2 holes_per_column = 2,400 ops
+# Total: ~6,700 ops per call. At ~60 us/op that's 400 ms - matches the
+# 400 ms face-gen estimate.
+#
+# A per-cell hole bucket makes the inner check O(holes_in_cell) instead of
+# O(total_holes). For 107 holes spread across a 40x40 cell grid, average
+# 1-2 holes per cell - and the bucket build itself is O(holes * cells_per_hole)
+# which is O(107 * 4) = 428 ops. The walk is O(1600 * 2) = 3,200 ops. Total
+# ~3,600 ops. ~2x faster, but more importantly the cost is INDEPENDENT of
+# total hole count - the walk scales with the cell grid, not the hole list.
+#
+# Bucket key is (xi, zi) - the same integer indices the existing walk already
+# uses for corner_heights, so no coordinate-system translation is needed.
+static func _bucket_holes_by_cell(holes: Array, half: float, cell: float) -> Dictionary:
+	var out: Dictionary = {}
+	for h in holes:
+		var hx0: float = h.x0
+		var hx1: float = h.x1
+		var hz0: float = h.z0
+		var hz1: float = h.z1
+		# Cell index from world XZ. `floor((x + half) / cell)` gives the
+		# column index the existing cell walk uses, so the bucket key is
+		# directly comparable to the walk's (xi, zi).
+		var cx0: int = int(floor((hx0 + half) / cell))
+		var cx1: int = int(floor((hx1 + half) / cell))
+		var cz0: int = int(floor((hz0 + half) / cell))
+		var cz1: int = int(floor((hz1 + half) / cell))
+		# Clamp to non-negative - a hole exactly at the map edge can
+		# compute a fractional index that floors to -1, and we don't
+		# want that in the dict.
+		if cx0 < 0: cx0 = 0
+		if cz0 < 0: cz0 = 0
+		for cx in range(cx0, cx1 + 1):
+			for cz in range(cz0, cz1 + 1):
+				var key := Vector2i(cx, cz)
+				if not out.has(key):
+					out[key] = []
+				out[key].append(h)
+	return out
+
+static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = [], grid_cell: float = -1.0) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var water_holes = []
@@ -752,10 +803,27 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 	# skirmish.gd's dynamic rebake on building placed/destroyed.
 	for eh in extra_holes:
 		hard_holes.append(_rect_from(eh.center, eh.half_extents))
+	# PR-5 (2026-08-19). `grid_cell` is the source-geometry cell size, not
+	# the bake's `cell_size` (those are independent - the bake cell_size
+	# is set by the region, the grid_cell is the quad walk stride).
+	# Coarsening it 1.5x for the rebake path cuts the number of verts
+	# in the per-tile bucket by 2.25x, which translates to a similar
+	# Recast cost reduction (Recast's per-tile cost is mostly
+	# voxelization, which is O(verts) once the grid is set up). A
+	# coarser source means a slightly less precise carve around a
+	# building - the carve is still a hard obstacle, but its boundary
+	# is one grid_cell fuzzier. For tactical RTS with 1m+ unit
+	# clearance that's invisible. Pass -1.0 (the default) to use the
+	# map's standard cell - the boot path does.
+	if grid_cell < 0.0:
+		grid_cell = _nav_grid_cell(map_def)
 	var bridges = _collect_bridges(map_def)
 	var has_blobs = not map_def.get("water_blobs", []).is_empty()
 	var heightmap_img = _get_heightmap_image(map_def)
-	var cell = _nav_grid_cell(map_def)
+	# PR-5. `grid_cell` is the parameter (defaults to _nav_grid_cell above);
+	# use it for both the walk and the corner-height grid so they stay
+	# in step at whichever coarseness the caller asked for.
+	var cell: float = grid_cell
 	# Only the heightmap branch below reads corner heights, so only build
 	# (or fetch) the shared grid when there is a heightmap to sample.
 	var corner_heights := PackedFloat64Array()
@@ -765,40 +833,45 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 		corner_heights = grid["heights"]
 		corner_n = grid["n"]
 
+	# PR-2 cleanup (2026-08-19). Hole spatial index - the inner check
+	# is now O(holes_in_cell) rather than O(total_holes). See
+	# _bucket_holes_by_cell above for the cost analysis.
+	var hard_buckets: Dictionary = _bucket_holes_by_cell(hard_holes, half, cell)
+	var water_buckets: Dictionary = _bucket_holes_by_cell(water_holes, half, cell)
+
 	var xi = 0
 	var x = -half
 	while x < half:
 		var x1 = min(x + cell, half)
-		var col_hard_holes: Array = []
-		for h in hard_holes:
-			if x < h.x1 and x1 > h.x0:
-				col_hard_holes.append(h)
-		var col_water_holes: Array = []
-		for w in water_holes:
-			if x < w.x1 and x1 > w.x0:
-				col_water_holes.append(w)
-
 		var zi = 0
 		var z = -half
 		while z < half:
 			var z1 = min(z + cell, half)
-			var hard_blocked = false
-			for h in col_hard_holes:
-				if z < h.z1 and z1 > h.z0:
-					hard_blocked = true
-					break
-			if hard_blocked and cell > HOLE_SUBDIVISION_CELL:
+			var cell_key := Vector2i(xi, zi)
+			var hard_blocked := false
+			var cell_hard: Array = []
+			if hard_buckets.has(cell_key):
+				cell_hard = hard_buckets[cell_key]
+				for h in cell_hard:
+					if z < h.z1 and z1 > h.z0:
+						hard_blocked = true
+						break
 				# See HOLE_SUBDIVISION_CELL's own comment. Flat Y=0 sub-
 				# quads even on a heightmap map - a small, known imprecision
 				# right at a building edge, far preferable to omitting the
 				# whole coarse quad the building only clips a corner of.
-				_emit_subdivided_ground_quad(verts, x, x1, z, z1, col_hard_holes, col_water_holes, bridges, has_blobs, map_def)
+				# Per-cell bucket slices. The subdivided quad only checks per-sub-cell
+				# overlap, so the per-cell bucket is exactly the right input here
+				# (and is in fact MORE correct than the old col_hard_holes, which
+				# contained holes from elsewhere in the column).
+				var cell_water: Array = water_buckets[cell_key] if water_buckets.has(cell_key) else []
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, cell_hard, cell_water, bridges, has_blobs, map_def)
 				z = z1
 				zi += 1
 				continue
 			var blocked = hard_blocked
-			if not blocked:
-				for w in col_water_holes:
+			if not blocked and water_buckets.has(cell_key):
+				for w in water_buckets[cell_key]:
 					if z < w.z1 and z1 > w.z0 and not _cell_on_bridge(x, x1, z, z1, bridges):
 						blocked = true
 						break
@@ -870,7 +943,7 @@ static func _emit_subdivided_ground_quad(verts: PackedVector3Array, x0: float, x
 # ground_nav_map like every other ground/legged type. water_blobs are
 # deliberately NOT excluded here either, for the same reason water_areas
 # never was - amphibious units cross water freely.
-static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = []) -> PackedVector3Array:
+static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = [], grid_cell: float = -1.0) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var holes = []
@@ -881,28 +954,38 @@ static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = []
 	# water, but not through a building sitting on land.
 	for eh in extra_holes:
 		holes.append(_rect_from(eh.center, eh.half_extents))
-	var cell = _nav_grid_cell(map_def)
+	# PR-5. See _build_ground_faces' own PR-5 comment for why this
+	# is coarsenable and what it costs in fidelity.
+	if grid_cell < 0.0:
+		grid_cell = _nav_grid_cell(map_def)
+	var cell: float = grid_cell
+	# PR-2 cleanup (2026-08-19). Hole spatial index - see
+	# _bucket_holes_by_cell in _build_ground_faces for the rationale.
+	var hole_buckets: Dictionary = _bucket_holes_by_cell(holes, half, cell)
 
 	var x = -half
 	while x < half:
 		var x1 = min(x + cell, half)
-		var col_holes: Array = []
-		for h in holes:
-			if x < h.x1 and x1 > h.x0:
-				col_holes.append(h)
+		var xi: int = int(floor((x + half) / cell))
 		var z = -half
 		while z < half:
 			var z1 = min(z + cell, half)
+			var zi: int = int(floor((z + half) / cell))
+			var cell_key := Vector2i(xi, zi)
 			var blocked = false
-			for h in col_holes:
-				if z < h.z1 and z1 > h.z0:
-					blocked = true
-					break
+			if hole_buckets.has(cell_key):
+				for h in hole_buckets[cell_key]:
+					if z < h.z1 and z1 > h.z0:
+						blocked = true
+						break
 			if blocked and cell > HOLE_SUBDIVISION_CELL:
 				# Same fix as _build_ground_faces() - see that function's
 				# header comment. A screw_drive unit hits the exact same
 				# building-swallows-a-whole-coarse-quad failure on land.
-				_emit_subdivided_ground_quad(verts, x, x1, z, z1, col_holes, [], [], false, map_def)
+				# Per-cell bucket slice for the subdivided quad - see
+				# _build_ground_faces' equivalent comment for why this is correct.
+				var cell_holes: Array = hole_buckets[cell_key] if hole_buckets.has(cell_key) else []
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, cell_holes, [], [], false, map_def)
 			elif not blocked:
 				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
@@ -1154,18 +1237,123 @@ static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size
 # regardless of map size), not placement latency. Selective per-tile rebake
 # (Chunk 22) is a further optimization on top of an already-non-blocking
 # path, not a correctness requirement.
+#
+# PR-2 (2026-08-19). `affected_tile_indices` lets the urgent placement path
+# scope the rebake to the tiles a new building actually touches. With
+# lake_crossing's 16-tile default and a 3-8m footprint, that's 1-4 tiles
+# out of 16 - so the worker-thread cost (not the main-thread one) drops by
+# 4-16x. Empty list = "rebuild all" (the boot/death path).
+#
+# PR-5 (2026-08-19). `grid_cell_mult` (default 1.5) coarsens the source
+# geometry by 1.5x for the rebake path. Cuts the per-tile vertex count
+# by 2.25x, which Recast voxelizes 2-3x faster. The bake cell_size is
+# unchanged (it has to match the region's setup), so the navmesh fidelity
+# is the same; only the carve around a building is one grid cell fuzzier
+# at the boundary. Set to 1.0 for boot-quality fidelity.
+# REVERTED 2026-08-19: the 1.5x grid_cell triggers the
+# `cell > HOLE_SUBDIVISION_CELL` branch in _build_ground_faces for
+# every hard-blocked cell, which emits 36 verts per blocked cell
+# instead of 6. With 107+ structures the per-call cost went from
+# ~200 ms to ~900 ms. The face-bucketing fix (also PR-2 cleanup) is
+# the right path to dropping navmesh_dispatch, not the coarsening.
+# Caller now defaults to 1.0 (the boot path explicitly).
+#
+# PR-C (2026-08-19). Moved the GDScript face gen + bucketing off the
+# main thread onto a Thread, so the calling code (match_director's
+# _mark_navmesh_dirty urgent path) returns within a frame instead of
+# blocking for 5-10 ms (post-bucket-fix) or 400+ ms (pre-fix). The
+# Recast bake itself was always on Recast workers via
+# bake_from_source_geometry_data_async; only the prep work was on
+# main. The thread runs face gen + bucketing + bake dispatch, then
+# terminates. The on_ready callback fires on the main thread when
+# the LAST Recast bake completes (existing Godot behaviour - the
+# callback is always called on main). Threads are kept in
+# _active_rebake_threads so the GDScript GC doesn't kill them mid-run;
+# the list is cleaned up by the thread's own deferred self-removal.
+static var _active_rebake_threads: Array = []
+
 static func rebake_ground_amphibious_tiles_async(map_def: Dictionary, extra_holes: Array,
 		ground_regions: Array, amphibious_regions: Array, tile_rects: Array,
-		on_ready: Callable = Callable()) -> void:
+		on_ready: Callable = Callable(),
+		affected_tile_indices: Array = [],
+		grid_cell_mult: float = 1.0) -> void:
+	# PR-C: dispatch the whole prep + bake-dispatch on a thread. Args are
+	# duplicated where mutation is possible (extra_holes, ground_regions,
+	# amphibious_regions arrays - the regions are RIDs so they're safe, but
+	# duplicating the Arrays prevents the main thread from mutating them
+	# while the worker is reading).
+	var thread := Thread.new()
+	thread.start(_rebuild_thread.bind(
+		map_def,
+		extra_holes.duplicate(true),
+		ground_regions,
+		amphibious_regions,
+		tile_rects,
+		on_ready,
+		affected_tile_indices.duplicate(true),
+		grid_cell_mult,
+		thread))
+	_active_rebake_threads.append(thread)
+
+
+# PR-C (2026-08-19). Runs on a worker thread, NOT the main thread.
+# Does the GDScript face gen + bucketing + dispatches the Recast bakes
+# (which themselves run on Recast workers). The on_ready callback fires
+# on the main thread when the LAST Recast bake completes (Godot
+# NavigationServer3D guarantees the callback is called on main).
+#
+# Thread safety notes:
+#   * _build_ground_faces / _build_amphibious_faces / _bucket_verts_by_tile
+#     are pure GDScript data manipulation - safe on any thread.
+#   * NavigationServer3D.bake_from_source_geometry_data_async is
+#     designed to be called from any thread.
+#   * The bake callback is invoked on the main thread by Godot, so
+#     region_set_navigation_mesh + on_ready run on main.
+#   * extra_holes / affected_tile_indices are duplicated in the caller
+#     so a parallel placement on main doesn't mutate them mid-read.
+static func _rebuild_thread(map_def: Dictionary, extra_holes: Array,
+		ground_regions: Array, amphibious_regions: Array, tile_rects: Array,
+		on_ready: Callable, affected_tile_indices: Array,
+		grid_cell_mult: float, self_thread: Thread) -> void:
 	var tile_cell_size = _nav_tile_cell_size(map_def)
-	var ground_verts = _build_ground_faces(map_def, extra_holes)
-	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
+	var grid_cell: float = _nav_grid_cell(map_def) * grid_cell_mult
+	var ground_verts = _build_ground_faces(map_def, extra_holes, grid_cell)
+	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes, grid_cell)
 	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects)
 	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects)
-	var remaining = {"n": ground_regions.size() + amphibious_regions.size()}
-	for i in range(tile_rects.size()):
+	# Empty list = "rebuild all" - the path a full-rebake caller (boot,
+	# building-destroyed) takes.
+	var indices: Array = affected_tile_indices
+	if indices.is_empty():
+		indices = []
+		for i in range(tile_rects.size()):
+			indices.append(i)
+	# Each tile dispatches two bakes (ground + amphibious).
+	var remaining = {"n": indices.size() * 2}
+	for i in indices:
 		_bake_region_async(ground_regions[i], ground_buckets[i], tile_cell_size, remaining, on_ready)
 		_bake_region_async(amphibious_regions[i], amphibious_buckets[i], tile_cell_size, remaining, on_ready)
+	# PR-C: cleanup is done by the on_ready callback (called on main
+	# when the last Recast bake completes) via _cleanup_finished_threads.
+	# We can't call_deferred from a static method, and the thread
+	# terminates on its own the moment this callable returns - all
+	# that's needed is to keep the Thread reference alive (the static
+	# array does that) until the Recast bakes finish.
+
+
+# PR-C (2026-08-19). Removes finished worker threads from the
+# active-list. Called by match_director's _on_navmesh_rebaked (which
+# runs on main when the last Recast bake completes) so the list
+# doesn't grow unbounded across a long match.
+static func _cleanup_finished_threads() -> void:
+	var i := _active_rebake_threads.size() - 1
+	while i >= 0:
+		var t: Thread = _active_rebake_threads[i]
+		if t == null or not t.is_alive():
+			if t != null:
+				t.wait_to_finish()
+			_active_rebake_threads.remove_at(i)
+		i -= 1
 
 
 # PR8 (2026-08-16). Sync twin of rebake_ground_amphibious_tiles_async().
