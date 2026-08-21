@@ -17,9 +17,11 @@ const BlockMeshes = preload("res://scripts/block_meshes.gd")
 const UIRadialMenu = preload("res://scripts/ui_radial_menu.gd")
 const UIIcons = preload("res://scripts/ui_icons.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
-const UITheme = preload("res://scripts/ui_theme.gd")
 const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
 const RadialDial = preload("res://scripts/ui/radial_dial.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
 
 @export var max_blocks: int = 400
 @export var grid_unit: float = 1.0  # 1-unit increments for strict grid snapping
@@ -52,13 +54,16 @@ var preview_node: Node3D = null
 
 # UI Nodes
 @onready var hull_container:    Node3D        = $HullContainer
-@onready var properties_panel:  VBoxContainer = $CanvasLayer/PropertiesScroller/properties_panel
-@onready var status_label:      Label         = $CanvasLayer/BottomBar/StatusLabel
-@onready var back_button:       Button        = $CanvasLayer/BackButton
-@onready var clear_button:      Button        = $CanvasLayer/ActionsPanel/ClearButton
-@onready var export_button:     Button        = $CanvasLayer/ActionsPanel/ExportButton
-@onready var save_btn:          Button        = $CanvasLayer/ActionsPanel/SaveButton
-@onready var load_btn:          Button        = $CanvasLayer/ActionsPanel/LoadButton
+
+var _canvas_layer: CanvasLayer = null
+var properties_panel:  VBoxContainer = null
+var status_label:      Label         = null
+var back_button:       Button        = null
+var clear_button:      Button        = null
+var export_button:     Button        = null
+var save_btn:          Button        = null
+var load_btn:          Button        = null
+var _right_dock_outer: Control       = null
 
 var palette_buttons: Array = []
 
@@ -122,13 +127,7 @@ func _setup_environment() -> void:
 	_setup_grid_floor()
 	_setup_forward_arrow()
 	_setup_preview_mesh()
-	_build_palette_dock()
-
-	back_button.pressed.connect(_on_back_clicked)
-	clear_button.pressed.connect(_on_clear_clicked)
-	export_button.pressed.connect(_on_export_clicked)
-	save_btn.pressed.connect(_on_save_assembly_clicked)
-	load_btn.pressed.connect(_on_load_assembly_clicked)
+	_build_ui_layout()
 
 	_update_properties_panel()
 	_update_status("MODULAR HULL BUILDER — Place blocks on the 1.0-unit 3D grid!")
@@ -195,13 +194,35 @@ func _setup_preview_mesh() -> void:
 	_preview_mesh_instance.material_override = mat
 	hull_container.add_child(_preview_mesh_instance)
 
-func _build_palette_dock() -> void:
-	if has_node("CanvasLayer/LeftPanel"):
-		get_node("CanvasLayer/LeftPanel").visible = false
-	if has_node("CanvasLayer/PaletteScroller"):
-		get_node("CanvasLayer/PaletteScroller").visible = false
+func _build_ui_layout() -> void:
+	_canvas_layer = CanvasLayer.new()
+	_canvas_layer.name = "CanvasLayer"
+	add_child(_canvas_layer)
 
-	# 1. Outer positioner (traps scroll/clicks from leaking to camera)
+	# Shared 3D UI prop stage for StampedButtons
+	UIShell.stage(_canvas_layer)
+
+	# Top-left back button
+	var back_btn := StampedButtonScript.new()
+	back_btn.name = "BackButton"
+	back_btn.text = "< BACK TO MENU"
+	back_btn.custom_minimum_size = Vector2(170, 38)
+	back_btn.position = Vector2(DOCK_LEFT_INSET, 16.0)
+	UIFeedbackScript.wire(back_btn, "default")
+	back_btn.pressed.connect(_on_back_clicked)
+	_canvas_layer.add_child(back_btn)
+	back_button = back_btn
+
+	# Left Palette Dock
+	_build_palette_dock()
+
+	# Right Properties & Actions Dock
+	_build_right_dock()
+
+	# Bottom Status Bar
+	_build_bottom_bar()
+
+func _build_palette_dock() -> void:
 	var outer := Control.new()
 	outer.name = "BlockCatalogDock"
 	outer.anchor_left = 0.0
@@ -213,7 +234,7 @@ func _build_palette_dock() -> void:
 	outer.offset_top = DOCK_TOP_INSET
 	outer.offset_bottom = -DOCK_BOTTOM_INSET
 	outer.mouse_filter = Control.MOUSE_FILTER_STOP
-	$CanvasLayer.add_child(outer)
+	_canvas_layer.add_child(outer)
 	_palette_dock_outer = outer
 
 	outer.gui_input.connect(func(event: InputEvent):
@@ -223,7 +244,6 @@ func _build_palette_dock() -> void:
 			outer.accept_event()
 	)
 
-	# 2. Stamped steel outer lip
 	var steel_lip := Panel.new()
 	steel_lip.name = "SteelLip"
 	steel_lip.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -241,7 +261,6 @@ func _build_palette_dock() -> void:
 	UITheme.apply_material(steel_lip, "steel", {"brightness": 0.62, "grime": 0.40})
 	outer.add_child(steel_lip)
 
-	# 3. Rubber Gasket
 	var gasket := Panel.new()
 	gasket.name = "RubberGasket"
 	gasket.anchor_left = 0.0
@@ -254,7 +273,7 @@ func _build_palette_dock() -> void:
 	gasket.offset_bottom = -LIP_WIDTH
 	gasket.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var gasket_style := StyleBoxFlat.new()
-	gasket_style.bg_color = Color(0.07, 0.07, 0.08, 1.0)
+	gasket_style.bg_color = Tokens.BASE_900
 	gasket_style.corner_radius_top_left = 3
 	gasket_style.corner_radius_top_right = 3
 	gasket_style.corner_radius_bottom_left = 5
@@ -266,7 +285,6 @@ func _build_palette_dock() -> void:
 	gasket.material = gasket_mat
 	outer.add_child(gasket)
 
-	# 4. Red-steel body panel
 	var body := PanelContainer.new()
 	body.name = "ToolboxBody"
 	body.anchor_left = 0.0
@@ -294,7 +312,6 @@ func _build_palette_dock() -> void:
 	dock_vbox.add_theme_constant_override("separation", 10)
 	body.add_child(dock_vbox)
 
-	# Header Stamped Label
 	var header = StampedLabelScript.new()
 	header.text = "BLOCK LIBRARY"
 	header.font_size = 18
@@ -304,8 +321,7 @@ func _build_palette_dock() -> void:
 	var subhead := Label.new()
 	subhead.text = "PRIMITIVE GEOMETRY (2 SHAPES)"
 	subhead.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	subhead.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
-	subhead.add_theme_color_override("font_color", Tokens.BASE_400)
+	subhead.theme_type_variation = "HintLabel"
 	dock_vbox.add_child(subhead)
 
 	dock_vbox.add_child(HSeparator.new())
@@ -323,6 +339,167 @@ func _build_palette_dock() -> void:
 
 	_populate_palette()
 
+func _build_right_dock() -> void:
+	var outer := Control.new()
+	outer.name = "BlockInspectorDock"
+	outer.anchor_left = 1.0
+	outer.anchor_top = 0.0
+	outer.anchor_right = 1.0
+	outer.anchor_bottom = 1.0
+	outer.offset_left = -(DOCK_WIDTH + DOCK_LEFT_INSET)
+	outer.offset_right = -DOCK_LEFT_INSET
+	outer.offset_top = DOCK_TOP_INSET
+	outer.offset_bottom = -DOCK_BOTTOM_INSET
+	outer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_canvas_layer.add_child(outer)
+	_right_dock_outer = outer
+
+	outer.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton or event is InputEventMouseMotion:
+			outer.accept_event()
+	)
+
+	var steel_lip := Panel.new()
+	steel_lip.name = "SteelLip"
+	steel_lip.set_anchors_preset(Control.PRESET_FULL_RECT)
+	steel_lip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var lip_style := StyleBoxFlat.new()
+	lip_style.bg_color = Color.WHITE
+	lip_style.corner_radius_top_left = 5
+	lip_style.corner_radius_top_right = 5
+	lip_style.corner_radius_bottom_left = 8
+	lip_style.corner_radius_bottom_right = 8
+	lip_style.border_width_top = 3
+	lip_style.border_color = Tokens.BASE_500
+	lip_style.set_content_margin_all(0)
+	steel_lip.add_theme_stylebox_override("panel", lip_style)
+	UITheme.apply_material(steel_lip, "steel", {"brightness": 0.62, "grime": 0.40})
+	outer.add_child(steel_lip)
+
+	var gasket := Panel.new()
+	gasket.name = "RubberGasket"
+	gasket.anchor_left = 0.0
+	gasket.anchor_top = 0.0
+	gasket.anchor_right = 1.0
+	gasket.anchor_bottom = 1.0
+	gasket.offset_left = LIP_WIDTH
+	gasket.offset_top = LIP_WIDTH
+	gasket.offset_right = -LIP_WIDTH
+	gasket.offset_bottom = -LIP_WIDTH
+	gasket.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var gasket_style := StyleBoxFlat.new()
+	gasket_style.bg_color = Tokens.BASE_900
+	gasket_style.corner_radius_top_left = 3
+	gasket_style.corner_radius_top_right = 3
+	gasket_style.corner_radius_bottom_left = 5
+	gasket_style.corner_radius_bottom_right = 5
+	gasket_style.set_content_margin_all(0)
+	gasket.add_theme_stylebox_override("panel", gasket_style)
+	var gasket_mat := ShaderMaterial.new()
+	gasket_mat.shader = preload("res://shaders/rubber_gasket.gdshader")
+	gasket.material = gasket_mat
+	outer.add_child(gasket)
+
+	var body := PanelContainer.new()
+	body.name = "InspectorBody"
+	body.anchor_left = 0.0
+	body.anchor_top = 0.0
+	body.anchor_right = 1.0
+	body.anchor_bottom = 1.0
+	body.offset_left = TOTAL_INSET
+	body.offset_top = TOTAL_INSET
+	body.offset_right = -TOTAL_INSET
+	body.offset_bottom = -TOTAL_INSET
+	body.mouse_filter = Control.MOUSE_FILTER_STOP
+	body.theme_type_variation = "DockPanel"
+	UITheme.apply_material(body, "powdercoat")
+	outer.add_child(body)
+
+	var vbox := VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.add_theme_constant_override("separation", 8)
+	body.add_child(vbox)
+
+	var header = StampedLabelScript.new()
+	header.text = "BLOCK INSPECTOR"
+	header.font_size = 18
+	header.custom_minimum_size = Vector2(0, 26)
+	vbox.add_child(header)
+
+	vbox.add_child(HSeparator.new())
+
+	var scroller := ScrollContainer.new()
+	scroller.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroller.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_child(scroller)
+
+	properties_panel = VBoxContainer.new()
+	properties_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	properties_panel.add_theme_constant_override("separation", 6)
+	scroller.add_child(properties_panel)
+
+	vbox.add_child(HSeparator.new())
+
+	var actions_vbox := VBoxContainer.new()
+	actions_vbox.add_theme_constant_override("separation", 6)
+	vbox.add_child(actions_vbox)
+
+	save_btn = Button.new()
+	save_btn.text = "Save Assembly"
+	save_btn.custom_minimum_size = Vector2(0, 34)
+	UIFeedbackScript.wire(save_btn, "default")
+	save_btn.pressed.connect(_on_save_assembly_clicked)
+	actions_vbox.add_child(save_btn)
+
+	load_btn = Button.new()
+	load_btn.text = "Load Assembly"
+	load_btn.custom_minimum_size = Vector2(0, 34)
+	UIFeedbackScript.wire(load_btn, "default")
+	load_btn.pressed.connect(_on_load_assembly_clicked)
+	actions_vbox.add_child(load_btn)
+
+	clear_button = Button.new()
+	clear_button.text = "Clear Grid"
+	clear_button.custom_minimum_size = Vector2(0, 34)
+	clear_button.theme_type_variation = "DangerButton"
+	UIFeedbackScript.wire(clear_button, "danger")
+	clear_button.pressed.connect(_on_clear_clicked)
+	actions_vbox.add_child(clear_button)
+
+	export_button = Button.new()
+	export_button.text = "CSG Weld & Export"
+	export_button.custom_minimum_size = Vector2(0, 42)
+	export_button.theme_type_variation = "PrimaryButton"
+	UIFeedbackScript.wire(export_button, "confirm")
+	export_button.pressed.connect(_on_export_clicked)
+	actions_vbox.add_child(export_button)
+
+func _build_bottom_bar() -> void:
+	var bar := PanelContainer.new()
+	bar.name = "BottomBar"
+	bar.anchor_left = 0.0
+	bar.anchor_right = 1.0
+	bar.anchor_top = 1.0
+	bar.anchor_bottom = 1.0
+	bar.offset_top = -36.0
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.theme_type_variation = "DockRail"
+	_canvas_layer.add_child(bar)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.add_child(margin)
+
+	status_label = Label.new()
+	status_label.name = "StatusLabel"
+	status_label.theme_type_variation = "StatLabel"
+	status_label.text = "Ready"
+	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_child(status_label)
+
 func _populate_palette() -> void:
 	if _palette_vbox == null:
 		return
@@ -337,6 +514,8 @@ func _populate_palette() -> void:
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		card.toggle_mode = true
 		card.tooltip_text = str(d["tooltip"])
+		card.theme_type_variation = "TabButton"
+		UIFeedbackScript.wire(card, "select")
 		if first:
 			card.button_pressed = true
 			first = false
@@ -366,15 +545,13 @@ func _populate_palette() -> void:
 
 		var name_lbl := Label.new()
 		name_lbl.text = str(d["name"]).to_upper()
-		name_lbl.add_theme_font_size_override("font_size", Tokens.FONT_BODY)
-		name_lbl.add_theme_color_override("font_color", Tokens.TEXT_PRIMARY)
+		name_lbl.theme_type_variation = "HeadingLabel"
 		name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		text_col.add_child(name_lbl)
 
 		var desc_lbl := Label.new()
 		desc_lbl.text = str(d["subtext"])
-		desc_lbl.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
-		desc_lbl.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
+		desc_lbl.theme_type_variation = "HintLabel"
 		desc_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		text_col.add_child(desc_lbl)
 
@@ -1394,6 +1571,7 @@ func _update_properties_panel() -> void:
 		lbl.text = "Select a block to inspect & edit\n\nRight-Click — Radial Menu & Outer Dials\nDEL — delete\nCtrl+D — duplicate\nGizmo handles — translate"
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lbl.theme_type_variation = "HintLabel"
 		properties_panel.add_child(lbl)
 		return
 
@@ -1403,7 +1581,7 @@ func _update_properties_panel() -> void:
 	var title := Label.new()
 	title.text = "%s #%d" % [_block_name(blk["type"]), selected_block + 1]
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 15)
+	title.theme_type_variation = "HeadingLabel"
 	properties_panel.add_child(title)
 	properties_panel.add_child(HSeparator.new())
 
@@ -1411,6 +1589,7 @@ func _update_properties_panel() -> void:
 	var pos_lbl := Label.new()
 	var coord: Vector3i = blk["grid_coord"]
 	pos_lbl.text = "Grid Cell: [%d, %d, %d]" % [coord.x, coord.y, coord.z]
+	pos_lbl.theme_type_variation = "StatLabel"
 	properties_panel.add_child(pos_lbl)
 
 	var rot: Vector3 = blk["rotation"]
@@ -1420,6 +1599,7 @@ func _update_properties_panel() -> void:
 		roundi(rad_to_deg(rot.y)),
 		roundi(rad_to_deg(rot.z))
 	]
+	rot_lbl.theme_type_variation = "StatLabel"
 	properties_panel.add_child(rot_lbl)
 
 	var dim_header := Label.new()
@@ -1427,11 +1607,13 @@ func _update_properties_panel() -> void:
 		dim_header.text = "Dimensions: %d x %d x %d [m]" % [dim.x, dim.y, dim.z]
 	else:
 		dim_header.text = "Width: %d [m] | Slope: 1x1 [45°]" % dim.x
+	dim_header.theme_type_variation = "StatLabel"
 	properties_panel.add_child(dim_header)
 
 	var scale_btn := Button.new()
 	scale_btn.text = "Open Radial Action Ring & Dials"
 	scale_btn.custom_minimum_size = Vector2(0, 36)
+	UIFeedbackScript.wire(scale_btn, "select")
 	scale_btn.pressed.connect(func():
 		var vp_center = get_viewport().get_visible_rect().size * 0.5
 		_open_block_radial_menu(selected_block, vp_center)
@@ -1456,19 +1638,23 @@ func _update_properties_panel() -> void:
 
 	var dup_btn := Button.new()
 	dup_btn.text = "[+] Duplicate (Ctrl+D)"
-	dup_btn.custom_minimum_size = Vector2(0, 38)
+	dup_btn.custom_minimum_size = Vector2(0, 36)
+	UIFeedbackScript.wire(dup_btn, "default")
 	dup_btn.pressed.connect(_duplicate_selected)
 	properties_panel.add_child(dup_btn)
 
 	var mirror_btn := Button.new()
 	mirror_btn.text = "Mirror Across X Axis"
-	mirror_btn.custom_minimum_size = Vector2(0, 38)
+	mirror_btn.custom_minimum_size = Vector2(0, 36)
+	UIFeedbackScript.wire(mirror_btn, "default")
 	mirror_btn.pressed.connect(_mirror_selected_x)
 	properties_panel.add_child(mirror_btn)
 
 	var del_btn := Button.new()
 	del_btn.text = "[x] Delete Block (Del)"
-	del_btn.custom_minimum_size = Vector2(0, 38)
+	del_btn.custom_minimum_size = Vector2(0, 36)
+	del_btn.theme_type_variation = "DangerButton"
+	UIFeedbackScript.wire(del_btn, "danger")
 	del_btn.pressed.connect(_delete_selected)
 	properties_panel.add_child(del_btn)
 
@@ -1476,6 +1662,7 @@ func _update_properties_panel() -> void:
 	var sym_chk := CheckBox.new()
 	sym_chk.text = "Enforce Left/Right Symmetry"
 	sym_chk.button_pressed = symmetry_enabled
+	UIFeedbackScript.wire(sym_chk, "default")
 	sym_chk.toggled.connect(func(t: bool):
 		symmetry_enabled = t
 		if t:
@@ -1490,9 +1677,8 @@ func _update_properties_panel() -> void:
 
 func _add_section_header(text: String) -> void:
 	var lbl := Label.new()
-	lbl.text = text
-	lbl.add_theme_font_size_override("font_size", 11)
-	lbl.add_theme_color_override("font_color", Color(0.65, 0.75, 0.9))
+	lbl.text = text.to_upper()
+	lbl.theme_type_variation = "HeadingLabel"
 	properties_panel.add_child(lbl)
 
 func _on_color_changed(idx: int, color: Color) -> void:

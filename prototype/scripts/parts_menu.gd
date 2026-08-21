@@ -70,12 +70,14 @@ const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 ## tiers for the manufactory system; reusing HULL_TIER_BY_CLASS here keeps the
 ## parts bin and the production tiers from ever disagreeing about what counts as
 ## a light chassis.
-const HULL_TIER_TO_GROUP := {
-	"light": "Light Chassis",
-	"medium": "Medium Chassis",
-	"heavy": "Heavy Chassis",
-}
-const HULL_GROUP_ORDER = ["Light Chassis", "Medium Chassis", "Heavy Chassis", "Static Foundations"]
+const HULL_GROUP_ORDER = [
+	"Scout & Light Chassis",
+	"Medium Battle Chassis",
+	"Heavy & Assault Chassis",
+	"Specialty & Transports",
+	"Aerospace & Aviation",
+	"Static Foundations"
+]
 
 # Locomotion: derived from the traits array each entry already declares, so a
 # modded drive sorts itself. Order is checked top-down and first match wins,
@@ -118,7 +120,7 @@ const CARD_HEIGHT := 100
 # --- Dock dimensions --------------------------------------------------------
 # Wide enough for two part cards per row at CARD_MIN_WIDTH plus the concentric
 # lip/gasket/body insets and the scrollbar.
-const TOOLBOX_WIDTH := 320.0
+const TOOLBOX_WIDTH := 288.0
 
 # --- State ------------------------------------------------------------------
 var _filter: String = ""
@@ -495,16 +497,25 @@ func _hull_group(data: Dictionary) -> String:
 	if data.get("is_foundation", false):
 		return "Static Foundations"
 	var declared := str(data.get("hull_class", "")).to_lower()
-	if ModuleCatalog.HULL_TIER_BY_CLASS.has(declared):
-		return HULL_TIER_TO_GROUP[ModuleCatalog.HULL_TIER_BY_CLASS[declared]]
-	# Mod hull with no declared class. Same weight breakpoints
-	# get_hull_size_tier() falls back to, so the two paths agree.
+	var traits: Array = data.get("traits", [])
+	if "airborne" in traits or "fixed_wing" in traits or "rotary_wing" in traits:
+		return "Aerospace & Aviation"
+	if declared == "scout" or declared == "light":
+		return "Scout & Light Chassis"
+	elif declared == "medium":
+		return "Medium Battle Chassis"
+	elif declared == "heavy":
+		return "Heavy & Assault Chassis"
+	elif declared == "transport" or declared == "oddball":
+		return "Specialty & Transports"
+
+	# Fallback by weight
 	var w = float(data.get("weight", 0.0))
 	if w <= ModuleCatalog.HULL_TIER_LIGHT_MAX_WEIGHT:
-		return "Light Chassis"
-	if w <= ModuleCatalog.HULL_TIER_MEDIUM_MAX_WEIGHT:
-		return "Medium Chassis"
-	return "Heavy Chassis"
+		return "Scout & Light Chassis"
+	elif w <= ModuleCatalog.HULL_TIER_MEDIUM_MAX_WEIGHT:
+		return "Medium Battle Chassis"
+	return "Heavy & Assault Chassis"
 
 
 func _loco_group(data: Dictionary) -> String:

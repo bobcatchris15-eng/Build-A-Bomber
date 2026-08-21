@@ -512,17 +512,12 @@ func _sync_nav_radii() -> void:
 	if not is_instance_valid(nav_agent):
 		return
 	nav_agent.target_desired_distance = _arrive_distance()
-	# Floored above the navmesh's vertical error, because path_desired_distance
-	# is measured in 3D and the ground navmesh is deliberately flat while the
-	# body follows real terrain. Without this the vertical gap alone can equal
-	# the whole tolerance, and the agent never advances past its first corner -
-	# see TerrainBuilderScript.nav_vertical_slack(). The 1.5 gives the
-	# horizontal component something left to work with once the vertical error
-	# is paid for.
+	var turn_reach := (move_speed / TURN_RATE) * 0.45
+	var base_path_dist := maxf(maxf(2.5, turn_reach), _arrive_distance() * 0.8)
 	var slack := 0.0
 	if _controller != null and "current_map" in _controller:
 		slack = TerrainBuilderScript.nav_vertical_slack(_controller.current_map) * 1.5
-	nav_agent.path_desired_distance = maxf(maxf(1.0, move_speed * 0.06), slack)
+	nav_agent.path_desired_distance = maxf(base_path_dist, slack)
 
 
 # The buffer, and what shedding load looks like when it empties.

@@ -248,9 +248,27 @@ func refresh(delta: float = 0.0) -> void:
 
 # --- Overlay drawing --------------------------------------------------------
 
+func _draw_radar_grid() -> void:
+	if _overlay == null or _overlay.size.x <= 0.0 or _overlay.size.y <= 0.0:
+		return
+	var center := _overlay.size * 0.5
+	var r := minf(center.x, center.y) * 0.94
+	var reticle_col := Style.RETICLE
+	# Cold-War radar range rings
+	_overlay.draw_arc(center, r * 0.33, 0.0, TAU, 32, reticle_col * 0.35, 1.0, true)
+	_overlay.draw_arc(center, r * 0.66, 0.0, TAU, 48, reticle_col * 0.40, 1.0, true)
+	_overlay.draw_arc(center, r, 0.0, TAU, 64, reticle_col * 0.65, 1.0, true)
+	# Crosshairs with center gap
+	_overlay.draw_line(Vector2(center.x, center.y - r), Vector2(center.x, center.y - 8), reticle_col * 0.40, 1.0, true)
+	_overlay.draw_line(Vector2(center.x, center.y + 8), Vector2(center.x, center.y + r), reticle_col * 0.40, 1.0, true)
+	_overlay.draw_line(Vector2(center.x - r, center.y), Vector2(center.x - 8, center.y), reticle_col * 0.40, 1.0, true)
+	_overlay.draw_line(Vector2(center.x + 8, center.y), Vector2(center.x + r, center.y), reticle_col * 0.40, 1.0, true)
+
+
 func _draw_overlay() -> void:
 	if _overlay == null or _overlay.size.x <= 0.0:
 		return
+	_draw_radar_grid()
 	var vision = _director.vision if _director != null and "vision" in _director else null
 	var reveal_all: bool = vision != null and "reveal_all" in vision and vision.reveal_all
 	var selected: Dictionary = {}

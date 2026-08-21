@@ -527,9 +527,7 @@ static func max_height(map_def: Dictionary) -> float:
 # Heightmap maps emit real corner heights, so only the bake quantisation
 # applies there.
 static func nav_vertical_slack(map_def: Dictionary) -> float:
-	if _get_heightmap_image(map_def):
-		return NAV_CELL_HEIGHT * 2.0
-	return max_height(map_def) + NAV_CELL_HEIGHT
+	return NAV_CELL_HEIGHT * 2.0
 
 
 static func height_at(map_def: Dictionary, x: float, z: float) -> float:
@@ -819,19 +817,13 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = [], gr
 		grid_cell = _nav_grid_cell(map_def)
 	var bridges = _collect_bridges(map_def)
 	var has_blobs = not map_def.get("water_blobs", []).is_empty()
-	var heightmap_img = _get_heightmap_image(map_def)
 	# PR-5. `grid_cell` is the parameter (defaults to _nav_grid_cell above);
 	# use it for both the walk and the corner-height grid so they stay
 	# in step at whichever coarseness the caller asked for.
 	var cell: float = grid_cell
-	# Only the heightmap branch below reads corner heights, so only build
-	# (or fetch) the shared grid when there is a heightmap to sample.
-	var corner_heights := PackedFloat64Array()
-	var corner_n := 0
-	if heightmap_img:
-		var grid = _corner_heights(map_def, half, cell)
-		corner_heights = grid["heights"]
-		corner_n = grid["n"]
+	var grid = _corner_heights(map_def, half, cell)
+	var corner_heights: PackedFloat64Array = grid["heights"]
+	var corner_n: int = grid["n"]
 
 	# PR-2 cleanup (2026-08-19). Hole spatial index - the inner check
 	# is now O(holes_in_cell) rather than O(total_holes). See
@@ -856,16 +848,8 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = [], gr
 					if z < h.z1 and z1 > h.z0:
 						hard_blocked = true
 						break
-				# See HOLE_SUBDIVISION_CELL's own comment. Flat Y=0 sub-
-				# quads even on a heightmap map - a small, known imprecision
-				# right at a building edge, far preferable to omitting the
-				# whole coarse quad the building only clips a corner of.
-				# Per-cell bucket slices. The subdivided quad only checks per-sub-cell
-				# overlap, so the per-cell bucket is exactly the right input here
-				# (and is in fact MORE correct than the old col_hard_holes, which
-				# contained holes from elsewhere in the column).
 				var cell_water: Array = water_buckets[cell_key] if water_buckets.has(cell_key) else []
-				_emit_subdivided_ground_quad(verts, x, x1, z, z1, cell_hard, cell_water, bridges, has_blobs, map_def)
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, cell_hard, cell_water, bridges, has_blobs, map_def, true)
 				z = z1
 				zi += 1
 				continue
@@ -877,7 +861,7 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = [], gr
 						break
 			if not blocked and has_blobs and _cell_on_water_blob(x, x1, z, z1, map_def):
 				blocked = true
-			if not blocked and heightmap_img:
+			if not blocked:
 				# Grid line xi is world x, xi+1 is world x1 (see
 				# _corner_heights() - it walks the same sequence).
 				var h00 = corner_heights[xi * corner_n + zi]
@@ -892,12 +876,6 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = [], gr
 					blocked = true
 				else:
 					_add_nav_quad(verts, Vector3(x, h00, z), Vector3(x1, h10, z), Vector3(x1, h11, z1), Vector3(x, h01, z1))
-			elif not blocked:
-				# Deliberately flat (not height_at()) - see this function's
-				# header comment for why the navmesh SOURCE geometry stays
-				# flat even though the visual mesh and every gameplay Y
-				# query (terrain_height_at()) are real heightmap-driven.
-				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
 			zi += 1
 		x = x1
@@ -910,14 +888,14 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = [], gr
 # coarse loop already ran, just at finer granularity within this one quad,
 # so a fine sub-cell not actually touching any hole still gets emitted.
 static func _emit_subdivided_ground_quad(verts: PackedVector3Array, x0: float, x1: float, z0: float, z1: float,
-		hard_holes: Array, water_holes: Array, bridges: Array, has_blobs: bool, map_def: Dictionary) -> void:
+		hard_holes: Array, water_holes: Array, bridges: Array, has_blobs: bool, map_def: Dictionary, has_heightmap: bool = true) -> void:
 	var sub = HOLE_SUBDIVISION_CELL
 	var sx = x0
 	while sx < x1:
-		var sx1 = min(sx + sub, x1)
+		var sx1 = minf(sx + sub, x1)
 		var sz = z0
 		while sz < z1:
-			var sz1 = min(sz + sub, z1)
+			var sz1 = minf(sz + sub, z1)
 			var blocked = false
 			for h in hard_holes:
 				if _rect_overlaps(sx, sx1, sz, sz1, h):
@@ -931,7 +909,16 @@ static func _emit_subdivided_ground_quad(verts: PackedVector3Array, x0: float, x
 			if not blocked and has_blobs and _cell_on_water_blob(sx, sx1, sz, sz1, map_def):
 				blocked = true
 			if not blocked:
-				_add_nav_quad(verts, Vector3(sx, 0, sz), Vector3(sx1, 0, sz), Vector3(sx1, 0, sz1), Vector3(sx, 0, sz1))
+				var h00 = terrain_height_at(map_def, Vector3(sx, 0, sz))
+				var h10 = terrain_height_at(map_def, Vector3(sx1, 0, sz))
+				var h11 = terrain_height_at(map_def, Vector3(sx1, 0, sz1))
+				var h01 = terrain_height_at(map_def, Vector3(sx, 0, sz1))
+				var max_slope = maxf(
+					maxf(absf(h10 - h00), absf(h01 - h00)),
+					maxf(absf(h11 - h10), absf(h11 - h01))
+				) / maxf(sx1 - sx, 0.001)
+				if max_slope <= MAX_WALKABLE_SLOPE:
+					_add_nav_quad(verts, Vector3(sx, h00, sz), Vector3(sx1, h10, sz), Vector3(sx1, h11, sz1), Vector3(sx, h01, sz1))
 			sz = sz1
 		sx = sx1
 
@@ -959,18 +946,21 @@ static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = []
 	if grid_cell < 0.0:
 		grid_cell = _nav_grid_cell(map_def)
 	var cell: float = grid_cell
+	var grid = _corner_heights(map_def, half, cell)
+	var corner_heights: PackedFloat64Array = grid["heights"]
+	var corner_n: int = grid["n"]
 	# PR-2 cleanup (2026-08-19). Hole spatial index - see
 	# _bucket_holes_by_cell in _build_ground_faces for the rationale.
 	var hole_buckets: Dictionary = _bucket_holes_by_cell(holes, half, cell)
 
 	var x = -half
+	var xi: int = 0
 	while x < half:
 		var x1 = min(x + cell, half)
-		var xi: int = int(floor((x + half) / cell))
 		var z = -half
+		var zi: int = 0
 		while z < half:
 			var z1 = min(z + cell, half)
-			var zi: int = int(floor((z + half) / cell))
 			var cell_key := Vector2i(xi, zi)
 			var blocked = false
 			if hole_buckets.has(cell_key):
@@ -985,11 +975,17 @@ static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = []
 				# Per-cell bucket slice for the subdivided quad - see
 				# _build_ground_faces' equivalent comment for why this is correct.
 				var cell_holes: Array = hole_buckets[cell_key] if hole_buckets.has(cell_key) else []
-				_emit_subdivided_ground_quad(verts, x, x1, z, z1, cell_holes, [], [], false, map_def)
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, cell_holes, [], [], false, map_def, true)
 			elif not blocked:
-				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
+				var h00 = corner_heights[xi * corner_n + zi]
+				var h10 = corner_heights[(xi + 1) * corner_n + zi]
+				var h01 = corner_heights[xi * corner_n + zi + 1]
+				var h11 = corner_heights[(xi + 1) * corner_n + zi + 1]
+				_add_nav_quad(verts, Vector3(x, h00, z), Vector3(x1, h10, z), Vector3(x1, h11, z1), Vector3(x, h01, z1))
 			z = z1
+			zi += 1
 		x = x1
+		xi += 1
 	return verts
 
 # Deep-draught-only water: the same water_areas footprint as water_map,
@@ -1164,6 +1160,8 @@ static func _configure_nav_mesh(nav_mesh: NavigationMesh, cell_size: float, agen
 
 static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float) -> NavigationMesh:
 	var nav_mesh = NavigationMesh.new()
+	if verts.is_empty():
+		return nav_mesh
 	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS)
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
@@ -1220,6 +1218,12 @@ static func rebake_ground_and_amphibious_async(map_def: Dictionary, extra_holes:
 
 static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size: float, remaining: Dictionary, on_ready: Callable) -> void:
 	var nav_mesh = NavigationMesh.new()
+	if verts.is_empty():
+		NavigationServer3D.region_set_navigation_mesh(region, nav_mesh)
+		remaining["n"] -= 1
+		if remaining["n"] <= 0 and on_ready.is_valid():
+			on_ready.call()
+		return
 	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS)
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)

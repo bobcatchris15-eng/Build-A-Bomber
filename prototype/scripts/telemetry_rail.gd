@@ -205,6 +205,8 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 	# unchanged.
 	var hull = _cached_hull
 	_update_verdict(stats)
+	if lab.has_method("update_stats_display"):
+		lab.update_stats_display(stats, hull)
 	if lab.has_method("_update_toolbar_info"):
 		lab._update_toolbar_info(hull, stats)
 	var total_cost_metal = stats["cost_metal"]
@@ -1165,56 +1167,34 @@ func _update_lifetime_stats(hull: Node3D) -> void:
 func _build_verdict_block() -> void:
 	if _verdict_panel != null and is_instance_valid(_verdict_panel):
 		return
-	var parent = hp_label.get_parent()
+	var parent: Node = lab.get_node_or_null("StatsDock/ConsoleHBox/TelemetryCard/TelemetryVBox/TopMetaRow/VerdictBadge")
+	if parent == null:
+		parent = hp_label.get_parent() if hp_label else null
 	if parent == null:
 		return
 
 	_verdict_panel = PhosphorPanelScript.new()
 	_verdict_panel.tube = PhosphorPanelScript.Tube.AMBER
+	_verdict_panel.custom_minimum_size = Vector2(240, 26)
+	_verdict_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	parent.add_child(_verdict_panel)
-	parent.move_child(_verdict_panel, 0)
 
-	# WHY A VBox INSIDE THE PhosphorPanel, NOT PanelContainer's OWN STACKING.
-	# PhosphorPanel.add_readout() wraps each Label in a MarginContainer, and
-	# the parent PanelContainer is supposed to stack those MarginContainers
-	# vertically. In practice it does not - every readout lands at y=0,
-	# with the detail text drawn ON TOP of the headline (visible in the
-	# the "UNARMED / No weapon fitted" overlap, where the headline's
-	# amber pixels and the detail's white pixels occupy the same row and
-	# the shader composites them into one unreadable line). The VBox below
-	# is a hard workaround: a Container we know stacks its children, with
-	# explicit separation between headline, separator and detail.
-	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	_verdict_panel.add_child(stack)
+	var hbox := HBoxContainer.new()
+	hbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hbox.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	_verdict_panel.add_child(hbox)
 
-	# Headline. Same HeadingLabel theme variation the other rail headings
-	# use (so the visual language stays consistent across the screen),
-	# and the "!" prefix added in _update_verdict() below is the icon the
-	# detail was overlaying.
 	_verdict_headline = Label.new()
 	_verdict_headline.theme_type_variation = "HeadingLabel"
 	_verdict_headline.add_theme_color_override("font_color", Color.WHITE)
-	stack.add_child(_verdict_headline)
+	hbox.add_child(_verdict_headline)
 
-	# Hairline rule between headline and detail. The phosphor's shader
-	# treats the separator's white pixels as excitation and tints them
-	# with the tube colour, so the rule reads as part of the display's
-	# own glow rather than as a foreign StyleBoxFlat smuggled in.
-	var rule := HSeparator.new()
-	rule.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	stack.add_child(rule)
-
-	# Detail. StatLabel (the theme's tabular face) so the number-prefixed
-	# lines line up under each other when the verdict text carries
-	# numbers, and the same WHITE the headline uses so the shader
-	# tints both with the same tube colour rather than reading the two
-	# as different surfaces.
 	_verdict_detail = Label.new()
 	_verdict_detail.theme_type_variation = "StatLabel"
-	_verdict_detail.add_theme_color_override("font_color", Color.WHITE)
-	_verdict_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	stack.add_child(_verdict_detail)
+	_verdict_detail.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9, 1.0))
+	_verdict_detail.clip_text = true
+	_verdict_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(_verdict_detail)
 
 
 # NOTHING HERE RE-DERIVES. `stats` is the exact analyze() result the rest of

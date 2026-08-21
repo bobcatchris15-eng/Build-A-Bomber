@@ -18,6 +18,22 @@ Three principles follow from that:
 
 ---
 
+## 1a · The Two Skins
+
+The interface is unified by a shared structural grammar (5-metric spacing grid, 2px corner radii, programmatic node construction, `UIFeedback` audio/motion coupling) split into two context-specific aesthetic skins:
+
+1. **Cold-War Combat Information Center (In-Match Battle HUD)**:
+   - Codified in `scripts/hud/hud_style.gd` and `scripts/hud/hud_skin.gd`.
+   - Flat, high-contrast dark fills (`#161B22`, `#1E252E`) with 1px border edges (`#2C353F`, `#3E4A57`), cold phosphor accents (`CIC_EDGE`, `SCAN_LINE`, `RETICLE`), and monospaced live telemetry readouts.
+   - Zero runtime texture generation overhead for maximum combat frame rates.
+
+2. **Hobbyist Toolkit (Out-of-Match Screens)**:
+   - Codified in `scripts/ui_tokens.gd`, `scripts/ui_theme.gd`, and `bomber_theme.tres`.
+   - Physical workbench materials: L0 desks (`cutting_mat`, `cardboard`, `kraft`, `cork`, `chipboard`), L1 equipment chrome (`powdercoat`, `steel`, `moulded`, `canvas`, `carbon`, `fiberglass`, `toolbox`, `bakelite`, `wood`), and 3D industrial hardware controls via `UIPropStage`.
+   - Used across Main Menu, Design Lab, Armor Station, Modular Hull Builder, Blueprint Library, Roster Picker, Match Setup, Operations, and After-Action Report debrief dossiers.
+
+---
+
 ## 2 · Palette
 
 All colours live in `scripts/ui_tokens.gd`. No screen should hardcode a colour literal not from that file.
@@ -68,7 +84,7 @@ Off-white, not pure white. Pure white on warm dark reads as a blown-out highligh
 
 ## 3 · Material Vocabulary
 
-Six named surfaces, each with one job. Callers say what something is **made of**; appearance follows from that without per-call colour choices.
+Named surfaces, each with one job. Callers say what something is **made of**; appearance follows from that without per-call colour choices.
 
 | Material | Texture feel | Where it belongs |
 |---|---|---|
@@ -78,6 +94,9 @@ Six named surfaces, each with one job. Callers say what something is **made of**
 | `canvas` | Matte woven cloth | Drawer/flyout backing, tooltips, callouts |
 | `carbon` | Dark carbon weave | Primary action only — at most two per screen |
 | `fiberglass` | Slightly translucent laminate | Hazard placards, alert states |
+| `toolbox` | Faded oxide-red chipped enamel | Design Lab parts dock & Modular Hull Builder palette |
+| `wood` | Warm planed timber with horizontal grain | Paint bay dock, armor station workbench surfaces |
+| `bakelite` | Warm marbled phenolic resin | Commander's desk surfaces |
 
 Material textures are 9-sliced PNGs in `assets/textures/ui/`. The bevel is in a 12 px margin ring; the centre is flat and tileable. `build_ui_theme.gd` maps these onto StyleBoxTexture entries. **Do not apply material directly to a control's `material` property unless you have a specific runtime reason** (e.g. the backdrop shader).
 

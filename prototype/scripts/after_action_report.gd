@@ -5,6 +5,8 @@ extends Control
 
 const UITheme = preload("res://scripts/ui_theme.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 
 var is_victory: bool = false
 var match_duration: float = 0.0
@@ -28,11 +30,9 @@ func setup(p_victory: bool, p_duration: float, p_stats: Dictionary, p_is_op: boo
 	_build_ui()
 
 func _build_ui() -> void:
-	# Backdrop blur / dim overlay
-	var overlay = ColorRect.new()
-	overlay.color = Color(0, 0, 0, 0.75)
-	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(overlay)
+	# L0 Workbench backdrop on kraft paper debrief dossier
+	var bg = UIShell.workbench(self, "kraft")
+	bg.color = Color(0.12, 0.11, 0.10, 0.92) # Modal scrim underlay
 
 	var frame = MarginContainer.new()
 	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -43,7 +43,7 @@ func _build_ui() -> void:
 	add_child(frame)
 
 	var card = PanelContainer.new()
-	card.theme_type_variation = "InsetPanel"
+	card.theme_type_variation = "CardPanel"
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	frame.add_child(card)
@@ -246,6 +246,7 @@ func _build_ui() -> void:
 
 	var bp_select = OptionButton.new()
 	bp_select.custom_minimum_size.x = 220
+	UIFeedbackScript.wire(bp_select, "select")
 	for bp_name in bp_stats.keys():
 		bp_select.add_item("Tweak " + bp_name)
 	bottom_hbox.add_child(bp_select)
@@ -254,6 +255,7 @@ func _build_ui() -> void:
 	iterate_btn.text = "Iterate in Design Lab"
 	iterate_btn.theme_type_variation = "PrimaryButton"
 	iterate_btn.custom_minimum_size = Vector2(200, 44)
+	UIFeedbackScript.wire(iterate_btn, "confirm")
 	iterate_btn.pressed.connect(func():
 		var sel_idx = bp_select.selected
 		if sel_idx >= 0 and sel_idx < bp_stats.keys().size():
@@ -273,12 +275,14 @@ func _build_ui() -> void:
 		next_btn.text = "Next Engagement >"
 		next_btn.theme_type_variation = "PrimaryButton"
 		next_btn.custom_minimum_size = Vector2(200, 44)
+		UIFeedbackScript.wire(next_btn, "confirm")
 		next_btn.pressed.connect(func(): next_stage_requested.emit())
 		bottom_hbox.add_child(next_btn)
 
 	var menu_btn = Button.new()
 	menu_btn.text = "Main Menu"
 	menu_btn.custom_minimum_size = Vector2(140, 44)
+	UIFeedbackScript.wire(menu_btn, "default")
 	menu_btn.pressed.connect(func(): main_menu_requested.emit())
 	bottom_hbox.add_child(menu_btn)
 

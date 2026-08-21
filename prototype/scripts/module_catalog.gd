@@ -2517,6 +2517,9 @@ const POWER_DRAW := {
 	"laser_designator": 2.0,
 	"decoy_projector": 1.5,
 	"energy_barrier_projector": 5.0,
+	"repair_array": 3.5,
+	"drone_carrier": 4.0,
+	"aps_interceptor": 2.0,
 }
 
 static func get_power_draw(type_id: String) -> float:

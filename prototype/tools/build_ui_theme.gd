@@ -239,6 +239,7 @@ const VARIATION_BASES = {
 	"StatLabel": "Label",
 	# Command Console additions
 	"BakelitePanel": "PanelContainer",
+	"WoodPanel": "PanelContainer",
 	"FoldedPaperPanel": "PanelContainer",
 	"CRTReadout": "PanelContainer",
 	"DrawerTab": "Button",
@@ -333,6 +334,10 @@ func _build_panels(theme: Theme) -> void:
 	# BakelitePanel - commander's desk surface. Warm plastic with baked bevel.
 	theme.set_stylebox("panel", "BakelitePanel",
 		_plate("bakelite", "normal", Tokens.SPACE_MD, Tokens.SPACE_MD))
+
+	# WoodPanel - paint bay and workbench dock surface.
+	theme.set_stylebox("panel", "WoodPanel",
+		_plate("wood", "normal", Tokens.SPACE_MD, Tokens.SPACE_MD))
 
 	# FoldedPaperPanel - slide-up drawer panels. Canvas/duck cloth texture.
 	theme.set_stylebox("panel", "FoldedPaperPanel",

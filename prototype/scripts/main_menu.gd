@@ -179,25 +179,27 @@ func _ready() -> void:
 	var frame := UIShell.screen_frame(self)
 
 	var root_vbox = VBoxContainer.new()
-	root_vbox.add_theme_constant_override("separation", Tokens.SPACE_LG)
+	root_vbox.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	frame.add_child(root_vbox)
 
-	_build_console_bar(root_vbox)
+	# Top Navigation Ribbon
+	_build_top_ribbon(root_vbox)
 
-	var columns = HBoxContainer.new()
-	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	columns.add_theme_constant_override("separation", Tokens.SPACE_XL)
-	root_vbox.add_child(columns)
+	# Center Middle Space for 3D Turntable & Upper-Right Spec Placard
+	var mid_row = HBoxContainer.new()
+	mid_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	mid_row.add_theme_constant_override("separation", Tokens.SPACE_LG)
+	root_vbox.add_child(mid_row)
 
-	_build_left_column(columns)
-
-	# Flexible middle space to frame the rotating 3D showcase unit
 	var center_space = Control.new()
 	center_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	center_space.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	columns.add_child(center_space)
+	mid_row.add_child(center_space)
 
-	_build_status_column(columns)
+	_build_status_column(mid_row)
+
+	# Bottom Command Deck Band (Height: 224)
+	_build_bottom_deck(root_vbox)
 
 	# Initial 3D & Placard sync
 	_update_showcase_display()
@@ -419,32 +421,35 @@ func _apply_unpainted_scale_model_material(node: Node, mat: StandardMaterial3D =
 	for child in node.get_children():
 		_apply_unpainted_scale_model_material(child, mat)
 
-func _build_console_bar(parent: Control) -> void:
-	var bar = PanelContainer.new()
-	bar.theme_type_variation = "HeaderPanel"
-	parent.add_child(bar)
+var _active_tab: String = "DEPLOY"
+var _category_flows: Dictionary = {}
+
+func _build_top_ribbon(parent: Control) -> void:
+	var ribbon = PanelContainer.new()
+	ribbon.theme_type_variation = "HeaderPanel"
+	ribbon.custom_minimum_size = Vector2(0, 36)
+	parent.add_child(ribbon)
 
 	var margin = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", Tokens.SPACE_MD)
 	margin.add_theme_constant_override("margin_right", Tokens.SPACE_MD)
 	margin.add_theme_constant_override("margin_top", Tokens.SPACE_XS)
 	margin.add_theme_constant_override("margin_bottom", Tokens.SPACE_XS)
-	bar.add_child(margin)
+	ribbon.add_child(margin)
 
 	var hbox = HBoxContainer.new()
 	hbox.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	margin.add_child(hbox)
 
-	var ident = Label.new()
-	ident.text = "DESIGN BUREAU / CONSOLE 04"
-	ident.theme_type_variation = "HintLabel"
-	ident.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
-	hbox.add_child(ident)
+	var mark := WordmarkScript.new()
+	mark.lockup = WordmarkScript.Lockup.HORIZONTAL
+	mark.part_number = "DESIGN BUREAU & PROVING GROUND"
+	hbox.add_child(mark)
 
-	var divider = Label.new()
-	divider.text = "//"
-	divider.theme_type_variation = "HintLabel"
-	hbox.add_child(divider)
+	var sep = Label.new()
+	sep.text = "//"
+	sep.theme_type_variation = "HintLabel"
+	hbox.add_child(sep)
 
 	var status = Label.new()
 	status.text = "STATUS: OPERATIONAL"
@@ -456,199 +461,161 @@ func _build_console_bar(parent: Control) -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hbox.add_child(spacer)
 
-	var cycle_notice = Label.new()
-	cycle_notice.text = "3D SHOWCASE CYCLE: 30S ROTATION"
-	cycle_notice.theme_type_variation = "HintLabel"
-	cycle_notice.add_theme_color_override("font_color", Tokens.SIGNAL_INFO)
-	hbox.add_child(cycle_notice)
-
-func _build_left_column(parent: Control) -> void:
-	var col = VBoxContainer.new()
-	col.custom_minimum_size = Vector2(520, 0)
-	col.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	col.add_theme_constant_override("separation", Tokens.SPACE_SM)
-	parent.add_child(col)
-
-	var mark := WordmarkScript.new()
-	mark.lockup = WordmarkScript.Lockup.HORIZONTAL
-	mark.part_number = TAGLINE.to_upper()
-	col.add_child(mark)
-
-	var gap_top = Control.new()
-	gap_top.custom_minimum_size = Vector2(0, Tokens.SPACE_MD)
-	col.add_child(gap_top)
-
-	var nav = VBoxContainer.new()
-	nav.add_theme_constant_override("separation", Tokens.SPACE_MD)
-	col.add_child(nav)
-
-	var tutorial_manager = get_node_or_null("/root/TwoPhaseTutorialManager")
-	# Always show full menu with tutorial card in TRAINING section
-	for group in GROUPS:
-		_add_section_header(nav, group["section"])
-		var section := VBoxContainer.new()
-		section.add_theme_constant_override("separation", Tokens.SPACE_SM)
-		nav.add_child(section)
-		for item in group["items"]:
-			_add_destination_card(section, item["title"], item["desc"],
-				item["scene"], item["badge"], item.get("tutorial", false),
-				item.get("launcher", ""))
-
-	var gap_bottom = Control.new()
-	gap_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	col.add_child(gap_bottom)
-
-	var bottom_row := HBoxContainer.new()
-	bottom_row.add_theme_constant_override("separation", Tokens.SPACE_SM)
-	col.add_child(bottom_row)
-
 	var records_btn = Button.new()
 	records_btn.text = "RECORDS"
-	records_btn.custom_minimum_size = Vector2(140, 44)
+	records_btn.custom_minimum_size = Vector2(100, 28)
 	UIFeedbackScript.wire(records_btn)
 	records_btn.pressed.connect(func():
 		var router = get_node_or_null("/root/SceneRouter")
-		if router:
-			router.goto("res://scenes/BlueprintLibrary.tscn")
-		else:
-			get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
+		if router: router.goto("res://scenes/BlueprintLibrary.tscn")
+		else: get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
 	)
-	bottom_row.add_child(records_btn)
+	hbox.add_child(records_btn)
 
-	# The player's own colours. Sits next to RECORDS because both are profile
-	# screens - things you own between matches - rather than anything you set
-	# up per battle, which is why this replaced the per-match faction dropdown
-	# on MatchSetup rather than moving it.
 	var livery_btn = Button.new()
 	livery_btn.text = "LIVERY"
-	livery_btn.custom_minimum_size = Vector2(140, 44)
+	livery_btn.custom_minimum_size = Vector2(100, 28)
 	UIFeedbackScript.wire(livery_btn)
 	livery_btn.pressed.connect(func():
 		var router = get_node_or_null("/root/SceneRouter")
-		if router:
-			router.goto("res://scenes/Livery.tscn")
-		else:
-			get_tree().change_scene_to_file("res://scenes/Livery.tscn")
+		if router: router.goto("res://scenes/Livery.tscn")
+		else: get_tree().change_scene_to_file("res://scenes/Livery.tscn")
 	)
-	bottom_row.add_child(livery_btn)
+	hbox.add_child(livery_btn)
 
 	var settings_btn = Button.new()
 	settings_btn.text = "SYSTEM"
-	settings_btn.custom_minimum_size = Vector2(140, 44)
+	settings_btn.custom_minimum_size = Vector2(100, 28)
 	UIFeedbackScript.wire(settings_btn)
 	settings_btn.pressed.connect(func():
 		var system_layer = get_node_or_null("/root/SystemLayer")
-		if system_layer:
-			system_layer.open()
+		if system_layer: system_layer.open()
 	)
-	bottom_row.add_child(settings_btn)
+	hbox.add_child(settings_btn)
 
 	var quit_btn = Button.new()
-	quit_btn.text = "EXIT BUREAU"
-	quit_btn.custom_minimum_size = Vector2(180, 44)
-	quit_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	# UIFeedback.wire() supplies the hover sound, the hover lift and the press
-	# response in one call - replacing a press-audio lambda plus a whole separate
-	# mouse_entered lambda that existed only to play a hover sound.
+	quit_btn.text = "EXIT"
+	quit_btn.custom_minimum_size = Vector2(80, 28)
+	quit_btn.theme_type_variation = "DangerButton"
 	UIFeedbackScript.wire(quit_btn)
 	quit_btn.pressed.connect(func(): get_tree().quit())
-	bottom_row.add_child(quit_btn)
+	hbox.add_child(quit_btn)
 
 
-# A stamped, non-clickable L3 section label - "everything stays one click
-# deep" per UX_REDESIGN_PLAN.md, so these organise rather than navigate.
-func _add_section_header(parent: Control, text: String) -> void:
-	var label := Label.new()
-	label.text = text
-	label.theme_type_variation = "HintLabel"
-	label.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
-	parent.add_child(label)
+func _build_bottom_deck(parent: Control) -> void:
+	var deck = PanelContainer.new()
+	deck.theme_type_variation = "CardPanel"
+	deck.custom_minimum_size = Vector2(0, 224)
+	deck.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(deck)
 
-func _add_destination_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String, is_tutorial: bool = false, launcher_name: String = "") -> void:
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	deck.add_child(inner)
+
+	var tab_row := HBoxContainer.new()
+	tab_row.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	tab_row.custom_minimum_size = Vector2(0, 32)
+	inner.add_child(tab_row)
+
+	var content_deck = Control.new()
+	content_deck.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	inner.add_child(content_deck)
+
+	for group in GROUPS:
+		var sec_name: String = group["section"]
+		var tab_btn = Button.new()
+		tab_btn.text = sec_name
+		tab_btn.toggle_mode = true
+		tab_btn.button_pressed = (sec_name == _active_tab)
+		tab_btn.custom_minimum_size = Vector2(150, 32)
+		tab_btn.theme_type_variation = "TabButton"
+		UIFeedbackScript.wire(tab_btn, "select")
+		tab_row.add_child(tab_btn)
+
+		var scroll = ScrollContainer.new()
+		scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.visible = (sec_name == _active_tab)
+		content_deck.add_child(scroll)
+		_category_flows[sec_name] = scroll
+
+		var flow = HBoxContainer.new()
+		flow.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		flow.add_theme_constant_override("separation", Tokens.SPACE_MD)
+		scroll.add_child(flow)
+
+		for item in group["items"]:
+			_add_deck_card(flow, item["title"], item["desc"],
+				item["scene"], item["badge"], item.get("tutorial", false),
+				item.get("launcher", ""))
+
+		tab_btn.pressed.connect(func():
+			_active_tab = sec_name
+			for s in _category_flows:
+				_category_flows[s].visible = (s == sec_name)
+			for b in tab_row.get_children():
+				if b is Button:
+					b.button_pressed = (b.text == sec_name)
+		)
+
+
+func _add_deck_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String, is_tutorial: bool = false, launcher_name: String = "") -> void:
 	var btn = Button.new()
-	btn.custom_minimum_size = Vector2(0, 64)
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	# Industrial shaped outlines and dark fill gradient styleboxes
-	# NavCard is now a registered theme variation (see build_ui_theme.gd), so the
-	# four per-instance stylebox overrides this used to build are gone. Those
-	# overrides also carried hardcoded cool blue-greys that appear nowhere in the
-	# palette - a local override always beats the theme, so they were actively
-	# holding the design system out of the most prominent control in the game.
+	btn.custom_minimum_size = Vector2(300, 140)
+	btn.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	btn.theme_type_variation = "NavCard"
 	parent.add_child(btn)
 
 	var margin = MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_theme_constant_override("margin_left", Tokens.SPACE_SM)
-	margin.add_theme_constant_override("margin_right", Tokens.SPACE_SM)
-	margin.add_theme_constant_override("margin_top", Tokens.SPACE_XS)
-	margin.add_theme_constant_override("margin_bottom", Tokens.SPACE_XS)
+	margin.add_theme_constant_override("margin_left", Tokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_right", Tokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_top", Tokens.SPACE_SM)
+	margin.add_theme_constant_override("margin_bottom", Tokens.SPACE_SM)
 	btn.add_child(margin)
 
-	var hbox = HBoxContainer.new()
-	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hbox.add_theme_constant_override("separation", Tokens.SPACE_MD)
-	margin.add_child(hbox)
+	var vbox = VBoxContainer.new()
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	margin.add_child(vbox)
 
-	var indicator = ColorRect.new()
-	indicator.custom_minimum_size = Vector2(5, 0)
-	indicator.color = Tokens.SIGNAL_HAZARD
-	indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	indicator.modulate.a = 0.0
-	hbox.add_child(indicator)
-
-	var stack = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.alignment = BoxContainer.ALIGNMENT_CENTER
-	stack.add_theme_constant_override("separation", 0)
-	hbox.add_child(stack)
+	var top_row = HBoxContainer.new()
+	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(top_row)
 
 	var name_label = Label.new()
 	name_label.text = title_text
 	name_label.theme_type_variation = "HeadingLabel"
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_child(name_label)
-
-	var desc_label = Label.new()
-	desc_label.text = description
-	desc_label.theme_type_variation = "HintLabel"
-	desc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_child(desc_label)
-
-	# Industrial Badge Plate
-	var badge_panel = PanelContainer.new()
-	badge_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var b_sb = StyleBoxFlat.new()
-	b_sb.bg_color = Color(0.08, 0.09, 0.10, 0.8)
-	b_sb.border_color = Color(0.35, 0.38, 0.42, 0.7)
-	b_sb.set_border_width_all(1)
-	b_sb.set_content_margin_all(4)
-	badge_panel.add_theme_stylebox_override("panel", b_sb)
+	top_row.add_child(name_label)
 
 	var badge = Label.new()
 	badge.text = badge_text
 	badge.theme_type_variation = "HintLabel"
 	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	badge.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
-	badge_panel.add_child(badge)
-	hbox.add_child(badge_panel)
+	badge.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
+	top_row.add_child(badge)
+
+	vbox.add_child(HSeparator.new())
+
+	var desc_label = Label.new()
+	desc_label.text = description
+	desc_label.theme_type_variation = "HintLabel"
+	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	desc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(desc_label)
 
 	UIFeedbackScript.wire(btn)
 	btn.pressed.connect(func():
-		# Armed BEFORE the route, so the Lab's own first-run check sees an active
-		# run and stands down rather than stacking its offer on top of it.
 		if is_tutorial:
 			var tutorial = get_node_or_null("/root/TwoPhaseTutorialManager")
 			if tutorial:
 				tutorial.begin()
-		# LAUNCHER WINS OVER SCENE PATH. The PROVING GROUND card declares a
-		# launcher; the launcher builds a MatchRuleSet, writes MatchConfig, and
-		# routes through SceneRouter itself. A card that omits the launcher (or
-		# the launcher returns false - no blueprint, failed to mount) falls
-		# through to the legacy scene path so the card never lands on nothing.
 		if launcher_name != "":
 			if launcher_name == "TestRangeLauncher":
 				var launcher = TestRangeLauncherScript.new()
@@ -656,28 +623,13 @@ func _add_destination_card(parent: Control, title_text: String, description: Str
 				if launcher.launch("main_menu"):
 					return
 				launcher.queue_free()
-			else:
-				push_warning("[MainMenu] Unknown launcher '%s' on card '%s' - falling through to scene path" % [launcher_name, title_text])
-		# Through the router so the destination arrives on a fade, and so the
-		# router decides whether this target needs the loading screen - the call
-		# site no longer has to know which scenes stall.
 		var router = get_node_or_null("/root/SceneRouter")
 		if router:
 			router.goto(scene_path)
 		else:
 			get_tree().change_scene_to_file(scene_path)
 	)
-	# Indicator only - the hover SOUND and lift come from UIFeedback.wire() above.
-	btn.mouse_entered.connect(func():
-		indicator.modulate.a = 1.0
-	)
-	btn.mouse_exited.connect(func():
-		indicator.modulate.a = 0.0
-	)
 
-# _create_industrial_button_style() was here. Replaced by the NavCard theme
-# variation, which expresses the same asymmetric left gutter through a registered
-# flat stylebox instead of a per-instance one.
 
 func _build_status_column(parent: Control) -> void:
 	var col = VBoxContainer.new()

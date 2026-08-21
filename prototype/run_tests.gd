@@ -312,6 +312,8 @@ const SUITE_ORDER := [
 	["ui_and_camera", "test_hud_band_regions_never_overlap"],
 	["ui_and_camera", "test_hud_icons_all_resolve"],
 	["ui_and_camera", "test_hud_does_not_use_out_of_match_chrome"],
+	["ui_and_camera", "test_wood_material_registration"],
+	["ui_and_camera", "test_modular_hull_builder_ui_cleanliness"],
 	["ui_and_camera", "test_ui_audit_has_real_teeth"],
 	["ui_and_camera", "test_ui_dock_state_cycle"],
 	["ui_and_camera", "test_ui_tone_no_decorative_glyphs"],

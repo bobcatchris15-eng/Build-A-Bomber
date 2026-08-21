@@ -57,6 +57,10 @@ const SIGNAL_HAZARD_DIM = Color(0.259, 0.204, 0.075, 1.0)
 const SIGNAL_ALERT_DIM = Color(0.243, 0.098, 0.078, 1.0)
 const SIGNAL_GO_DIM = Color(0.133, 0.196, 0.106, 1.0)
 
+# Toolkit skin physical hardware accents.
+const TOOLKIT_WARM_HIGHLIGHT = Color(0.850, 0.720, 0.450, 0.15) # Physical brass touch feedback
+const TOOLKIT_PATINA         = Color(0.350, 0.420, 0.380, 0.25) # Aged tool rail patina accent
+
 # ---------------------------------------------------------------------------
 # TYPE SCALE
 # ---------------------------------------------------------------------------

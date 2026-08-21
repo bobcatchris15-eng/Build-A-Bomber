@@ -146,13 +146,22 @@ func _get_drag_data(at_position: Vector2):
 # been torn down (test teardown, scene swap) so the preview falls back
 # to the label-only form rather than crashing.
 func _get_thumbnail_cache() -> Node:
-	var root := get_tree().root if get_tree() != null else null
-	if root == null:
+	var tree := get_tree()
+	if tree == null:
 		return null
-	var lab := root.get_node_or_null("MainLab")
-	if lab == null:
-		return null
-	return lab.get_node_or_null("PartThumbnailCache")
+	if tree.root != null:
+		var lab := tree.root.get_node_or_null("MainLab")
+		if lab and lab.get_node_or_null("PartThumbnailCache"):
+			return lab.get_node_or_null("PartThumbnailCache")
+	if tree.current_scene != null:
+		var cache = tree.current_scene.get_node_or_null("PartThumbnailCache")
+		if cache != null:
+			return cache
+	if tree.root != null:
+		var cache = tree.root.find_child("PartThumbnailCache", true, false)
+		if cache != null:
+			return cache
+	return null
 
 
 func _run_bake(cache: Node, target: TextureRect) -> void:

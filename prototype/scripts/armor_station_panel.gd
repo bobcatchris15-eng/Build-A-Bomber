@@ -32,6 +32,7 @@ extends Control
 signal back_requested
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const UITheme = preload("res://scripts/ui_theme.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
@@ -69,13 +70,6 @@ const PRESETS := {
 	"FLANKS": ["left", "right"],
 	"TURTLE": ["front", "left", "right", "top"],
 }
-
-# The wood theme constants are local to this script. See armor_bay_screen.gd's
-# old wood styling for the rationale; the same palette carries over so the
-# new panel looks like the same workstation the player entered the old way.
-const _WOOD_PANEL_BG := Color(0.180, 0.140, 0.092)
-const _WOOD_BORDER := Color(0.290, 0.225, 0.140)
-const _WOOD_BASE := Color(0.115, 0.092, 0.062)
 
 # External handles wired in by MainLab / the placer via enter()/exit().
 # The placer is responsible for stripping modules and routing clicks
@@ -201,7 +195,8 @@ func _build_header() -> void:
 
 func _build_dock() -> void:
 	var dock := PanelContainer.new()
-	dock.add_theme_stylebox_override("panel", _make_wood_panel_style())
+	dock.theme_type_variation = "WoodPanel"
+	UITheme.apply_material(dock, "wood")
 	# Left-edge anchor + full height, narrower than the parts menu.
 	# DOCK_LEFT_INSET mirrors parts_menu.gd's number (20) so the swap
 	# keeps the left edge stationary.
@@ -338,25 +333,6 @@ func _build_dock() -> void:
 	_status_label.theme_type_variation = "HintLabel"
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	inner.add_child(_status_label)
-
-
-func _make_wood_panel_style() -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = _WOOD_PANEL_BG
-	sb.border_color = _WOOD_BORDER
-	sb.border_width_left = 1
-	sb.border_width_top = 1
-	sb.border_width_right = 1
-	sb.border_width_bottom = 2
-	sb.content_margin_left = Tokens.SPACE_SM
-	sb.content_margin_top = Tokens.SPACE_SM
-	sb.content_margin_right = Tokens.SPACE_SM
-	sb.content_margin_bottom = Tokens.SPACE_SM
-	sb.corner_radius_top_left = 6
-	sb.corner_radius_top_right = 6
-	sb.corner_radius_bottom_left = 6
-	sb.corner_radius_bottom_right = 6
-	return sb
 
 
 func _section_label(text: String) -> Label:

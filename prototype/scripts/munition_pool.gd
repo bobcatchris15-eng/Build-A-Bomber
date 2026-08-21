@@ -169,13 +169,23 @@ static func alpha_emissive(albedo: Color, emission: Color, energy: float = 1.0) 
 # tweening its scale to Vector3(0, 1, 0) must now tween to Vector3(0, len, 0)
 # to hold the beam's length steady while only its radius shrinks.
 static func aim_beam(beam: MeshInstance3D, from: Vector3, to: Vector3, diameter: float) -> float:
-	var length := from.distance_to(to)
-	beam.scale = Vector3(diameter, length, diameter)
-	beam.global_position = from.lerp(to, 0.5)
-	# A zero-length beam gives look_at a degenerate basis; skip aiming and let
-	# it sit unrotated rather than spam errors (can happen when a target is
-	# destroyed in the same frame it was fired at).
-	if length > 0.001:
-		beam.look_at(to, Vector3.UP)
-		beam.rotate_object_local(Vector3.RIGHT, PI / 2)
+	var delta := to - from
+	var length := delta.length()
+	if length <= 0.001:
+		beam.scale = Vector3.ZERO
+		return 0.0
+
+	var y_axis := delta / length
+	var up_candidate := Vector3.UP if absf(y_axis.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
+	var x_axis := y_axis.cross(up_candidate).normalized()
+	var z_axis := x_axis.cross(y_axis).normalized()
+
+	var basis := Basis(x_axis * diameter, y_axis * length, z_axis * diameter)
+	var mid := from.lerp(to, 0.5)
+
+	if beam.is_inside_tree():
+		beam.global_transform = Transform3D(basis, mid)
+	else:
+		beam.transform = Transform3D(basis, mid)
+
 	return length

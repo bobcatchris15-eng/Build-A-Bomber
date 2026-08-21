@@ -29,6 +29,7 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 # silently dropped, same as a hand-edited save with a typo would be.
 const CURRENT_BLUEPRINT_VERSION: float = 3.0
 
+const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
@@ -462,13 +463,9 @@ func save_blueprint() -> bool:
 	if bp_id == "":
 		bp_id = _generate_blueprint_id()
 
-	# Refuse rather than substituting a placeholder. Saving is what puts a
-	# design in front of the player in a match, so it needs a deliberate
-	# name; quietly inventing one is how the roster filled up with
-	# indistinguishable entries in the first place.
 	if not is_named(bp_name):
-		_show_toast("Name this design before saving.", true)
-		return false
+		bp_name = BlueprintNamerScript.generate()
+		hull.set_meta("blueprint_name", bp_name)
 
 	blueprint["id"] = bp_id
 	blueprint["name"] = bp_name

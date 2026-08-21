@@ -1497,17 +1497,25 @@ func _fire_pd_at_missile():
 func _fire_kinetic_projectile(radius: float, length: float, duration: float, color: Color, explode_on_hit: bool):
 	var tracer = MeshInstance3D.new()
 	tracer.mesh = MunitionPool.unit_cylinder()
-	tracer.scale = Vector3(radius * 2.0, length, radius * 2.0)
 	tracer.material_override = MunitionPool.emissive(color, color)
 	_effects_parent().add_child(tracer)
 
 	var start = global_position + Vector3(0, 0.4, 0)
-	tracer.global_position = start
-	tracer.look_at(target.global_position, Vector3.UP)
-	tracer.rotate_object_local(Vector3.RIGHT, PI/2)
+	var end = target.global_position if is_instance_valid(target) else start + (-global_transform.basis.z * 20.0)
+	var delta = end - start
+	var dir_len = delta.length()
+	if dir_len > 0.001:
+		var y_axis = delta / dir_len
+		var up_candidate = Vector3.UP if absf(y_axis.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
+		var x_axis = y_axis.cross(up_candidate).normalized()
+		var z_axis = x_axis.cross(y_axis).normalized()
+		var basis = Basis(x_axis * (radius * 2.0), y_axis * length, z_axis * (radius * 2.0))
+		tracer.global_transform = Transform3D(basis, start)
+	else:
+		tracer.global_position = start
+		tracer.scale = Vector3(radius * 2.0, length, radius * 2.0)
 	
 	var tween = create_tween()
-	var end = target.global_position
 	tween.tween_property(tracer, "global_position", end, duration)
 	tween.finished.connect(func():
 		if is_instance_valid(tracer): tracer.queue_free()
@@ -2839,15 +2847,23 @@ func _fire_ballista():
 	if parent == null: return
 	var bolt = MeshInstance3D.new()
 	bolt.mesh = MunitionPool.unit_cylinder()
-	bolt.scale = Vector3(0.09, 1.1, 0.09)
 	bolt.material_override = MunitionPool.albedo(Color(0.35, 0.26, 0.16))
 	parent.add_child(bolt)
 
 	var start = global_position + Vector3(0, 0.5, 0)
-	var end = target.global_position
-	bolt.global_position = start
-	bolt.look_at(end, Vector3.UP)
-	bolt.rotate_object_local(Vector3.RIGHT, PI / 2)
+	var end = target.global_position if is_instance_valid(target) else start + (-global_transform.basis.z * 20.0)
+	var delta = end - start
+	var dir_len = delta.length()
+	if dir_len > 0.001:
+		var y_axis = delta / dir_len
+		var up_candidate = Vector3.UP if absf(y_axis.dot(Vector3.UP)) < 0.99 else Vector3.FORWARD
+		var x_axis = y_axis.cross(up_candidate).normalized()
+		var z_axis = x_axis.cross(y_axis).normalized()
+		var basis = Basis(x_axis * 0.09, y_axis * 1.1, z_axis * 0.09)
+		bolt.global_transform = Transform3D(basis, start)
+	else:
+		bolt.global_position = start
+		bolt.scale = Vector3(0.09, 1.1, 0.09)
 
 	var tween = create_tween()
 	tween.tween_property(bolt, "global_position", end, 0.3)

@@ -149,6 +149,14 @@ SHADOW_ASSIGNMENT = {
     # Bakelite desk surface - raised like powdercoat panels.
     ("bakelite", "normal"): "raised",
     ("bakelite", "hover"): "raised",
+    # Wood desk surface - raised panel.
+    ("wood", "normal"): "raised",
+    ("wood", "hover"): "raised",
+    # Cold-War CIC console frames and buttons.
+    ("cic_frame", "normal"): "raised",
+    ("cic_frame", "hover"): "raised",
+    ("cic_button", "normal"): "raised",
+    ("cic_button", "hover"): "raised",
 }
 
 # Warm near-black, matching ui_tokens.gd SHADOW_COLOR. A neutral or cool shadow
@@ -564,6 +572,59 @@ def mat_toolbox(h, w, rng):
     return rgb, gloss
 
 
+def mat_wood(h, w, rng):
+    """
+    Warm-toned planed timber with visible grain. The paint bay workbench surface.
+
+    Features horizontal growth-ring grain, subtle pore texture, and warm timber
+    coloring with natural hue variation.
+    """
+    # Main horizontal grain flow (anisotropic along X)
+    grain = fbm(h, w, octaves=5, base=4, rng=rng, aniso=32.0)
+    fine = fbm(h, w, octaves=3, base=32, rng=rng, aniso=24.0)
+    roll = fbm(h, w, octaves=2, base=2, rng=rng, aniso=8.0)
+
+    # Warm wood brown base: BASE_700/800 warmth with amber-red bias
+    base = np.array([0.180, 0.130, 0.082])
+    lum = 1.0 + (grain - 0.5) * 0.28 + (fine - 0.5) * 0.12 + (roll - 0.5) * 0.14
+    rgb = base[None, None, :] * lum[:, :, None]
+    # Matte satin finish
+    gloss = np.full((h, w), 0.22) + (grain - 0.5) * 0.10
+    return rgb, gloss
+
+
+def mat_cic_frame(h, w, rng):
+    """
+    Cold-War Military CIC Instrument Housing.
+    Heavy olive-drab/slate cast-steel housing with fine stippling,
+    machined edge highlights, and Cold-War military console hue.
+    """
+    stipple = fbm(h, w, octaves=4, base=32, rng=rng)
+    steel_grain = fbm(h, w, octaves=3, base=12, rng=rng, aniso=20.0)
+    roll = fbm(h, w, octaves=2, base=2, rng=rng)
+
+    base = np.array([0.092, 0.125, 0.105])
+    lum = 1.0 + (stipple - 0.5) * 0.14 + (steel_grain - 0.5) * 0.08 + (roll - 0.5) * 0.08
+    rgb = base[None, None, :] * lum[:, :, None]
+    gloss = np.full((h, w), 0.32) + (stipple - 0.5) * 0.10
+    return rgb, gloss
+
+
+def mat_cic_button(h, w, rng):
+    """
+    Cold-War Military Console Mechanical Switch / Keycap.
+    Tactile molded rectangular switch with machined bevels and illuminated character.
+    """
+    stipple = fbm(h, w, octaves=4, base=48, rng=rng)
+    micro = fbm(h, w, octaves=2, base=96, rng=rng)
+
+    base = np.array([0.138, 0.178, 0.148])
+    lum = 1.0 + (stipple - 0.5) * 0.10 + (micro - 0.5) * 0.05
+    rgb = base[None, None, :] * lum[:, :, None]
+    gloss = np.full((h, w), 0.38) + (stipple - 0.5) * 0.12
+    return rgb, gloss
+
+
 MATERIALS = {
     "powdercoat": mat_powdercoat,
     "steel": mat_steel,
@@ -573,6 +634,9 @@ MATERIALS = {
     "fiberglass": mat_fiberglass,
     "toolbox": mat_toolbox,
     "bakelite": mat_bakelite,
+    "wood": mat_wood,
+    "cic_frame": mat_cic_frame,
+    "cic_button": mat_cic_button,
 }
 
 

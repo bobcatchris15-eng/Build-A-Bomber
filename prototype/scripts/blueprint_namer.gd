@@ -26,6 +26,11 @@ const HEADS = [
 	"Badger", "Otter", "Ox", "Ram", "Toad", "Moth", "Wasp", "Vole",
 	"Gravel", "Ditch", "Bog", "Fen", "Ridge", "Gulch", "Marsh", "Scrub",
 	"Pike", "Drum", "Anvil", "Kettle", "Barrel", "Spade", "Churn", "Flint",
+	"Stag", "Beaver", "Hound", "Bull", "Rook", "Gull", "Ferret", "Hare",
+	"Silt", "Ore", "Lead", "Rust", "Grit", "Peat", "Shale", "Basalt",
+	"Quarry", "Barrow", "Trench", "Canyon", "Crag", "Heath", "Dune", "Bluff",
+	"Rivet", "Grommet", "Tallow", "Cask", "Plow", "Bale", "Harness", "Grit",
+	"Vanguard", "Rampart", "Bastion", "Bulwark", "Sentry", "Garrison", "Colossus", "Titan",
 ]
 
 # Function-shaped nouns: what a piece of equipment does, or the part of it
@@ -37,6 +42,11 @@ const TAILS = [
 	"Hopper", "Loader", "Rammer", "Scraper", "Dozer", "Tender", "Yoke",
 	"Wallow", "Trough", "Bellows", "Gasket", "Flange", "Spindle", "Cog",
 	"Warden", "Marshal", "Steward", "Bailiff", "Reaver", "Harrier",
+	"Dredger", "Roller", "Auger", "Borer", "Striker", "Press", "Pulverizer",
+	"Chamber", "Bung", "Valve", "Nozzle", "Fitting", "Coupler", "Bearing",
+	"Strut", "Chassis", "Harness", "Gimbal", "Carriage", "Davit", "Gantry",
+	"Enforcer", "Sentinel", "Vanguard", "Outrider", "Dragoon", "Goliath",
+	"Dreadnought", "Marauder", "Sapper", "Pioneer", "Forager", "Scavenger",
 ]
 
 # Roman numerals only go as high as the format plausibly would. A "Mk XLVII"

@@ -8,6 +8,8 @@ var tweak_callout_manager
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const DesignVerdictScript = preload("res://scripts/design_verdict.gd")
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 
 # --- Rail structure (VISUAL/UI plan item 7) ---------------------------------
 # The rail used to be a bare anchored `Panel` in UI_StatBlock.tscn carrying an
@@ -21,10 +23,44 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 # re-resolved `$ScrollContainer/VBoxContainer` on every call are the ones that
 # had to change; they use `_rail_vbox` now, captured before the move.
 var stats_dock: Control = null
+var console_root: PanelContainer = null
 var _slot_hull_label: Label = null
 var _slot_parts_label: Label = null
 var _slot_cost_label: Label = null
 var _rail_vbox: VBoxContainer = null
+
+# Alert Placard References (Overweight & Power Deficit sliding warning bezels)
+var overweight_alert_placard: PanelContainer = null
+var overweight_text_label: Label = null
+var overweight_detail_label: Label = null
+var overweight_tween: Tween = null
+
+var power_alert_placard: PanelContainer = null
+var power_text_label: Label = null
+var power_detail_label: Label = null
+var power_tween: Tween = null
+
+# 4-Cluster UI References
+var combat_hp_label: Label = null
+var combat_dps_label: Label = null
+var combat_speed_label: Label = null
+var combat_range_label: Label = null
+var combat_power_label: Label = null
+var combat_weight_label: Label = null
+var combat_role_label: Label = null
+var combat_parts_label: Label = null
+
+var build_cost_label: Label = null
+var build_materials_label: Label = null
+var factory_glyph_label: Label = null
+var factory_name_label: Label = null
+var build_lab_tier_label: Label = null
+var build_time_label: Label = null
+
+var inspector_title_label: Label = null
+var inspector_subtitle_label: Label = null
+var inspector_stats_label: Label = null
+var inspector_sliders_container: VBoxContainer = null
 
 # The current design's headline stats, published by update_stats() for readers
 # that want the numbers rather than the label text - fleet_comparison_panel.gd
@@ -896,7 +932,7 @@ func _ready():
 	# hull_spec_btn is created partway through this function rather than being an
 	# @onready node - building the dock any earlier caught it as null and silently
 	# left the flyout trigger stranded in the rail with no error.
-	_build_rail_dock()
+	_build_stats_dock()
 
 	# Initial sync of armor UI
 	call_deferred("_initial_sync")
@@ -904,22 +940,18 @@ func _ready():
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 
 func sync_hull_ui(hull: Node3D):
-	# An unnamed design now shows an EMPTY field with a suggestion behind it,
-	# not the literal string "Untitled Design". Writing the placeholder into
-	# the field is what made it look like a name the player had already
-	# supplied - they'd hit Save and get refused by something the UI had
-	# filled in for them.
 	if not hull:
 		if blueprint_name_edit:
-			blueprint_name_edit.text = ""
-			lab_toolbar._reroll_name_suggestion()
+			lab_toolbar._reroll_name_suggestion(true)
 		return
 	is_updating_sliders = true
 	if blueprint_name_edit:
 		var bp_name = str(hull.get_meta("blueprint_name", "")).strip_edges()
-		blueprint_name_edit.text = bp_name if BlueprintManagerScript.is_named(bp_name) else ""
-		if blueprint_name_edit.text == "":
-			lab_toolbar._reroll_name_suggestion()
+		if BlueprintManagerScript.is_named(bp_name):
+			blueprint_name_edit.text = bp_name
+		else:
+			lab_toolbar._reroll_name_suggestion(true)
+			hull.set_meta("blueprint_name", blueprint_name_edit.text)
 	if armor_mat_btn:
 		var mat = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
 		match mat:
@@ -976,124 +1008,640 @@ var _current_callout_idx = 0
 # whole reason there are two mechanisms rather than one: a pie slice cannot
 # hold a slider, and a sidebar row is a bad place for a verb that applies to a
 # thing you are looking at somewhere else.
-func _build_rail_dock() -> void:
+func _create_beveled_box(bg_color: Color = Color(0.09, 0.11, 0.13, 0.95), border_color: Color = Color(0.38, 0.44, 0.48, 0.90), radius: int = 8, pad: int = 8) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg_color
+	sb.border_color = border_color
+	sb.set_border_width_all(2)
+	sb.border_width_top = 3
+	sb.corner_radius_top_left = radius
+	sb.corner_radius_top_right = radius
+	sb.corner_radius_bottom_left = radius
+	sb.corner_radius_bottom_right = radius
+	sb.content_margin_left = pad
+	sb.content_margin_right = pad
+	sb.content_margin_top = pad
+	sb.content_margin_bottom = pad
+	return sb
+
+
+func _build_stats_dock() -> void:
 	var scroll: Node = get_node_or_null("ScrollContainer")
 	if scroll == null:
 		push_error("stat_calculator: no ScrollContainer to dock")
 		return
 
-	var UIDockScript = load("res://scripts/ui_dock.gd")
-	stats_dock = UIDockScript.new()
-	stats_dock.name = "StatsDock"
-	stats_dock.dock_title = "TELEMETRY"
-	stats_dock.dock_icon = "info"
-	stats_dock.side = UIDockScript.Side.RIGHT
-	stats_dock.expanded_size = 320.0
-	stats_dock.auto_reveal = false
-	stats_dock.default_state = UIDockScript.State.RAILED
-	# Persisted separately from the parts catalogue so the two remember their own
-	# widths - they are different panels holding different things.
-	stats_dock.persist_key = "design_lab_stats"
-	stats_dock.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
-	# Starts below the toolbar, which spans the full width above both docks.
-	stats_dock.offset_top = Tokens.TOOLBAR_HEIGHT
-	add_child(stats_dock)
+	# Sliding Alert Placard 1: Overweight / Over Capacity Warning
+	overweight_alert_placard = PanelContainer.new()
+	overweight_alert_placard.name = "OverweightAlertPlacard"
+	overweight_alert_placard.anchor_left = 0.5
+	overweight_alert_placard.anchor_top = 1.0
+	overweight_alert_placard.anchor_right = 0.5
+	overweight_alert_placard.anchor_bottom = 1.0
+	overweight_alert_placard.offset_left = -115.0
+	overweight_alert_placard.offset_right = 185.0
+	overweight_alert_placard.offset_top = -248.0
+	overweight_alert_placard.offset_bottom = -164.0
+	var over_style = _create_beveled_box(Color(0.14, 0.07, 0.07, 0.98), Color(0.92, 0.28, 0.22, 0.95), 4, 6)
+	overweight_alert_placard.add_theme_stylebox_override("panel", over_style)
+	add_child(overweight_alert_placard)
 
-	# The dock is added first and the scroll moved into it second, so the scroll
-	# never spends a frame parentless (which would drop its scroll offset).
-	scroll.reparent(stats_dock.body())
-	# The rail's own anchoring came from the deleted Panel's layout; inside a dock
-	# body the container drives width, so the offsets have to go or the scroll
-	# keeps trying to sit 300px off the right edge of its new parent.
-	if scroll is Control:
-		var sc := scroll as Control
-		sc.set_anchors_preset(Control.PRESET_FULL_RECT)
-		sc.offset_left = 0.0
-		sc.offset_top = 0.0
-		sc.offset_right = 0.0
-		sc.offset_bottom = 0.0
-		sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var ov_vbox := VBoxContainer.new()
+	ov_vbox.add_theme_constant_override("separation", 2)
+	overweight_alert_placard.add_child(ov_vbox)
 
-	_build_admin_toolbox()
+	var ov_tab := Label.new()
+	ov_tab.text = "▲ ⚠️ DRIVE OVERLOAD"
+	ov_tab.theme_type_variation = "StatLabel"
+	ov_tab.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4, 1.0))
+	ov_vbox.add_child(ov_tab)
+
+	overweight_text_label = Label.new()
+	overweight_text_label.theme_type_variation = "HeadingLabel"
+	overweight_text_label.text = "OVERLOAD: 0 / 0 kg"
+	overweight_text_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.9, 1.0))
+	ov_vbox.add_child(overweight_text_label)
+
+	overweight_detail_label = Label.new()
+	overweight_detail_label.theme_type_variation = "HintLabel"
+	overweight_detail_label.text = "Speed cut by 0.0 m/s (Chassis Overloaded)"
+	ov_vbox.add_child(overweight_detail_label)
+
+	# Sliding Alert Placard 2: Power Deficit / Low Power Warning
+	power_alert_placard = PanelContainer.new()
+	power_alert_placard.name = "PowerAlertPlacard"
+	power_alert_placard.anchor_left = 0.5
+	power_alert_placard.anchor_top = 1.0
+	power_alert_placard.anchor_right = 0.5
+	power_alert_placard.anchor_bottom = 1.0
+	power_alert_placard.offset_left = 195.0
+	power_alert_placard.offset_right = 475.0
+	power_alert_placard.offset_top = -248.0
+	power_alert_placard.offset_bottom = -164.0
+	var pwr_style = _create_beveled_box(Color(0.14, 0.11, 0.06, 0.98), Color(0.96, 0.68, 0.18, 0.95), 4, 6)
+	power_alert_placard.add_theme_stylebox_override("panel", pwr_style)
+	add_child(power_alert_placard)
+
+	var pw_vbox := VBoxContainer.new()
+	pw_vbox.add_theme_constant_override("separation", 2)
+	power_alert_placard.add_child(pw_vbox)
+
+	var pw_tab := Label.new()
+	pw_tab.text = "▲ ⚡ POWER DEFICIT"
+	pw_tab.theme_type_variation = "StatLabel"
+	pw_tab.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2, 1.0))
+	pw_vbox.add_child(pw_tab)
+
+	power_text_label = Label.new()
+	power_text_label.theme_type_variation = "HeadingLabel"
+	power_text_label.text = "POWER: 0 / 0 kW"
+	power_text_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.8, 1.0))
+	pw_vbox.add_child(power_text_label)
+
+	power_detail_label = Label.new()
+	power_detail_label.theme_type_variation = "HintLabel"
+	power_detail_label.text = "Energy systems offline / brownout"
+	pw_vbox.add_child(power_detail_label)
+
+	# Main Console Frame: Centered in workspace and detached subtly from bottom with aggressive bevel/chamfer
+	console_root = PanelContainer.new()
+	console_root.name = "DesignCockpitConsole"
+	console_root.anchor_left = 0.5
+	console_root.anchor_top = 1.0
+	console_root.anchor_right = 0.5
+	console_root.anchor_bottom = 1.0
+	# Centered cleanly in the workbench view (width 1050px)
+	console_root.offset_left = -380.0
+	console_root.offset_right = 670.0
+	console_root.offset_top = -224.0
+	console_root.offset_bottom = -14.0
+	console_root.custom_minimum_size = Vector2(1050, 210)
+	console_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	var main_box_style = _create_beveled_box(Color(0.07, 0.08, 0.09, 0.98), Color(0.48, 0.54, 0.58, 0.95), 10, 8)
+	console_root.add_theme_stylebox_override("panel", main_box_style)
+	add_child(console_root)
+
+	var hbox := HBoxContainer.new()
+	hbox.name = "ConsoleHBox"
+	hbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	hbox.add_theme_constant_override("separation", 8)
+	console_root.add_child(hbox)
+
+	var cluster_style = _create_beveled_box(Color(0.11, 0.13, 0.14, 0.90), Color(0.32, 0.36, 0.40, 0.85), 6, 8)
+
+	# =========================================================================
+	# CLUSTER 1: NAME AND SAVE / LOAD GROUP (Width: 245px)
+	# =========================================================================
+	var c1 := PanelContainer.new()
+	c1.name = "NameAndOperationsCluster"
+	c1.custom_minimum_size = Vector2(245, 0)
+	c1.add_theme_stylebox_override("panel", cluster_style.duplicate())
+	hbox.add_child(c1)
+
+	var c1_vbox := VBoxContainer.new()
+	c1_vbox.add_theme_constant_override("separation", 3)
+	c1.add_child(c1_vbox)
+
+	var c1_title := Label.new()
+	c1_title.text = "DESIGN & OPERATIONS"
+	c1_title.theme_type_variation = "HeadingLabel"
+	c1_title.add_theme_color_override("font_color", Color(0.92, 0.76, 0.45, 1.0))
+	c1_vbox.add_child(c1_title)
+
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 4)
+	c1_vbox.add_child(name_row)
+
+	if blueprint_name_edit:
+		blueprint_name_edit.reparent(name_row)
+		blueprint_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		blueprint_name_edit.custom_minimum_size = Vector2(150, 24)
+		blueprint_name_edit.expand_to_text_length = false
+		blueprint_name_edit.tooltip_text = blueprint_name_edit.text
+		if not blueprint_name_edit.text_changed.is_connected(_on_blueprint_name_tooltip_update):
+			blueprint_name_edit.text_changed.connect(_on_blueprint_name_tooltip_update)
+
+	var roll_btn := Button.new()
+	roll_btn.text = "🎲"
+	roll_btn.tooltip_text = "Generate New Designation"
+	roll_btn.custom_minimum_size = Vector2(28, 24)
+	UIFeedbackScript.wire(roll_btn)
+	roll_btn.pressed.connect(func(): lab_toolbar._reroll_name_suggestion())
+	name_row.add_child(roll_btn)
+
+	var old_name_row := _rail_vbox.get_node_or_null("BlueprintNameRow")
+	if old_name_row:
+		old_name_row.visible = false
+
+	# Save / Load Button Pair
+	var save_load_row := HBoxContainer.new()
+	save_load_row.add_theme_constant_override("separation", 4)
+	c1_vbox.add_child(save_load_row)
+
+	if save_button:
+		save_button.reparent(save_load_row)
+		save_button.text = "SAVE"
+		save_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		save_button.custom_minimum_size = Vector2(0, 24)
+		save_button.theme_type_variation = "PrimaryButton"
+		UIFeedbackScript.wire(save_button)
+
+	if library_button:
+		library_button.reparent(save_load_row)
+		library_button.text = "LOAD"
+		library_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		library_button.custom_minimum_size = Vector2(0, 24)
+		UIFeedbackScript.wire(library_button)
+
+	if test_button:
+		test_button.reparent(c1_vbox)
+		test_button.text = "TEST IN ARENA"
+		test_button.custom_minimum_size = Vector2(0, 22)
+		UIFeedbackScript.wire(test_button)
+
+	if mirror_checkbox:
+		mirror_checkbox.reparent(c1_vbox)
+		mirror_checkbox.text = "Mirror [M]"
+
+	# =========================================================================
+	# CLUSTER 2: COMBAT & POWER GROUP (Stamped Steel Gauge Cluster, Width: 290px)
+	# =========================================================================
+	var c2 := PanelContainer.new()
+	c2.name = "CombatGaugeCluster"
+	c2.custom_minimum_size = Vector2(290, 0)
+	c2.add_theme_stylebox_override("panel", cluster_style.duplicate())
+	hbox.add_child(c2)
+
+	var c2_vbox := VBoxContainer.new()
+	c2_vbox.add_theme_constant_override("separation", 2)
+	c2.add_child(c2_vbox)
+
+	var c2_title := Label.new()
+	c2_title.text = "TACTICAL & COMBAT SPEC"
+	c2_title.theme_type_variation = "HeadingLabel"
+	c2_title.add_theme_color_override("font_color", Color(0.92, 0.76, 0.45, 1.0))
+	c2_vbox.add_child(c2_title)
+
+	# Main 2x2 Big Gauge Grid
+	var main_grid := GridContainer.new()
+	main_grid.columns = 2
+	main_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	main_grid.add_theme_constant_override("h_separation", 12)
+	main_grid.add_theme_constant_override("v_separation", 2)
+	c2_vbox.add_child(main_grid)
+
+	combat_hp_label = Label.new()
+	combat_hp_label.theme_type_variation = "HeadingLabel"
+	combat_hp_label.text = "HP: 0"
+	main_grid.add_child(combat_hp_label)
+
+	combat_dps_label = Label.new()
+	combat_dps_label.theme_type_variation = "HeadingLabel"
+	combat_dps_label.text = "DPS: 0.0"
+	main_grid.add_child(combat_dps_label)
+
+	combat_speed_label = Label.new()
+	combat_speed_label.theme_type_variation = "HeadingLabel"
+	combat_speed_label.text = "Speed: 0.0 km/h"
+	main_grid.add_child(combat_speed_label)
+
+	combat_range_label = Label.new()
+	combat_range_label.theme_type_variation = "HeadingLabel"
+	combat_range_label.text = "Range: 0 m"
+	main_grid.add_child(combat_range_label)
+
+	# Power stats readout (Generation, Storage, Draw)
+	combat_power_label = Label.new()
+	combat_power_label.theme_type_variation = "StatLabel"
+	combat_power_label.text = "⚡ Gen: 0.0 kW | Stor: 0 kJ | Draw: 0.0 kW"
+	combat_power_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.55, 1.0))
+	c2_vbox.add_child(combat_power_label)
+
+	c2_vbox.add_child(HSeparator.new())
+
+	# Detail Data Sub-labels
+	combat_weight_label = Label.new()
+	combat_weight_label.theme_type_variation = "StatLabel"
+	combat_weight_label.text = "Mass: 0.0 / 0.0 kg"
+	c2_vbox.add_child(combat_weight_label)
+
+	var sub_row := HBoxContainer.new()
+	sub_row.add_theme_constant_override("separation", 8)
+	c2_vbox.add_child(sub_row)
+
+	combat_role_label = Label.new()
+	combat_role_label.theme_type_variation = "StatLabel"
+	combat_role_label.text = "Role: Direct Fire"
+	combat_role_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sub_row.add_child(combat_role_label)
+
+	combat_parts_label = Label.new()
+	combat_parts_label.theme_type_variation = "StatLabel"
+	combat_parts_label.text = "Modules: 0 Mounted"
+	sub_row.add_child(combat_parts_label)
+
+	# =========================================================================
+	# CLUSTER 3: BUILD GROUP (Width: 210px)
+	# =========================================================================
+	var c3 := PanelContainer.new()
+	c3.name = "BuildCluster"
+	c3.custom_minimum_size = Vector2(210, 0)
+	c3.add_theme_stylebox_override("panel", cluster_style.duplicate())
+	hbox.add_child(c3)
+
+	var c3_vbox := VBoxContainer.new()
+	c3_vbox.add_theme_constant_override("separation", 2)
+	c3.add_child(c3_vbox)
+
+	var c3_title := Label.new()
+	c3_title.text = "MANUFACTURING SPEC"
+	c3_title.theme_type_variation = "HeadingLabel"
+	c3_title.add_theme_color_override("font_color", Color(0.92, 0.76, 0.45, 1.0))
+	c3_vbox.add_child(c3_title)
+
+	build_cost_label = Label.new()
+	build_cost_label.theme_type_variation = "HeadingLabel"
+	build_cost_label.text = "0 CREDITS"
+	build_cost_label.add_theme_font_size_override("font_size", 16)
+	c3_vbox.add_child(build_cost_label)
+
+	build_materials_label = Label.new()
+	build_materials_label.theme_type_variation = "StatLabel"
+	build_materials_label.text = "0 Metal / 0 Crystal"
+	c3_vbox.add_child(build_materials_label)
+
+	# Factory Pane with Glyph
+	var factory_pane := PanelContainer.new()
+	var pane_style := StyleBoxFlat.new()
+	pane_style.bg_color = Color(0.06, 0.07, 0.08, 0.95)
+	pane_style.set_border_width_all(1)
+	pane_style.border_color = Color(0.28, 0.32, 0.35, 0.8)
+	pane_style.set_content_margin_all(3)
+	pane_style.corner_radius_top_left = 4
+	pane_style.corner_radius_top_right = 4
+	pane_style.corner_radius_bottom_left = 4
+	pane_style.corner_radius_bottom_right = 4
+	factory_pane.add_theme_stylebox_override("panel", pane_style)
+	c3_vbox.add_child(factory_pane)
+
+	var f_hbox := HBoxContainer.new()
+	f_hbox.add_theme_constant_override("separation", 6)
+	factory_pane.add_child(f_hbox)
+
+	factory_glyph_label = Label.new()
+	factory_glyph_label.text = "⚙️"
+	factory_glyph_label.add_theme_font_size_override("font_size", 18)
+	f_hbox.add_child(factory_glyph_label)
+
+	factory_name_label = Label.new()
+	factory_name_label.text = "LIGHT VEHICLE FACTORY"
+	factory_name_label.theme_type_variation = "StatLabel"
+	factory_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	f_hbox.add_child(factory_name_label)
+
+	build_lab_tier_label = Label.new()
+	build_lab_tier_label.theme_type_variation = "HintLabel"
+	build_lab_tier_label.text = "Tech: Tier 1 Standard"
+	c3_vbox.add_child(build_lab_tier_label)
+
+	build_time_label = Label.new()
+	build_time_label.theme_type_variation = "HintLabel"
+	build_time_label.text = "Build Time: 0.0s"
+	c3_vbox.add_child(build_time_label)
+
+	# =========================================================================
+	# CLUSTER 4: MODULE INSPECTOR (Width: 270px)
+	# =========================================================================
+	var c4 := PanelContainer.new()
+	c4.name = "ModuleInspectorCluster"
+	c4.custom_minimum_size = Vector2(270, 0)
+	c4.add_theme_stylebox_override("panel", cluster_style.duplicate())
+	hbox.add_child(c4)
+
+	var c4_vbox := VBoxContainer.new()
+	c4_vbox.add_theme_constant_override("separation", 2)
+	c4.add_child(c4_vbox)
+
+	var c4_title := Label.new()
+	c4_title.text = "MODULE INSPECTOR"
+	c4_title.theme_type_variation = "HeadingLabel"
+	c4_title.add_theme_color_override("font_color", Color(0.92, 0.76, 0.45, 1.0))
+	c4_vbox.add_child(c4_title)
+
+	inspector_title_label = Label.new()
+	inspector_title_label.theme_type_variation = "HeadingLabel"
+	inspector_title_label.text = "NO MODULE SELECTED"
+	c4_vbox.add_child(inspector_title_label)
+
+	inspector_subtitle_label = Label.new()
+	inspector_subtitle_label.theme_type_variation = "HintLabel"
+	inspector_subtitle_label.text = "CHASSIS BASE // CLICK PART TO INSPECT"
+	c4_vbox.add_child(inspector_subtitle_label)
+
+	inspector_stats_label = Label.new()
+	inspector_stats_label.theme_type_variation = "StatLabel"
+	inspector_stats_label.text = "HP: - | Mass: - | DPS: -"
+	c4_vbox.add_child(inspector_stats_label)
+
+	var insp_scroll := ScrollContainer.new()
+	insp_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	insp_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	c4_vbox.add_child(insp_scroll)
+
+	inspector_sliders_container = VBoxContainer.new()
+	inspector_sliders_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inspector_sliders_container.add_theme_constant_override("separation", 2)
+	insp_scroll.add_child(inspector_sliders_container)
+
+	if locomotion_tweaks:
+		locomotion_tweaks.reparent(inspector_sliders_container)
+
+	if delete_button:
+		delete_button.reparent(c4_vbox)
+		delete_button.custom_minimum_size = Vector2(0, 24)
+		delete_button.theme_type_variation = "DangerButton"
+		delete_button.text = "DISCARD PART [DEL]"
+		delete_button.visible = false
+		UIFeedbackScript.wire(delete_button)
+
+	# Residual scroll container stays hidden
+	scroll.visible = false
+
+	# Keep legacy @onready label references mapped to dummy/real nodes so nothing crashes
+	if hp_label and hp_label.get_parent() == null: add_child(hp_label)
+	if weight_label and weight_label.get_parent() == null: add_child(weight_label)
+	if dps_label and dps_label.get_parent() == null: add_child(dps_label)
+	if cost_label and cost_label.get_parent() == null: add_child(cost_label)
+
 	lab_toolbar._build_toolbar()
 
 
-# --- The right-hand admin toolbox -------------------------------------------
-# Chris's model: the right dock is a toolbox that expands into the document
-# actions. Uses UIToolbox, the same widget backing the parts catalogue's four
-# toolboxes on the opposite edge - it was built here first as a second copy and
-# has since been extracted, so both sides are now one implementation.
-#
-# ADDITIVE ON PURPOSE. This inserts one tier at the TOP of the rail and moves
-# nothing that was already there. The telemetry readouts below are positioned by
-# INDEX - _build_drivetrain_readout() and _build_range_readout() both use
-# _rail_vbox.move_child(x, at + n) to sit their labels directly after the row they
-# explain - so re-homing the existing rail contents into tiers would silently
-# reorder them. The stat rail is also the most heavily tested part of this screen.
-# Restructuring it is a separate change with its own verification.
-#
-# The action buttons are NEW INSTANCES wired to the same handlers, not the rail's
-# originals: those get reparented into the top toolbar by _build_toolbar(), and a
-# node has exactly one parent. Chris asked for both, so both exist - the cost is
-# that the copies must stay wired to the same methods, which is why they connect
-# to _on_save_pressed etc. rather than duplicating any logic.
-#
-# The DELETE button is the one exception: the rail's original "Delete Selected
-# Part" fires the same handler as the toolbox's "DISCARD PART", so showing
-# both on screen at once reads as a duplicate rather than as a second entry
-# point. The toolbox is the "official" home for document actions, so the
-# rail's original is hidden below - the @onready var and its pressed signal
-# stay wired, so the Delete keyboard binding keeps working.
-func _build_admin_toolbox() -> void:
-	if _rail_vbox == null:
+func update_stats_display(stats: Dictionary, hull: Node3D) -> void:
+	if stats.is_empty():
 		return
 
-	var toolbox := UIToolbox.new()
-	# Positive x: this dock is on the RIGHT edge, so content should unfold leftward
-	# out of its header rather than in from off-screen.
-	toolbox.stagger_from = Vector2(12, 0)
-	# Single tier, so it opens with it already up - closing the only thing in the
-	# toolbox by default would just hide it.
-	var body := toolbox.add_tier("document", "DOCUMENT", true)
+	# --- 1. Combat Group ---
+	var hp = float(stats.get("hull_hp", 0.0))
+	var m_pool = float(stats.get("module_hp_pool", 0.0))
+	if combat_hp_label:
+		combat_hp_label.text = "HP: %.0f (+%.0f)" % [hp, m_pool]
 
-	var name_hint := Label.new()
-	name_hint.text = "DESIGN NAME"
-	name_hint.theme_type_variation = "HintLabel"
-	body.add_child(name_hint)
+	var dps = float(stats.get("dps", 0.0))
+	if combat_dps_label:
+		combat_dps_label.text = "DPS: %.1f" % dps
 
-	# The name field itself, moved rather than copied: a LineEdit holds the text
-	# that Save reads, so two of them would be two different names.
-	if blueprint_name_edit:
-		blueprint_name_edit.reparent(body)
+	var dt: Dictionary = stats.get("drivetrain", {})
+	var spd = float(dt.get("top_speed", 0.0))
+	if combat_speed_label:
+		combat_speed_label.text = "Speed: %.1f km/h" % (spd * 3.6)
 
-	# The Roll button that _setup_name_roller() built beside the name field
-	# was originally a sibling of the LineEdit in a BlueprintNameRow in the
-	# rail. That row is now orphaned (the LineEdit moved here), so the row
-	# moves with the field - both live in the DOCUMENT section, and the
-	# BlueprintNameRow's HBoxContainer layout still applies.
-	var name_row := _rail_vbox.get_node_or_null("BlueprintNameRow")
-	if name_row:
-		name_row.reparent(body)
-		# Reparent leaves the old FULL_RECT anchors on the row, which would
-		# make it fill the body and cover the buttons below. Re-anchor it
-		# to the top of the body so it sits between the name_hint label and
-		# the action buttons.
-		name_row.set_anchors_preset(Control.PRESET_TOP_WIDE)
-		name_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var wr: Dictionary = stats.get("weapon_range", {})
+	var has_wpn: bool = bool(stats.get("has_weapons", false)) or bool(wr.get("has_weapons", false)) or dps > 0.0
+	var longest_rng: float = float(wr.get("longest", stats.get("longest_range", 0.0)))
+	var shortest_rng: float = float(wr.get("shortest", stats.get("shortest_range", 0.0)))
 
-	_admin_action(body, "SAVE BLUEPRINT", _on_save_pressed, "confirm")
-	_admin_action(body, "BLUEPRINT LIBRARY", _on_library_pressed, "default")
-	_admin_action(body, "DISCARD PART", _on_delete_pressed, "danger")
+	# Fallback if wr had not populated longest but weapons exist on hull
+	if has_wpn and longest_rng <= 0.0 and hull:
+		for child in hull.get_children():
+			if child.has_meta("module_data"):
+				var mdata = child.get_meta("module_data")
+				if mdata and (mdata.category == "weapon" or mdata.get_dps() > 0.0):
+					var b_rng = ModuleCatalog.get_base_range(mdata.type_id)
+					longest_rng = maxf(longest_rng, b_rng)
+					shortest_rng = b_rng if shortest_rng <= 0.0 else minf(shortest_rng, b_rng)
 
-	_rail_vbox.add_child(toolbox)
-	_rail_vbox.move_child(toolbox, 0)
+	if combat_range_label:
+		if (has_wpn or dps > 0.0) and longest_rng > 0.0:
+			if longest_rng == shortest_rng:
+				combat_range_label.text = "Range: %.0f m" % longest_rng
+			else:
+				combat_range_label.text = "Range: %.0f-%.0f m" % [shortest_rng, longest_rng]
+		else:
+			combat_range_label.text = "Range: Unarmed"
 
-	# Hide the rail's original DeleteButton - the toolbox's DISCARD PART is
-	# the visible home for this action. The @onready var and its pressed
-	# signal stay wired so the Delete keyboard binding keeps working.
+	# Power stats readout (Generation, Storage, Draw)
+	var power: Dictionary = stats.get("power", {})
+	var gen: float = float(power.get("generation", 0.0))
+	var stor: float = float(power.get("storage", 0.0))
+	var idle_draw: float = float(power.get("draw", 0.0))
+	var weapon_draw: float = float(power.get("weapon_draw", 0.0))
+	var total_draw: float = float(power.get("total_draw", idle_draw + weapon_draw))
+	var active_draw: float = total_draw if total_draw > 0.0 else idle_draw
+
+	if combat_power_label:
+		combat_power_label.text = "⚡ Gen: %.1f kW | Stor: %.0f kJ | Draw: %.1f kW" % [gen, stor, active_draw]
+		if active_draw > 0.0 and gen <= 0.0:
+			combat_power_label.add_theme_color_override("font_color", Tokens.SIGNAL_ALERT)
+		elif gen > 0.0 and active_draw > gen:
+			combat_power_label.add_theme_color_override("font_color", Color(1.0, 0.7, 0.2, 1.0))
+		else:
+			combat_power_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.55, 1.0))
+
+	var wt = float(stats.get("weight", 0.0))
+	var cap = float(dt.get("capacity", 0.0))
+	var carried = float(dt.get("carried_weight", 0.0))
+	var has_loco = bool(dt.get("has_locomotion", false))
+	var is_over = bool(dt.get("is_overloaded", false))
+	if not is_over and has_loco and cap > 0.0:
+		if carried > cap or wt > cap or (carried / cap) >= 1.0:
+			is_over = true
+
+	if combat_weight_label:
+		combat_weight_label.text = "Mass: %.1f / %.1f kg" % [wt, cap]
+		combat_weight_label.add_theme_color_override("font_color", Tokens.SIGNAL_ALERT if is_over else Tokens.TEXT_PRIMARY)
+
+	var is_harv: bool = bool(stats.get("is_harvester", false))
+	var role_str := "Direct Fire"
+	if is_harv:
+		role_str = "Resource Harvester"
+	elif not has_wpn and dps <= 0.0:
+		role_str = "Unarmed Support / Scout"
+	else:
+		var tier_label = wr.get("tier_label", "")
+		if tier_label.is_empty() and longest_rng > 0.0:
+			tier_label = ModuleCatalog.get_range_tier_label(longest_rng)
+		if tier_label.is_empty():
+			tier_label = "Direct Fire"
+		role_str = tier_label
+
+	if combat_role_label:
+		combat_role_label.text = "Role: %s" % role_str
+
+	# --- Drive Sliding Overweight Placard ---
+	if overweight_alert_placard:
+		var lost_spd = float(dt.get("speed_lost_to_overload", 0.0))
+		if overweight_text_label:
+			overweight_text_label.text = "OVERLOAD: %.0f / %.0f kg" % [carried if carried > 0 else wt, cap]
+		if overweight_detail_label:
+			overweight_detail_label.text = "-%.1f m/s Speed Penalty (Chassis Overloaded)" % lost_spd if lost_spd > 0 else "Chassis capacity exceeded"
+
+		var target_top = -308.0 if is_over else -248.0
+		if overweight_alert_placard.offset_top != target_top:
+			if overweight_tween and overweight_tween.is_valid():
+				overweight_tween.kill()
+			overweight_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+			overweight_tween.tween_property(overweight_alert_placard, "offset_top", target_top, 0.3)
+			overweight_tween.parallel().tween_property(overweight_alert_placard, "offset_bottom", target_top + 84.0, 0.3)
+
+	# --- Drive Sliding Power Deficit Placard ---
+	var is_power_alert = (active_draw > 0.0 and gen <= 0.0) or (gen > 0.0 and active_draw > gen)
+
+	if power_alert_placard:
+		if power_text_label:
+			if active_draw > 0.0 and gen <= 0.0:
+				power_text_label.text = "UNPOWERED: Draw %.1f kW (0 Gen)" % active_draw
+			else:
+				power_text_label.text = "DEFICIT: Draw %.1f / Gen %.1f kW" % [active_draw, gen]
+		if power_detail_label:
+			power_detail_label.text = "Energy systems offline - fit generator" if (active_draw > 0.0 and gen <= 0.0) else "Shortfall by %.1f kW (Brownout risk)" % (active_draw - gen)
+
+		var target_top = -308.0 if is_power_alert else -248.0
+		if power_alert_placard.offset_top != target_top:
+			if power_tween and power_tween.is_valid():
+				power_tween.kill()
+			power_tween = create_tween().set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+			power_tween.tween_property(power_alert_placard, "offset_top", target_top, 0.3)
+			power_tween.parallel().tween_property(power_alert_placard, "offset_bottom", target_top + 84.0, 0.3)
+
+	var mod_count := 0
+	if hull:
+		for child in hull.get_children():
+			if child.has_meta("type_id") or child.has_meta("module_data"):
+				mod_count += 1
+	if combat_parts_label:
+		combat_parts_label.text = "Modules: %d Mounted" % mod_count
+
+	# --- 2. Build Group ---
+	var metal = int(stats.get("cost_metal", 0))
+	var crystal = int(stats.get("cost_crystal", 0))
+	var credits = ResourceCatalogScript.credits_from_materials(Vector2i(metal, crystal))
+	if build_cost_label:
+		build_cost_label.text = "%d CREDITS" % credits
+	if build_materials_label:
+		build_materials_label.text = "%d Metal / %d Crystal" % [metal, crystal]
+
+	var hull_id: String = hull.get_meta("type_id", "brenntal_medium_a") if (hull and hull.has_meta("type_id")) else "brenntal_medium_a"
+	var hdata: Dictionary = ModuleCatalog.get_module_data(hull_id)
+	var traits: Array = hdata.get("traits", [])
+	var size_tier: String = ModuleCatalog.get_hull_size_tier(hull_id)
+
+	if factory_glyph_label and factory_name_label:
+		if hdata.get("is_foundation", false):
+			factory_glyph_label.text = "🏗️"
+			factory_name_label.text = "FOUNDRY EMPLACEMENT"
+		elif "airborne" in traits or "fixed_wing" in traits or "rotary_wing" in traits:
+			factory_glyph_label.text = "✈️"
+			factory_name_label.text = "AEROSPACE HANGAR"
+		elif "naval" in traits or "buoyant" in traits:
+			factory_glyph_label.text = "⚓"
+			factory_name_label.text = "NAVAL SHIPYARD"
+		elif size_tier == "heavy":
+			factory_glyph_label.text = "🏭"
+			factory_name_label.text = "HEAVY FACTORY COMPLEX"
+		else:
+			factory_glyph_label.text = "⚙️"
+			factory_name_label.text = "LIGHT VEHICLE FACTORY"
+
+	if build_lab_tier_label:
+		build_lab_tier_label.text = "Tech: Tier 2 Advanced Lab" if size_tier == "heavy" or "airborne" in traits else "Tech: Tier 1 Standard Lab"
+
+	var b_time = maxf(4.0, (metal * 0.04 + crystal * 0.08))
+	if build_time_label:
+		build_time_label.text = "Build Time: %.1fs" % b_time
+
+
+func update_inspector(module: Node3D, data = null) -> void:
+	if not is_instance_valid(inspector_title_label):
+		return
+	if module == null or not is_instance_valid(module) or data == null:
+		var root = get_node_or_null("/root/MainLab")
+		var hull = root.get_node_or_null("Hull") if root else null
+		var hull_id: String = hull.get_meta("type_id", "brenntal_medium_a") if (hull and hull.has_meta("type_id")) else "brenntal_medium_a"
+		var hdata: Dictionary = ModuleCatalog.get_module_data(hull_id)
+		inspector_title_label.text = str(hdata.get("name", "Brenntal Medium")).to_upper()
+		inspector_subtitle_label.text = "CHASSIS BASE // NO PART SELECTED"
+		var hp = hdata.get("base_hp", hdata.get("hp", 1200.0))
+		var wt = hdata.get("weight", 496.0)
+		inspector_stats_label.text = "Base HP: %.0f | Base Mass: %.0f kg" % [hp, wt]
+		if delete_button:
+			delete_button.visible = false
+		return
+
+	var mod_name: String = ""
+	var category: String = "module"
+	var role_name: String = ""
+	var hp: float = 100.0
+	var wt: float = 50.0
+	var dps: float = 0.0
+	var cost_val: int = 10
+
+	if data is Resource:
+		mod_name = str(data.get("module_name")) if data.get("module_name") != null else "Module"
+		category = str(data.get("category")) if data.get("category") != null else "module"
+		var type_id: String = str(data.get("type_id")) if data.get("type_id") != null else ""
+		var cat_entry: Dictionary = ModuleCatalog.get_module_data(type_id)
+		role_name = str(cat_entry.get("role", cat_entry.get("category", category)))
+		hp = data.get_hp() if data.has_method("get_hp") else float(data.get("base_hp", 100.0))
+		wt = data.get_weight() if data.has_method("get_weight") else float(data.get("base_weight", 50.0))
+		dps = data.get_dps() if data.has_method("get_dps") else float(data.get("base_dps", 0.0))
+		if data.has_method("get_cost"):
+			cost_val = ResourceCatalogScript.credits_from_materials(data.get_cost())
+		else:
+			cost_val = ResourceCatalogScript.credits_from_materials(Vector2i(int(data.get("cost_metal", 10)), int(data.get("cost_crystal", 0))))
+	elif data is Dictionary:
+		mod_name = str(data.get("name", data.get("module_name", "Module")))
+		category = str(data.get("category", "module"))
+		role_name = str(data.get("role", category))
+		hp = float(data.get("hp", data.get("base_hp", 100.0)))
+		wt = float(data.get("weight", data.get("base_weight", 50.0)))
+		dps = float(data.get("dps", data.get("base_dps", 0.0)))
+		cost_val = ResourceCatalogScript.credits_from_materials(Vector2i(int(data.get("metal", 10)), int(data.get("crystal", 0))))
+
+	inspector_title_label.text = mod_name.to_upper()
+	inspector_subtitle_label.text = "CATEGORY: %s // ROLE: %s" % [category.to_upper(), role_name.to_upper()]
+	inspector_stats_label.text = "HP: %.1f | WT: %.1f kg | DPS: %.1f | Cost: %d cr" % [hp, wt, dps, cost_val]
 	if delete_button:
-		delete_button.visible = false
+		delete_button.visible = true
 
 
 # One transparent top-bar slot: a caption over a value, with a hairline rule on
@@ -1314,6 +1862,9 @@ func _on_test_pressed(): lab_toolbar._on_test_pressed()
 func _on_mirror_toggled(button_pressed: bool): lab_toolbar._on_mirror_toggled(button_pressed)
 func _on_library_pressed(): lab_toolbar._on_library_pressed()
 func _on_blueprint_name_changed(new_text: String): lab_toolbar._on_blueprint_name_changed(new_text)
+func _on_blueprint_name_tooltip_update(new_text: String) -> void:
+	if blueprint_name_edit:
+		blueprint_name_edit.tooltip_text = new_text
 func _on_roll_name_pressed(): lab_toolbar._on_roll_name_pressed()
 
 func on_module_selected(module: Node3D): tweak_callout_manager.on_module_selected(module)

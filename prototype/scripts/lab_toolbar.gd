@@ -100,12 +100,19 @@ func _on_delete_pressed():
 		root.delete_selected_module()
 		
 func _on_save_pressed():
-	var root = lab.get_node("/root/MainLab")
+	var root = lab.get_node_or_null("/root/MainLab")
 	var hull = root.get_node_or_null("Hull") if root else null
-	if hull:
+	if hull and blueprint_name_edit:
 		var name_text = blueprint_name_edit.text.strip_edges()
+		if name_text.is_empty():
+			if not blueprint_name_edit.placeholder_text.strip_edges().is_empty():
+				name_text = blueprint_name_edit.placeholder_text.strip_edges()
+			else:
+				name_text = BlueprintNamerScript.generate()
+			blueprint_name_edit.text = name_text
+			_on_blueprint_name_changed(name_text)
 		hull.set_meta("blueprint_name", name_text)
-	var blueprint_manager = root.get_node_or_null("BlueprintManager")
+	var blueprint_manager = root.get_node_or_null("BlueprintManager") if root else null
 	if blueprint_manager:
 		if blueprint_manager.save_blueprint():
 			UIStampScript.spawn_stamp(lab.get_tree().root, "APPROVED FOR FIELD TEST", "go")
@@ -133,7 +140,8 @@ func _setup_name_roller() -> void:
 
 	# reparent() preserves the node itself, so $ScrollContainer/VBoxContainer/
 	# BlueprintNameEdit becomes .../BlueprintNameRow/BlueprintNameEdit. The
-	# @onready var already resolved at _ready(), so the reference stays valid.
+	# @onready var keeps its reference; any code that resolves the path by
+	# string gets the new one.
 	blueprint_name_edit.reparent(row)
 	blueprint_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
@@ -143,22 +151,19 @@ func _setup_name_roller() -> void:
 	_name_roll_button.pressed.connect(_on_roll_name_pressed)
 	row.add_child(_name_roll_button)
 
-	_reroll_name_suggestion()
+	_reroll_name_suggestion(true)
 
-func _reroll_name_suggestion() -> void:
-	# Shown as placeholder text only. A suggestion the player never looked at
-	# is not a name they chose, so it must not count as one - it stays out of
-	# the field (and therefore out of the save) until Roll is pressed.
-	if blueprint_name_edit:
-		blueprint_name_edit.placeholder_text = BlueprintNamerScript.generate()
-
-func _on_roll_name_pressed() -> void:
+func _reroll_name_suggestion(force_set_text: bool = true) -> void:
 	if not blueprint_name_edit:
 		return
 	var rolled: String = BlueprintNamerScript.generate()
-	blueprint_name_edit.text = rolled
-	_on_blueprint_name_changed(rolled)
-	_reroll_name_suggestion()
+	blueprint_name_edit.placeholder_text = rolled
+	if force_set_text or blueprint_name_edit.text.strip_edges().is_empty():
+		blueprint_name_edit.text = rolled
+		_on_blueprint_name_changed(rolled)
+
+func _on_roll_name_pressed() -> void:
+	_reroll_name_suggestion(true)
 
 func _process(delta: float) -> void:
 	if not _undo_btn or not _redo_btn: return
@@ -488,12 +493,6 @@ func _build_toolbar() -> void:
 
 	row.add_child(VSeparator.new())
 
-	# The flyout trigger, and then the document actions. Save last-but-one and
-	# Test last, so the two that leave or commit the screen sit furthest from
-	# Undo/Redo and cannot be hit by accident on the way to them.
-	if library_button:
-		library_button.reparent(row)
-
 	var spacer = Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
@@ -506,11 +505,6 @@ func _build_toolbar() -> void:
 			if placer and placer.has_method("show_instructions_dialog"):
 				placer.show_instructions_dialog(true)
 	)
-
-	if save_button:
-		save_button.reparent(row)
-	if test_button:
-		test_button.reparent(row)
 
 	# Navigation back to the main menu - reparented from the rail (where it
 	# used to live below the stats) so it sits with the other "leave the

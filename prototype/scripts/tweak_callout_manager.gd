@@ -159,14 +159,20 @@ func on_module_selected(module: Node3D):
 
 	if hull and (module == null or module == hull or module.name == "Hull"):
 		lab.sync_hull_ui(hull)
+		if lab.has_method("update_inspector"):
+			lab.update_inspector(null, null)
 
 	if not locomotion_tweaks:
 		return
 
 	if not module or not module.has_meta("module_data"):
+		if lab.has_method("update_inspector"):
+			lab.update_inspector(null, null)
 		return
 
 	var data: ModuleDataResource = module.get_meta("module_data")
+	if lab.has_method("update_inspector"):
+		lab.update_inspector(module, data)
 
 	_open_action_ring(module, data.module_name.to_upper())
 

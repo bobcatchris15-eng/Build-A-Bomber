@@ -3754,6 +3754,7 @@ def _fracture(bm, cuts, radius, rng, bias_flat=0.0):
 		edges = [e for e in bm.edges if len(e.link_faces) == 1]
 		if edges:
 			bmesh.ops.holes_fill(bm, edges=edges)
+		bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
 
 
 def build_boulder(name, radius=1.0, irregularity=0.4, subdivisions=2, flatten=0.75, seed=0,

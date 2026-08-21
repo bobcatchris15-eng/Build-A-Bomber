@@ -17,35 +17,37 @@ extends RefCounted
 #   - Icons are monochrome white SVGs tinted by modulate. Never a coloured icon.
 
 # --- Palette ----------------------------------------------------------------
-# Neutral ramp. Dark enough that the 3D world reads as brighter than the HUD,
-# which is what keeps the eye in the battle rather than on the chrome.
-const VOID        := Color(0.055, 0.067, 0.086)   # #0E1116 deepest, minimap unexplored
-const PANEL       := Color(0.086, 0.106, 0.133)   # #161B22 panel fill
-const PANEL_RAISE := Color(0.118, 0.145, 0.180)   # #1E252E interactive surface
-const PANEL_HOVER := Color(0.157, 0.192, 0.235)   # #28313C hover
-const EDGE        := Color(0.173, 0.208, 0.247)   # #2C353F panel edge
-const EDGE_BRIGHT := Color(0.243, 0.290, 0.341)   # #3E4A57 divider / active edge
+# Neutral ramp. Cold-War military console olive-charcoal.
+const VOID        := Color(0.045, 0.065, 0.055)   # Deepest unpowered CRT / unexplored
+const PANEL       := Color(0.088, 0.120, 0.100)   # Cold-War milspec console housing
+const PANEL_RAISE := Color(0.128, 0.170, 0.142)   # Raised instrument switch body
+const PANEL_HOVER := Color(0.178, 0.238, 0.198)   # Active switch / hover surface
+const EDGE        := Color(0.200, 0.280, 0.225)   # Machined console seam
+const EDGE_BRIGHT := Color(0.320, 0.520, 0.380)   # Phosphor CRT illuminated active bezel
+const CIC_EDGE    := Color(0.320, 0.520, 0.380)   # Cold-War CIC phosphor accent border
+const SCAN_LINE   := Color(0.365, 1.000, 0.494, 0.03) # Faint CRT scanline tint
+const RETICLE     := Color(0.400, 0.700, 0.450, 0.70) # Radar reticle / tracking green
 
-const TEXT        := Color(0.894, 0.914, 0.937)   # #E4E9EF primary
-const TEXT_DIM    := Color(0.541, 0.588, 0.639)   # #8A96A3 secondary
-const TEXT_FAINT  := Color(0.353, 0.400, 0.455)   # #5A6674 disabled / hint
+const TEXT        := Color(0.910, 0.950, 0.900)   # Gauge dial off-white primary
+const TEXT_DIM    := Color(0.580, 0.680, 0.600)   # Cold-War green-grey secondary
+const TEXT_FAINT  := Color(0.350, 0.450, 0.380)   # Disabled / hint
+const STENCIL_DIM := Color(0.720, 0.820, 0.740)   # Cold-War CIC placard heading text
 
-# Semantic. Kept apart from the team colours on purpose.
-const OK          := Color(0.373, 0.788, 0.541)   # #5FC98A complete, affordable
-const WARN        := Color(0.910, 0.639, 0.239)   # #E8A33D low power, stalled
-const BAD         := Color(0.910, 0.337, 0.310)   # #E8564F unaffordable, damage
+# Semantic.
+const OK          := Color(0.350, 0.850, 0.500)   # Radar phosphor green complete, affordable
+const WARN        := Color(0.950, 0.700, 0.200)   # Incandescent amber warning lamp
+const BAD         := Color(0.920, 0.260, 0.220)   # Alarm red lamp
 
-# Team identity. Also the minimap blip colours - one definition, so a blip and
-# a selection ring can never disagree about which side a unit is on.
-const TEAM_FRIENDLY := Color(0.310, 0.690, 0.910)  # #4FB0E8
-const TEAM_HOSTILE  := Color(0.910, 0.337, 0.310)  # #E8564F
-const TEAM_NEUTRAL  := Color(0.678, 0.706, 0.741)  # #ADB4BD
+# Team identity.
+const TEAM_FRIENDLY := Color(0.300, 0.720, 0.920)
+const TEAM_HOSTILE  := Color(0.920, 0.260, 0.220)
+const TEAM_NEUTRAL  := Color(0.680, 0.740, 0.700)
 
 # Resources. Distinct from every status colour so a resource count is never
 # mistaken for a warning.
-const METAL       := Color(0.780, 0.800, 0.820)
-const CRYSTAL     := Color(0.545, 0.694, 0.910)
-const POWER       := Color(0.910, 0.780, 0.318)
+const METAL       := Color(0.760, 0.820, 0.800)
+const CRYSTAL     := Color(0.450, 0.750, 0.900)
+const POWER       := Color(0.950, 0.800, 0.250)
 
 const SELECTED    := Color(1.0, 1.0, 1.0)
 
@@ -77,6 +79,7 @@ const RIBBON_HEIGHT := 34.0
 const FONT_UI := "res://assets/fonts/UIFont-Regular.ttf"
 const FONT_UI_BOLD := "res://assets/fonts/UIFont-Bold.ttf"
 const FONT_MONO := "res://assets/fonts/MonoFont-Regular.ttf"
+const FONT_STENCIL := "res://assets/fonts/StencilFont-Regular.ttf"
 
 const SZ_MICRO := 10
 const SZ_SMALL := 12
@@ -92,18 +95,64 @@ static func font(path: String) -> Font:
 	return f if f is Font else null
 
 
+const PLATE_DIR := "res://assets/textures/ui/"
+const PLATE_MARGIN := 12
+const PLATE_PAD := 16
+
+static var _plate_cache: Dictionary = {}
+
+static func _plate_box(material: String, state: String, margin_h: int = SP_MD, margin_v: int = SP_SM) -> StyleBox:
+	var key := "%s_%s" % [material, state]
+	if _plate_cache.has(key):
+		var cached = _plate_cache[key]
+		if cached is StyleBoxTexture:
+			var sb := cached.duplicate() as StyleBoxTexture
+			sb.content_margin_left = margin_h
+			sb.content_margin_right = margin_h
+			sb.content_margin_top = margin_v
+			sb.content_margin_bottom = margin_v
+			return sb
+
+	var path := PLATE_DIR + "plate_%s_%s.png" % [material, state]
+	if ResourceLoader.exists(path):
+		var tex = load(path) as Texture2D
+		if tex != null:
+			var sb := StyleBoxTexture.new()
+			sb.texture = tex
+			var frame := PLATE_MARGIN + PLATE_PAD
+			sb.texture_margin_left = frame
+			sb.texture_margin_right = frame
+			sb.texture_margin_top = frame
+			sb.texture_margin_bottom = frame
+			sb.expand_margin_left = PLATE_PAD
+			sb.expand_margin_right = PLATE_PAD
+			sb.expand_margin_top = PLATE_PAD
+			sb.expand_margin_bottom = PLATE_PAD
+			sb.content_margin_left = margin_h
+			sb.content_margin_right = margin_h
+			sb.content_margin_top = margin_v
+			sb.content_margin_bottom = margin_v
+			_plate_cache[key] = sb
+			return sb
+
+	var flat := StyleBoxFlat.new()
+	flat.bg_color = PANEL_HOVER if state == "hover" else (PANEL_RAISE if state == "pressed" else PANEL)
+	flat.set_border_width_all(BORDER)
+	flat.border_color = EDGE_BRIGHT if state == "hover" else EDGE
+	flat.set_corner_radius_all(RADIUS)
+	flat.content_margin_left = margin_h
+	flat.content_margin_right = margin_h
+	flat.content_margin_top = margin_v
+	flat.content_margin_bottom = margin_v
+	return flat
+
+
 # --- Panels -----------------------------------------------------------------
 
 # The one panel look. `raised` is for anything the mouse interacts with;
 # unraised is for backing surfaces.
-static func panel_box(raised: bool = false, edge: Color = EDGE) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = PANEL_RAISE if raised else PANEL
-	sb.set_border_width_all(BORDER)
-	sb.border_color = edge
-	sb.set_corner_radius_all(RADIUS)
-	sb.set_content_margin_all(SP_MD)
-	return sb
+static func panel_box(raised: bool = false, _edge: Color = EDGE) -> StyleBox:
+	return _plate_box("cic_frame", "hover" if raised else "normal", SP_MD, SP_MD)
 
 
 # A filled swatch with no border - progress fills, badges, 2D blips.
@@ -160,17 +209,36 @@ static func heading(text: String) -> Label:
 	return label(text.to_upper(), SZ_MICRO, TEXT_DIM, false, true)
 
 
+# Cold-War CIC stamped heading with StencilFont.
+static func heading_stencil(text: String, size: int = SZ_HEAD, color: Color = STENCIL_DIM) -> Label:
+	var l := Label.new()
+	l.text = text.to_upper()
+	var f := font(FONT_STENCIL)
+	if f != null:
+		l.add_theme_font_override("font", f)
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return l
+
+
+# Hardware status lamp / indicator dot.
+static func lamp(color: Color = OK, diameter: int = 8) -> Panel:
+	var p := Panel.new()
+	p.custom_minimum_size = Vector2(diameter, diameter)
+	p.add_theme_stylebox_override("panel", fill_box(color, int(diameter * 0.5)))
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return p
+
+
 # --- Buttons ----------------------------------------------------------------
-# One button appearance, four states. Built as an explicit StyleBox set rather
-# than a theme type variation so the battle HUD does not inherit from
-# bomber_theme.tres and cannot be broken by a lab-side theme edit.
-static func style_button(b: Button, accent: Color = TEAM_FRIENDLY) -> void:
-	var normal := panel_box(true)
-	var hover := panel_box(true, EDGE_BRIGHT)
-	hover.bg_color = PANEL_HOVER
-	var pressed := panel_box(true, accent)
-	pressed.bg_color = PANEL_HOVER.lerp(accent, 0.25)
-	var disabled := panel_box(false)
+# Cold-War military console tactile keycaps.
+static func style_button(b: Button, _accent: Color = TEAM_FRIENDLY) -> void:
+	var normal := _plate_box("cic_button", "normal", SP_SM, SP_XS)
+	var hover := _plate_box("cic_button", "hover", SP_SM, SP_XS)
+	var pressed := _plate_box("cic_button", "pressed", SP_SM, SP_XS)
+	var disabled := _plate_box("cic_button", "disabled", SP_SM, SP_XS)
 
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
@@ -178,12 +246,12 @@ static func style_button(b: Button, accent: Color = TEAM_FRIENDLY) -> void:
 	b.add_theme_stylebox_override("focus", normal)
 	b.add_theme_stylebox_override("disabled", disabled)
 
-	var f := font(FONT_UI)
+	var f := font(FONT_UI_BOLD)
 	if f != null:
 		b.add_theme_font_override("font", f)
 	b.add_theme_font_size_override("font_size", SZ_SMALL)
 	b.add_theme_color_override("font_color", TEXT)
-	b.add_theme_color_override("font_hover_color", Color.WHITE)
+	b.add_theme_color_override("font_hover_color", Color(0.45, 1.0, 0.65)) # Phosphor illuminated hover
 	b.add_theme_color_override("font_pressed_color", Color.WHITE)
 	b.add_theme_color_override("font_disabled_color", TEXT_FAINT)
 	b.focus_mode = Control.FOCUS_NONE

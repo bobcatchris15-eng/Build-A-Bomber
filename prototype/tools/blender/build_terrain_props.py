@@ -340,6 +340,10 @@ def unwrap_mesh(obj):
 
 def finalize_mesh(bm, name, mat_builder, smooth=True, auto_smooth_angle=35):
     """Finalizes a single-material bmesh into an object with UV unwrapping and PBR material."""
+    boundary = [e for e in bm.edges if len(e.link_faces) == 1]
+    if boundary:
+        bmesh.ops.holes_fill(bm, edges=boundary)
+    bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     bm.to_mesh(mesh_data)
     bm.free()
@@ -368,6 +372,10 @@ def finalize_mesh(bm, name, mat_builder, smooth=True, auto_smooth_angle=35):
 
 def finalize_mesh_dual(bm, name, mat0_builder, mat1_builder, smooth=True, auto_smooth_angle=35):
     """Finalizes a dual-material bmesh into an object with UV unwrapping and both PBR materials."""
+    boundary = [e for e in bm.edges if len(e.link_faces) == 1]
+    if boundary:
+        bmesh.ops.holes_fill(bm, edges=boundary)
+    bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     bm.to_mesh(mesh_data)
     bm.free()
@@ -497,7 +505,7 @@ def fracture_mesh_z(bm, cuts=6, radius=1.0, rng=None, bias_horizontal=0.0):
         n = Vector((nx, ny, nz)).normalized()
         dist = radius * rng.uniform(0.35, 0.75)
         plane_co = n * dist
-        res = bmesh.ops.bisect_plane(
+        bmesh.ops.bisect_plane(
             bm,
             geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
             plane_co=plane_co,
@@ -505,9 +513,10 @@ def fracture_mesh_z(bm, cuts=6, radius=1.0, rng=None, bias_horizontal=0.0):
             clear_outer=True,
             clear_inner=False
         )
-        cut_edges = [e for e in res["geom_cut"] if isinstance(e, bmesh.types.BMEdge)]
-        if cut_edges:
-            bmesh.ops.holes_fill(bm, edges=cut_edges)
+        boundary = [e for e in bm.edges if len(e.link_faces) == 1]
+        if boundary:
+            bmesh.ops.holes_fill(bm, edges=boundary)
+        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
 
 
 # ---------------------------------------------------------------------------
@@ -757,6 +766,7 @@ def build_organic_rock_spire(name, seed=0):
     # Multi-tier lofted pillar
     n_tiers = 6
     prev_verts = None
+    first_tier_verts = None
     all_faces = []
     for t in range(n_tiers + 1):
         z = (float(t) / n_tiers) * height
@@ -770,6 +780,10 @@ def build_organic_rock_spire(name, seed=0):
             cy = math.sin(theta) * r
             disp = organic_noise_3d(cx, cy, z, seed=seed) * 0.3
             tier_verts.append(bm.verts.new((cx * (1.0 + disp), cy * (1.0 + disp), z)))
+        
+        if first_tier_verts is None:
+            first_tier_verts = tier_verts
+            bm.faces.new(list(reversed(first_tier_verts)))
         
         if prev_verts is not None:
             for i in range(segments):

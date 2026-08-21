@@ -1219,3 +1219,38 @@ func test_hud_does_not_use_out_of_match_chrome() -> bool:
 				return false
 	print("  [PASS] scripts/hud/ is free of out-of-match chrome dependencies")
 	return true
+
+
+func test_wood_material_registration() -> bool:
+	print("Running Test Suite: Wood Material Registration...")
+	var UITheme = preload("res://scripts/ui_theme.gd")
+	if not ("wood" in UITheme.MATERIALS):
+		print("  [FAIL] 'wood' is missing from UITheme.MATERIALS")
+		return false
+	if not UITheme.MATERIAL_DEFAULTS.has("wood"):
+		print("  [FAIL] 'wood' is missing from UITheme.MATERIAL_DEFAULTS")
+		return false
+	var theme = preload("res://resources/bomber_theme.tres")
+	if theme == null:
+		print("  [FAIL] Could not load bomber_theme.tres")
+		return false
+	if not theme.has_stylebox("panel", "WoodPanel"):
+		print("  [FAIL] bomber_theme.tres missing 'WoodPanel' StyleBox")
+		return false
+	print("  [PASS] 'wood' material and WoodPanel variation are registered and valid.")
+	return true
+
+
+func test_modular_hull_builder_ui_cleanliness() -> bool:
+	print("Running Test Suite: Modular Hull Builder UI Cleanliness...")
+	var tscn_src := FileAccess.get_file_as_string("res://scenes/ModularHullBuilder.tscn")
+	if tscn_src.find("theme_override_font_sizes") >= 0:
+		print("  [FAIL] ModularHullBuilder.tscn contains inline theme_override_font_sizes")
+		return false
+	var gd_src := FileAccess.get_file_as_string("res://scripts/modular_hull_builder.gd")
+	if gd_src.find("UIShell.stage") < 0:
+		print("  [FAIL] modular_hull_builder.gd does not use UIShell.stage")
+		return false
+	print("  [PASS] Modular Hull Builder uses programmatic toolkit UI without .tscn overrides.")
+	return true
+
