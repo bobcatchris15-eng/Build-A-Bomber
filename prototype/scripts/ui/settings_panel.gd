@@ -77,7 +77,6 @@ var _settings: Node = null
 var _input_svc: Node = null
 var _toolbox: UIToolbox = null
 var _rebinding_action: String = ""
-var _rebinding_index: int = 0
 var _rebind_button: Button = null
 
 
@@ -86,16 +85,12 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(620, 560)
 	_settings = get_node_or_null("/root/SettingsService")
 	_input_svc = get_node_or_null("/root/InputService")
-	# The shared 3D UI viewport for this panel. Added first so the
-	# MeshIcons below it (in the rows) find it in their ancestor
-	# chain and so the stage draws underneath the panel's own
-	# children - the 3D content shows in the MeshIcon rects and
-	# nowhere else, because nothing else on this panel is a 3D prop.
-	UIShell.stage(self)
 	_build()
 
 
 func _build() -> void:
+	# Ensure the shared 3D UI viewport exists on this panel across initial build and rebuilds.
+	UIShell.stage(self)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, Tokens.SPACE_LG)
@@ -354,7 +349,6 @@ func _conflict_text(action: String) -> String:
 
 func _begin_rebind(action: String, btn: Button) -> void:
 	_rebinding_action = action
-	_rebinding_index = 0
 	_rebind_button = btn
 	btn.text = "PRESS A KEY"
 	set_process_input(true)

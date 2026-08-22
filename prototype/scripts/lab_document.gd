@@ -4,6 +4,15 @@ var telemetry_rail
 var lab_toolbar
 var tweak_callout_manager
 
+var stats_dock: Control = null
+var _callout_dirs = [
+	Vector2(0.8, -1.2), Vector2(-0.8, -1.2), # Top corners
+	Vector2(1.2, -0.2), Vector2(-1.2, -0.2), # High sides
+	Vector2(1.2, 0.6), Vector2(-1.2, 0.6),   # Low sides
+	Vector2(0.8, 1.2), Vector2(-0.8, 1.2)    # Bottom corners
+]
+var _current_callout_idx = 0
+
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
@@ -22,7 +31,6 @@ const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_cat
 # does not invalidate a reference, only a re-resolved path. The nine places that
 # re-resolved `$ScrollContainer/VBoxContainer` on every call are the ones that
 # had to change; they use `_rail_vbox` now, captured before the move.
-var stats_dock: Control = null
 var console_root: PanelContainer = null
 var _slot_hull_label: Label = null
 var _slot_parts_label: Label = null
@@ -450,36 +458,6 @@ const TWEAK_SPECS = {
 	]
 }
 
-var armor_mat_btn: OptionButton
-var armor_thick_label: Label
-var armor_thick_slider: HSlider
-
-# --- Hull spec flyout (VISUAL/UI plan item 7) -------------------------------
-# Armour material, faction and armour thickness used to be six controls parked
-# permanently in the right rail, visible whether or not they applied to
-# anything. They are hull-level settings a player touches a few times per
-# design, so they now live behind one toolbar-style trigger.
-#
-# The controls themselves are created once and REUSED, never rebuilt per open,
-# because every one of them is wired to an undo push and a stat recompute and
-# rebuilding them would mean reconnecting all of that on each open. When the
-# flyout closes they are reparented back into `hull_spec_stash` - the same
-# stash-and-reparent idiom _add_callout() already uses for tweak widgets, for
-# the same reason: a transient panel frees its children, and these must outlive
-# it.
-#
-# The faction dropdown that used to live here is GONE. Faction is a battle-time
-# property now, not a design-time one: reconstruct_vehicle()'s
-# match_faction_override has always had the final word at spawn, so a Lab
-# selector could only ever preview a livery that the match would overwrite -
-# and it also tinted the Lab's own stat readout with that faction's passives,
-# so the numbers a player tuned against were not the numbers the unit fielded
-# under whichever faction they actually picked at match setup. The Lab now
-# shows an unpainted design at its base stats, and both the paint and the
-# passives are applied once, at battle time.
-var hull_spec_stash: VBoxContainer
-var _hull_spec_flyout: Node = null
-
 # Wheels-only "dually" tweak (wheels_per_axle, 1-2): no scene node for this
 # exists in UI_StatBlock.tscn (only the generic Size/Count sliders shared by
 # every locomotion type), so it's built dynamically here rather than in the
@@ -802,48 +780,6 @@ func _ready():
 	leg_type_button.item_selected.connect(_on_leg_type_selected)
 	leg_type_container.visible = false
 
-	# The hull-spec controls. Built here, parked in an invisible stash, and
-	# shown in a flyout off the trigger button below - see hull_spec_stash's
-	# declaration for why they are reused rather than rebuilt per open.
-	hull_spec_stash = VBoxContainer.new()
-	hull_spec_stash.visible = false
-	add_child(hull_spec_stash)
-
-	var mat_cont = VBoxContainer.new()
-	mat_cont.name = "ArmorMaterialContainer"
-	var mat_label = Label.new()
-	mat_label.text = "Armor Material:"
-	mat_cont.add_child(mat_label)
-	armor_mat_btn = OptionButton.new()
-	armor_mat_btn.add_item("Hardened Steel")
-	armor_mat_btn.add_item("Reactive Armor")
-	armor_mat_btn.add_item("Ablative Ceramic")
-	armor_mat_btn.add_item("Energy Shielding")
-	armor_mat_btn.item_selected.connect(_on_armor_mat_selected)
-	mat_cont.add_child(armor_mat_btn)
-	hull_spec_stash.add_child(mat_cont)
-
-	var thick_cont = VBoxContainer.new()
-	thick_cont.name = "ArmorThicknessContainer"
-	armor_thick_label = Label.new()
-	armor_thick_label.text = "Armor Thickness: 1.0"
-	thick_cont.add_child(armor_thick_label)
-	armor_thick_slider = HSlider.new()
-	armor_thick_slider.min_value = 0.5
-	armor_thick_slider.max_value = 3.0
-	armor_thick_slider.step = 0.1
-	armor_thick_slider.value = 1.0
-	armor_thick_slider.value_changed.connect(_on_armor_thick_changed)
-	thick_cont.add_child(armor_thick_slider)
-	hull_spec_stash.add_child(thick_cont)
-
-	# The trigger. Sits in the rail for now; item 7's top toolbar is where it
-	# belongs, and moving it there is a reparent of this one node.
-	#
-	# Deadpan procurement register per the plan's item 0 - this opens a hull's
-	# specification, so it says so, and it carries no glyph.
-	# (hull_spec_btn removed as it is no longer used)
-
 	# Create Module Tweaks container
 	module_tweaks_container = VBoxContainer.new()
 	module_tweaks_container.name = "ModuleTweaksContainer"
@@ -952,18 +888,6 @@ func sync_hull_ui(hull: Node3D):
 		else:
 			lab_toolbar._reroll_name_suggestion(true)
 			hull.set_meta("blueprint_name", blueprint_name_edit.text)
-	if armor_mat_btn:
-		var mat = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
-		match mat:
-			"hardened_steel": armor_mat_btn.selected = 0
-			"reactive_armor": armor_mat_btn.selected = 1
-			"ablative_ceramic": armor_mat_btn.selected = 2
-			"energy_shielding": armor_mat_btn.selected = 3
-	if armor_thick_slider:
-		var thick = hull.get_meta("armor_thickness") if hull.has_meta("armor_thickness") else 1.0
-		armor_thick_slider.value = thick
-		if armor_thick_label:
-			armor_thick_label.text = "Armor Thickness: %.1f" % thick
 	# No faction sync: there is no faction control in the Lab any more. A
 	# blueprint saved before this change still carries its "faction" key and
 	# still deserializes, it simply has no effect until a match assigns one.
@@ -979,26 +903,6 @@ var _load_fill_styles: Dictionary = {}
 
 
 var _alpha_rows: Array[Label] = []
-
-# The regime column, as it is drawn. Two things carry the state, not one:
-#
-#   colour - CHIP is SIGNAL_ALERT (this design's shots are being stopped, which
-#            is a failure state for the thing being measured), BRUTE is
-#            SIGNAL_GO, and the ordinary through-regime keeps StatLabel's own
-#            TEXT_SECONDARY so the two extremes are the only rows that pull the
-#            eye. Same go/hazard/alert vocabulary the load bar uses for its
-#            fill, applied to the same kind of question.
-#   case   - the two extremes are SHOUTED and the middle is not. This is not
-#            decoration: it is the redundant channel that keeps the regime
-#            legible for a colour-blind player, and it survives a greyscale
-#            screenshot, which the colour alone does not.
-var _callout_dirs = [
-	Vector2(0.8, -1.2), Vector2(-0.8, -1.2), # Top corners
-	Vector2(1.2, -0.2), Vector2(-1.2, -0.2), # High sides
-	Vector2(1.2, 0.6), Vector2(-1.2, 0.6),   # Low sides
-	Vector2(0.8, 1.2), Vector2(-0.8, 1.2)    # Bottom corners
-]
-var _current_callout_idx = 0
 
 
 # Opens the action ring on `module`.
@@ -1720,77 +1624,6 @@ func _admin_action(parent: Control, label: String, handler: Callable, role: Stri
 
 # The thin top toolbar. STEEL band via HeaderPanel, which already carries the
 # hazard underline that separates chrome from viewport.
-func _on_hull_spec_pressed() -> void:
-	if is_instance_valid(_hull_spec_flyout):
-		_hull_spec_flyout.close()
-		return
-
-	# Hosted on tweak_canvas, the same floating layer the callouts use.
-	#
-	# NOT the button's own ancestor: that is the rail's ScrollContainer, which
-	# would clip a flyout wider than the rail - and wider than the rail is the
-	# normal case, so clipping it there defeats the point of moving these
-	# controls out of the rail at all.
-	#
-	# NOT get_tree().root either, which was the first version. A flyout parented
-	# to the viewport outlives the Design Lab scene, so leaving the Lab with one
-	# open leaked the panel AND the six reparented controls inside it - they are
-	# no longer children of the scene by then, so freeing the scene does not take
-	# them with it. tweak_canvas dies with the Lab and takes the flyout along.
-	var flyout = UIFlyoutScript.create(tweak_canvas, "Hull Specification")
-	_hull_spec_flyout = flyout
-
-	for ctrl in _hull_spec_widgets():
-		if is_instance_valid(ctrl):
-			ctrl.reparent(flyout.body())
-
-	# Reclaim the controls BEFORE the flyout frees itself. `closed` is emitted at
-	# the top of close(), ahead of the queue_free, which is the only point where
-	# reparenting is still safe.
-	flyout.closed.connect(_on_hull_spec_closed)
-	# (Flyout positioning removed since hull_spec_btn is gone)
-
-
-func _on_hull_spec_closed() -> void:
-	for ctrl in _hull_spec_widgets():
-		if is_instance_valid(ctrl) and ctrl.get_parent() != hull_spec_stash:
-			ctrl.reparent(hull_spec_stash)
-	_hull_spec_flyout = null
-
-
-# Declared in display order once, so open and close cannot disagree about which
-# controls belong to the flyout - a mismatch would strand a widget in a freed
-# panel and take the control with it.
-func _on_armor_mat_selected(idx: int) -> void:
-	if is_updating_sliders: return
-	var root = get_node_or_null("/root/MainLab")
-	var hull = root.get_node_or_null("Hull") if root else null
-	if not hull: return
-	_push_undo()
-	var materials = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
-	var selected_mat = materials[clampi(idx, 0, materials.size() - 1)]
-	hull.set_meta("armor_material", selected_mat)
-	update_stats(hull)
-
-func _on_armor_thick_changed(val: float) -> void:
-	if is_updating_sliders: return
-	var root = get_node_or_null("/root/MainLab")
-	var hull = root.get_node_or_null("Hull") if root else null
-	if not hull: return
-	_push_undo()
-	hull.set_meta("armor_thickness", val)
-	if armor_thick_label:
-		armor_thick_label.text = "Armor Thickness: %.1f" % val
-	update_stats(hull)
-
-func _hull_spec_widgets() -> Array:
-	var out: Array = []
-	if armor_mat_btn and is_instance_valid(armor_mat_btn):
-		out.append(armor_mat_btn.get_parent())
-	if armor_thick_slider and is_instance_valid(armor_thick_slider):
-		out.append(armor_thick_slider.get_parent())
-	return out
-
 func _initial_sync():
 	var root = get_node_or_null("/root/MainLab")
 	var hull = root.get_node_or_null("Hull") if root else null
@@ -1798,9 +1631,6 @@ func _initial_sync():
 		if not hull.has_meta("blueprint_name"):
 			hull.set_meta("blueprint_name", "Untitled Design")
 		sync_hull_ui(hull)
-
-func _process(delta):
-	pass
 
 func _on_part_hovered(type_id: String) -> void:
 	var root = get_node_or_null("/root/MainLab")

@@ -92,6 +92,7 @@ func _push_undo():
 	var root = lab.get_node_or_null("/root/MainLab")
 	if root and root.has_method("push_undo_snapshot"):
 		root.push_undo_snapshot()
+		update_undo_redo_state()
 
 func _on_delete_pressed():
 	var root = lab.get_node_or_null("/root/MainLab")
@@ -165,15 +166,15 @@ func _reroll_name_suggestion(force_set_text: bool = true) -> void:
 func _on_roll_name_pressed() -> void:
 	_reroll_name_suggestion(true)
 
-func _process(delta: float) -> void:
+func update_undo_redo_state() -> void:
 	if not _undo_btn or not _redo_btn: return
 	var root = lab.get_node_or_null("/root/MainLab")
 	if not root: return
-	var placer = root.get_node_or_null("ModulePlacer")
-	if not placer: return
+	var placer = root if root.has_method("undo") else root.get_node_or_null("ModulePlacer")
+	if not placer or not ("undo_stack" in placer) or not ("redo_stack" in placer): return
 	
-	var u_count = placer.undo_stack.size()
-	var r_count = placer.redo_stack.size()
+	var u_count: int = placer.undo_stack.size()
+	var r_count: int = placer.redo_stack.size()
 	
 	_undo_btn.text = "UNDO" + (" (" + str(u_count) + ")" if u_count > 0 else "")
 	_undo_btn.disabled = u_count == 0
@@ -284,10 +285,6 @@ func _apply_paint_mode_swap(root: Node) -> void:
 	var paint_env: Node3D = root.get_node_or_null("PaintStationEnvironment")
 	if paint_env:
 		paint_env.visible = true
-	# Tell the panel to take over. The placer strips modules here so
-	# the player can paint bare facets; the panel re-parents them
-	# back on exit.
-	var placer: Node = root.get_node_or_null(".") if root else null
 	if armor_panel and armor_panel.has_method("enter") and root:
 		var hull: Node3D = root.get_node_or_null("Hull")
 		armor_panel.enter(hull, root)
@@ -501,7 +498,7 @@ func _build_toolbar() -> void:
 	var instructions_btn = _toolbar_button(row, "INSTRUCTIONS", "instructions", func():
 		var root = lab.get_node_or_null("/root/MainLab")
 		if root:
-			var placer = root.get_node_or_null("ModulePlacer")
+			var placer = root if root.has_method("show_instructions_dialog") else root.get_node_or_null("ModulePlacer")
 			if placer and placer.has_method("show_instructions_dialog"):
 				placer.show_instructions_dialog(true)
 	)
@@ -662,12 +659,14 @@ func _toolbar_undo() -> void:
 	var root = lab.get_node_or_null("/root/MainLab")
 	if root and root.has_method("undo"):
 		root.undo()
+		update_undo_redo_state()
 
 
 func _toolbar_redo() -> void:
 	var root = lab.get_node_or_null("/root/MainLab")
 	if root and root.has_method("redo"):
 		root.redo()
+		update_undo_redo_state()
 
 var _compare_blueprint_list: Array = []
 

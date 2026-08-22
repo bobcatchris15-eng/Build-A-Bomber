@@ -31,12 +31,11 @@ var cost_label:
 	get: return lab.cost_label
 var dps_label:
 	get: return lab.dps_label
-var _alpha_rows:
-	get: return lab._alpha_rows
 var _rail_vbox:
 	get: return lab._rail_vbox
-var _load_fill_styles:
-	get: return lab._load_fill_styles
+
+var _alpha_rows: Array[Label] = []
+var _load_fill_styles: Dictionary = {}
 
 # --- The Lab's PUBLISHED headline stats: read/write proxies -----------------
 #
@@ -280,8 +279,6 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 	var hp_delta = _format_delta(total_hp, base_stats.get("hull_hp", total_hp))
 	var mpool_delta = _format_delta(module_hp_pool, base_stats.get("module_hp_pool", module_hp_pool))
 	hp_label.text = "Hull HP: %.1f%s (modules +%.1f%s)" % [total_hp, hp_delta, module_hp_pool, mpool_delta]
-	if hp_delta != "" or mpool_delta != "":
-		hp_label.text = hp_label.text.replace("[color", "[color").replace("[/color]", "[/color]") # triggers rich text if needed, wait StatLabel isn't RichTextLabel!
 	hp_label.tooltip_text = "Hull HP is the unit's real health pool in combat.\nModule HP is each mounted part's own pool - parts get shot off (subsystem stripping) without draining hull HP."
 	var cost_diff = _format_delta(total_cost_metal + total_cost_crystal, base_stats.get("cost_metal", total_cost_metal) + base_stats.get("cost_crystal", total_cost_crystal), true, true)
 	cost_label.text = "Cost: %d credits%s" % [ResourceCatalogScript.credits_from_materials(Vector2i(total_cost_metal, total_cost_crystal)), cost_diff]

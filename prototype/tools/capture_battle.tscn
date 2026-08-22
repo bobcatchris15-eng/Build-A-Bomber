@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://capture_battle_x7d"]
-
-[ext_resource type="Script" path="res://tools/capture_battle.gd" id="1_capture"]
-
-[node name="CaptureBattle" type="Node"]
-script = ExtResource("1_capture")

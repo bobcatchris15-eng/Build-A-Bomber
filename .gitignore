@@ -165,3 +165,6 @@ prototype/smoke.*
 # capitalization is the literal on-disk name (case-sensitive on Linux
 # CI), so the pattern has to match it.
 Local_Agent/
+
+# refactor-session scratch
+_refactor_logs/

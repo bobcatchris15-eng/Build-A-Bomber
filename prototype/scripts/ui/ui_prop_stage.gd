@@ -536,7 +536,7 @@ func _sync_camera_to_viewport() -> void:
 	# (well in front of the props) so the camera is not inside any
 	# of them and the camera frustum covers the whole visible plane.
 	_camera.position = Vector3(0, 0, 1000)
-	_camera.look_at(Vector3(0, 0, 0), Vector3.UP)
+	_camera.look_at_from_position(_camera.position, Vector3(0, 0, 0), Vector3.UP)
 
 
 func _build_camera() -> Camera3D:
@@ -671,6 +671,9 @@ func _on_host_exiting(handle: int) -> void:
 	var host: Control = entry["host"]
 	if host != null:
 		_mesh_by_host.erase(host)
+	var mesh: MeshInstance3D = entry.get("mesh")
+	if mesh != null and is_instance_valid(mesh):
+		mesh.queue_free()
 	_handles[handle] = null
 	_free_handles.append(handle)
 	# No request_render() - the viewport is being torn down or the

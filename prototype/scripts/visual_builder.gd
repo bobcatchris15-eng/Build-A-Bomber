@@ -13,6 +13,7 @@ const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const MountReachScript = preload("res://scripts/mount_reach.gd")
 const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
+const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 
 # mesh instance-id -> PartMaterials role, populated by _part() as assets load.
 #
@@ -159,7 +160,6 @@ static func _flat_mat(color: Color) -> StandardMaterial3D:
 # with this prefix, which is what keeps the fasteners reading as bare steel
 # against faction-liveried plate instead of the whole thing turning into one
 # flat shader.
-const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 const HARDWARE_PREFIX := "Hardware_"
 
 # Names of the pivot nodes unit.gd spins. Locomotion animation has always

@@ -82,4 +82,4 @@ func _print_next_char() -> void:
 	_print_timer.start()
 
 func _scroll_to_bottom() -> void:
-	scroll_vertical = get_v_scroll_bar().max_value
+	scroll_vertical = int(get_v_scroll_bar().max_value)

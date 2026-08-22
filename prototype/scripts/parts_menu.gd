@@ -539,14 +539,14 @@ func _populate(groups: Dictionary, order: Array, family: String) -> void:
 	# gets shown, appended after the known ones. Same reasoning as
 	# get_module_role()'s fallback: an unlisted group must be visible, not
 	# silently dropped.
-	var seen := []
+	var seen: Dictionary = {}
 	var ordered := []
 	for g in order:
 		if groups.has(g):
 			ordered.append(g)
-			seen.append(g)
+			seen[g] = true
 	for g in groups.keys():
-		if g not in seen:
+		if not seen.has(g):
 			ordered.append(g)
 
 	for group in ordered:
@@ -586,8 +586,6 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 	var btn = Button.new()
 	btn.set_script(preload("res://scripts/part_button.gd"))
 	btn.module_type_id = type_id
-	btn.mouse_entered.connect(func(): part_hovered.emit(type_id))
-	btn.mouse_exited.connect(func(): part_unhovered.emit())
 	btn.custom_minimum_size = Vector2(CARD_MIN_WIDTH, CARD_HEIGHT)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.focus_mode = Control.FOCUS_NONE
@@ -605,7 +603,7 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 
 	# 1. Top space for the 3D rendered icon (drag out)
 	var icon_rect = ColorRect.new()
-	icon_rect.color = Color(0,0,0, 0.2) # Dim placeholder for 3D render
+	icon_rect.color = Color(0, 0, 0, 0.2) # Dim placeholder for 3D render
 	icon_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(icon_rect)
@@ -655,8 +653,12 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 	focus_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(focus_ring)
 	
-	btn.mouse_entered.connect(func(): focus_ring.visible = true)
-	btn.mouse_exited.connect(func(): focus_ring.visible = false)
+	btn.mouse_entered.connect(func():
+		focus_ring.visible = true
+		part_hovered.emit(type_id))
+	btn.mouse_exited.connect(func():
+		focus_ring.visible = false
+		part_unhovered.emit())
 
 	if data.get("category", "") == "hull":
 		var size = data.get("size", Vector3.ZERO)

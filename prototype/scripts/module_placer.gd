@@ -821,7 +821,6 @@ static func _resize_collider_to_visual(module: Node3D) -> void:
 
 func update_locomotion_geometry_tweak(type_id: String, tweak_key: String, value) -> void:
 	if not hull: return
-	var VisualBuilder = load("res://scripts/visual_builder.gd")
 	var settings: Dictionary = hull.get_meta("locomotion_settings", {}).duplicate() if hull.has_meta("locomotion_settings") else {}
 	settings[tweak_key] = value
 	hull.set_meta("locomotion_settings", settings)
@@ -830,7 +829,7 @@ func update_locomotion_geometry_tweak(type_id: String, tweak_key: String, value)
 			var m_data = child.get_meta("module_data")
 			if m_data and m_data.type_id == type_id:
 				m_data.tweaks[tweak_key] = value
-				VisualBuilder.rebuild_visual(child)
+				VisualBuilderScript.rebuild_visual(child)
 				# _apply_mirror_flip() (called once at initial placement for
 				# the mirrored side) doesn't scale the module itself - it
 				# individually mirrors each of the module's CHILDREN's own
@@ -954,6 +953,16 @@ static func _refit_module_collider(module: Node3D) -> void:
 	(shape.shape as BoxShape3D).size = fit_size
 	body.position = bounds.get_center()
 
+static func _snap_local_to_grid(pos: Vector3, normal: Vector3, interval: float = 0.25) -> Vector3:
+	var snapped := pos
+	if absf(normal.x) < 0.9:
+		snapped.x = roundf(snapped.x / interval) * interval
+	if absf(normal.y) < 0.9:
+		snapped.y = roundf(snapped.y / interval) * interval
+	if absf(normal.z) < 0.9:
+		snapped.z = roundf(snapped.z / interval) * interval
+	return snapped
+
 func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false, tweaks: Dictionary = {}) -> Node3D:
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
@@ -986,8 +995,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		new_weapon.set_meta("facet", ModuleCatalog.classify_facet(early_local_normal))
 		new_weapon.set_meta("sponson", sponson)
 
-	var VisualBuilder = preload("res://scripts/visual_builder.gd")
-	VisualBuilder.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color, tweaks)
+	VisualBuilderScript.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color, tweaks)
 	
 	var static_body = StaticBody3D.new()
 	static_body.collision_layer = 2 # Modules layer
@@ -1092,15 +1100,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	var local_pos = Vector3.ZERO
 	var local_normal = early_local_normal
 	if hull:
-		local_pos = hull.to_local(pos)
-
-		var snap_interval = 0.25
-		if abs(local_normal.x) < 0.9:
-			local_pos.x = round(local_pos.x / snap_interval) * snap_interval
-		if abs(local_normal.y) < 0.9:
-			local_pos.y = round(local_pos.y / snap_interval) * snap_interval
-		if abs(local_normal.z) < 0.9:
-			local_pos.z = round(local_pos.z / snap_interval) * snap_interval
+		local_pos = _snap_local_to_grid(hull.to_local(pos), local_normal, 0.25)
 
 	# Weapon meshes are authored with their own mounting post/base baked in
 	# (bottom of the mesh sits at local Y=0 - see build_visual()'s
@@ -1139,7 +1139,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	if local_normal.y < -0.7:
 		new_weapon.transform.basis = new_weapon.transform.basis * Basis(Vector3.UP, PI)
 		if category == "weapon":
-			VisualBuilder.rebuild_visual(new_weapon)
+			VisualBuilderScript.rebuild_visual(new_weapon)
 			_refit_module_collider(new_weapon)
 
 	# Auto-scale armor to fit facet.
@@ -1243,7 +1243,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 					# is unselectable everywhere else.
 					_refit_module_collider(new_weapon)
 			if type_id == "energy_barrier_projector":
-				VisualBuilder.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color, tweaks)
+				VisualBuilderScript.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color, tweaks)
 
 	elif type_id == "resource_harvester":
 		if hull:
@@ -1268,7 +1268,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 			new_weapon.position = harvester_pos
 			new_weapon.set_meta("facet_size", Vector2(target_x, target_z))
 			new_weapon.set_meta("facet", "front")
-			VisualBuilder.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color, tweaks)
+			VisualBuilderScript.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color, tweaks)
 
 	# The weapon mount metas (mount_style, mount_normal, facet, sponson) are
 	# set at the TOP of this function, not here: build_visual() needs the
@@ -2840,19 +2840,8 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 	var catalog_data = ModuleCatalog.get_module_data(data.type_id)
 	var category = data.category
 
-	# Remembered so drag-end can re-run the same facet/mount classification
-	module.set_meta("_last_drag_normal", normal)
-
-	var local_pos = hull.to_local(world_pos)
 	var local_normal = hull.global_transform.basis.inverse() * normal
-	
-	var snap_interval = 0.25
-	if abs(local_normal.x) < 0.9:
-		local_pos.x = round(local_pos.x / snap_interval) * snap_interval
-	if abs(local_normal.y) < 0.9:
-		local_pos.y = round(local_pos.y / snap_interval) * snap_interval
-	if abs(local_normal.z) < 0.9:
-		local_pos.z = round(local_pos.z / snap_interval) * snap_interval
+	var local_pos = _snap_local_to_grid(hull.to_local(world_pos), local_normal, 0.25)
 
 	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
 	var mount_style = ""
@@ -2903,8 +2892,7 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 		module.transform.basis = module.transform.basis * Basis(Vector3.UP, PI)
 
 	if category == "weapon":
-		var VisualBuilder = preload("res://scripts/visual_builder.gd")
-		VisualBuilder.rebuild_visual(module)
+		VisualBuilderScript.rebuild_visual(module)
 		if module.get_meta("is_mirror", false):
 			_apply_mirror_flip(module)
 		
@@ -2940,8 +2928,7 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 			if local_mirrored_normal.y < -0.7:
 				mirror.transform.basis = mirror.transform.basis * Basis(Vector3.UP, PI)
 			if category == "weapon":
-				var VisualBuilder = preload("res://scripts/visual_builder.gd")
-				VisualBuilder.rebuild_visual(mirror)
+				VisualBuilderScript.rebuild_visual(mirror)
 			_apply_mirror_flip(mirror)
 
 # Non-static wrapper around the static _mount_transform, so drag_drop_manager.gd
@@ -3051,8 +3038,7 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 		module.set_meta("facet_size", Vector2(target_x, target_z))
 		module.set_meta("facet", "front")
 
-		var VisualBuilder = preload("res://scripts/visual_builder.gd")
-		VisualBuilder.rebuild_visual(module)
+		VisualBuilderScript.rebuild_visual(module)
 		_refit_module_collider(module)
 
 	elif category == "weapon":
@@ -3070,8 +3056,7 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 		# _update_module_placement() call during the drag - this just finalizes
 		# the classification and rebuilds the visual for the new facet's mesh
 		# (e.g. tweak deformations, and the blister).
-		var VisualBuilder = preload("res://scripts/visual_builder.gd")
-		VisualBuilder.rebuild_visual(module)
+		VisualBuilderScript.rebuild_visual(module)
 		# AFTER the rebuild, so the collider is fitted to the geometry the
 		# module actually has now - with a blister if it just landed on a wall,
 		# without one if it just left. Otherwise a weapon dragged onto a facet
@@ -3123,20 +3108,16 @@ func _apply_mirror_flip(module: Node3D):
 # --- First-Time Instructions Modal & Persistent Help ---
 var instructions_canvas_layer: CanvasLayer = null
 
-func _setup_instructions_ui() -> void:
-	pass
-
 # On a first visit the player is now OFFERED THE TUTORIAL rather than shown the
-# manual. The manual is not gone - _setup_instructions_ui() still builds its
-# button, and it works better as a reference you reach for than as a wall of text
-# that greets you before you have seen the thing it describes.
+# manual. The manual is not gone - it can be opened from the toolbar, and it
+# works better as a reference you reach for than as a wall of text that greets
+# you before you have seen the thing it describes.
 #
 # TutorialManager owns the "have they been offered this" flag, so there is one
 # first-run gate rather than two that can disagree. It no-ops when a run is
 # already active, which is the case when the player arrived here by pressing
 # TUTORIAL on the main menu.
 func _check_first_time_instructions() -> void:
-	_setup_instructions_ui()
 	var tutorial = get_node_or_null("/root/TutorialManager")
 	if tutorial == null:
 		return

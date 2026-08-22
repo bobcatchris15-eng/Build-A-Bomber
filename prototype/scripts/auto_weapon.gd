@@ -867,24 +867,6 @@ func _ready():
 	# despite reading like a presentation nicety.
 	time_since_last_shot = SimRNG.randf_range(0.0, fire_rate)
 
-# Crimson Concordat's passive: desperation damage that ramps up as this
-# weapon's own vehicle approaches death (linear 0 at full HP -> bonus_max at
-# 0 HP) - recomputed every tick since HP changes constantly, unlike every
-# other faction dps/range bonus which is a fixed value set once in _ready().
-func _recalculate_low_hp_dps_bonus():
-	dps = base_dps
-	var vehicle = get_vehicle_root()
-	if not vehicle or not ("hp" in vehicle) or not ("max_hp" in vehicle) or vehicle.max_hp <= 0.0:
-		return
-	var mount_faction = get_parent().get_meta("faction", "industrialists") if get_parent() and get_parent().has_meta("faction") else "industrialists"
-	# Crimson Concordat's desperation curve (more DPS the closer to death) was
-	# a faction passive; those are gone (see livery.gd), so this is always 0.
-	var bonus_max = 0.0
-	if bonus_max <= 0.0:
-		return
-	var hp_ratio = clamp(vehicle.hp / vehicle.max_hp, 0.0, 1.0)
-	dps = base_dps * (1.0 + bonus_max * (1.0 - hp_ratio))
-
 # RTS_CORE_ROADMAP.md D4: a defense building's weapons are inert for its
 # whole build_incomplete grace period (real construction time, not just a
 # cosmetic scale-up) - walks up to whichever ancestor actually carries the
@@ -960,7 +942,6 @@ func _tick_weapon(delta):
 
 	time_since_last_shot += delta
 	_los_cache_timer -= delta
-	_recalculate_low_hp_dps_bonus()
 	_find_nearest_target(delta)
 	_update_flame_jet()
 
@@ -1660,20 +1641,23 @@ const WeaponMissileScene = preload("res://scripts/weapon_missile.gd")
 func _munition_speed(seconds_to_max_range: float) -> float:
 	return maxf(fire_range / maxf(seconds_to_max_range, 0.05), 1.0)
 
+# Spawns a physical guided missile munition.
+func _spawn_missile(tgt: Node, dmg: float, seconds_to_max: float, is_top: bool = false, y_offset: float = 0.5) -> void:
+	if not is_instance_valid(tgt):
+		return
+	var missile = Node3D.new()
+	missile.set_script(WeaponMissileScene)
+	missile.position = global_position + Vector3(0, y_offset, 0)
+	missile.is_top_attack = is_top
+	missile.speed = _munition_speed(seconds_to_max)
+	missile.setup(tgt, self, dmg, damage_class, get_team())
+	_effects_parent().add_child(missile)
+
 # Real, interceptable missile (FABLE_REVIEW.md 2.2/2.2) instead of a cosmetic
 # tween - see weapon_missile.gd. is_top_attack/target/damage must be set
 # before add_child() since _ready() reads them immediately.
 func _fire_missile_projectile(is_top_attack: bool):
-	if not is_instance_valid(target): return
-	var missile = Node3D.new()
-	missile.set_script(WeaponMissileScene)
-	missile.position = global_position + Vector3(0, 0.5, 0)
-	missile.is_top_attack = is_top_attack
-	# Was weapon_missile.gd's bare default of 16 u/s - explicit now so it
-	# tracks fire_range like every other munition. guided_missile: 35 / 16.
-	missile.speed = _munition_speed(2.19)
-	missile.setup(target, self, dps * fire_rate, damage_class, get_team())
-	_effects_parent().add_child(missile)
+	_spawn_missile(target, dps * fire_rate, 2.19, is_top_attack, 0.5)
 
 func _fire_swarm_missiles():
 	var count = 4
@@ -1838,16 +1822,8 @@ func _fire_hypervelocity_missile():
 # checked here as well as in target selection so it can never be tricked into
 # spending a round on a ground target by an unusual acquisition path.
 func _fire_sam_launcher():
-	if not is_instance_valid(target):
-		return
-	if not _target_is_airborne(target):
-		return
-	var m = Node3D.new()
-	m.set_script(WeaponMissileScene)
-	m.position = global_position + Vector3(0, 0.5, 0)
-	m.speed = _munition_speed(1.15) # sam_launcher: 30 / 26
-	m.setup(target, self, dps * fire_rate, damage_class, get_team())
-	_effects_parent().add_child(m)
+	if is_instance_valid(target) and _target_is_airborne(target):
+		_spawn_missile(target, dps * fire_rate, 1.15, false, 0.5) # sam_launcher: 30 / 26
 
 # Loitering munition: climbs, holds, then dives. Modelled as a top-attack
 # missile with a deliberate delay before it starts tracking - the loiter is
@@ -1859,15 +1835,8 @@ func _fire_loitering_munition():
 	var loiter_delay = clampf(0.9 * endurance, 0.3, 2.5)
 	var locked = target
 	get_tree().create_timer(loiter_delay).timeout.connect(func():
-		if not is_instance_valid(self) or not is_instance_valid(locked):
-			return
-		var m = Node3D.new()
-		m.set_script(WeaponMissileScene)
-		m.position = global_position + Vector3(0, 0.6, 0)
-		m.is_top_attack = true
-		m.speed = _munition_speed(2.71) # loitering_munition: 38 / 14
-		m.setup(locked, self, dps * fire_rate, damage_class, get_team())
-		_effects_parent().add_child(m)
+		if is_instance_valid(self) and is_instance_valid(locked):
+			_spawn_missile(locked, dps * fire_rate, 2.71, true, 0.6) # loitering_munition: 38 / 14
 	)
 
 # Anti-radiation: only engages units that actually carry a sensor module.
@@ -1875,14 +1844,8 @@ func _fire_loitering_munition():
 # whose usefulness is decided by what the OPPONENT chose to build - a
 # genuinely different axis from everything else in the roster.
 func _fire_anti_radiation_missile():
-	if not is_instance_valid(target) or not _target_carries_sensors(target):
-		return
-	var m = Node3D.new()
-	m.set_script(WeaponMissileScene)
-	m.position = global_position + Vector3(0, 0.5, 0)
-	m.speed = _munition_speed(1.55) # anti_radiation_missile: 34 / 22
-	m.setup(target, self, dps * fire_rate, damage_class, get_team())
-	_effects_parent().add_child(m)
+	if is_instance_valid(target) and _target_carries_sensors(target):
+		_spawn_missile(target, dps * fire_rate, 1.55, false, 0.5) # anti_radiation_missile: 34 / 22
 
 # Bunker buster: top-attack, and heavily biased toward structures. Against
 # anything that moves it is clumsy and slow; against a building it is the
@@ -1892,28 +1855,13 @@ const BUNKER_BUSTER_STRUCTURE_BONUS: float = 2.1
 func _fire_bunker_buster():
 	if not is_instance_valid(target):
 		return
-	var dmg = dps * fire_rate
-	if target.is_in_group("buildings"):
-		dmg *= BUNKER_BUSTER_STRUCTURE_BONUS
-	var m = Node3D.new()
-	m.set_script(WeaponMissileScene)
-	m.position = global_position + Vector3(0, 0.5, 0)
-	m.is_top_attack = true
-	m.speed = _munition_speed(1.60) # bunker_buster: 24 / 15
-	m.setup(target, self, dmg, damage_class, get_team())
-	_effects_parent().add_child(m)
+	var dmg = dps * fire_rate * (BUNKER_BUSTER_STRUCTURE_BONUS if target.is_in_group("buildings") else 1.0)
+	_spawn_missile(target, dmg, 1.60, true, 0.5) # bunker_buster: 24 / 15
 
 # Cruise missile: the one point defence exists to eat. Big, slow, and it
 # announces itself the whole way in.
 func _fire_cruise_missile():
-	if not is_instance_valid(target):
-		return
-	var m = Node3D.new()
-	m.set_script(WeaponMissileScene)
-	m.position = global_position + Vector3(0, 0.6, 0)
-	m.speed = _munition_speed(4.67) # cruise_missile: 42 / 9
-	m.setup(target, self, dps * fire_rate, damage_class, get_team())
-	_effects_parent().add_child(m)
+	_spawn_missile(target, dps * fire_rate, 4.67, false, 0.6) # cruise_missile: 42 / 9
 
 # --- Shared predicates ------------------------------------------------------
 
@@ -2178,8 +2126,6 @@ func _fire_sensor_beacon_toward(fog_point: Vector3):
 	)
 
 func _fire_sensor_beacon_launcher():
-	var parent = _effects_parent()
-	if parent == null: return
 	var aim = target.global_position if is_instance_valid(target) else \
 		global_position - global_transform.basis.z.normalized() * fire_range
 	# One line per beacon, with the unit name and aim point. Pairs with
@@ -2188,27 +2134,7 @@ func _fire_sensor_beacon_launcher():
 	# are the kind of thing a stutter report needs to see.
 	var _carrier_name := String(get_parent().name) if get_parent() != null else "?"
 	BattleLogger.beacon_fired(_carrier_name, aim)
-	var beacon = MeshInstance3D.new()
-	beacon.mesh = MunitionPool.unit_sphere()
-	beacon.material_override = MunitionPool.emissive(laser_color, laser_color, 1.2)
-	beacon.scale = Vector3.ONE * 0.18
-	parent.add_child(beacon)
-	var start = global_position
-	var tween = create_tween()
-	tween.tween_method(func(v: float):
-		if not is_instance_valid(beacon): return
-		var pos = start.lerp(aim, v)
-		pos.y += sin(v * PI) * 5.0
-		beacon.global_position = pos
-	, 0.0, 1.0, 0.9)
-	var team = get_team()
-	tween.finished.connect(func():
-		if is_instance_valid(beacon):
-			beacon.queue_free()
-		var sk = get_tree().current_scene
-		if sk and sk.has_method("reveal_area"):
-			sk.reveal_area(team, aim, BEACON_REVEAL_RADIUS, BEACON_REVEAL_DURATION)
-	)
+	_fire_sensor_beacon_toward(aim)
 
 # Decoy: deploys a false contact that draws fire. Registers in the same
 # groups an enemy scans for, so no AI change is needed - the AI shoots it

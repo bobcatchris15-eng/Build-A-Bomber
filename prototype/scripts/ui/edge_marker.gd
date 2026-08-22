@@ -16,7 +16,7 @@ func setup(director: Node) -> void:
 	_director = director
 	_camera = _director.camera
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:

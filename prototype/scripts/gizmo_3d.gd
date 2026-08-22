@@ -10,16 +10,12 @@ const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 
 var target_module: Node3D
-var start_scale: Vector3
-var start_tweaks: Dictionary = {}
 
 # Palette compliance: both the rotate ring and the drag readout use the
 # design system's hazard/primary-text tokens rather than bespoke literals.
 const HANDLE_COLORS := {
 	"HandleRotate": Tokens.SIGNAL_HAZARD,
 }
-
-var _rotate_mode := false
 
 
 func _paint_handles():
@@ -64,7 +60,6 @@ func _ready():
 # inlined at the one call site) since callers still ask for rotate mode by
 # name.
 func set_rotate_mode(enabled: bool) -> void:
-	_rotate_mode = enabled
 	var ring = get_node_or_null("HandleRotate")
 	if ring:
 		ring.visible = enabled
@@ -126,15 +121,6 @@ func _on_drag_started():
 	var root = get_node_or_null("/root/MainLab")
 	if root and root.has_method("push_undo_snapshot"):
 		root.push_undo_snapshot()
-	if target_module:
-		start_scale = target_module.scale
-		start_tweaks = {}
-		if target_module.has_meta("tweaks"):
-			start_tweaks = target_module.get_meta("tweaks").duplicate(true)
-		elif target_module.has_meta("module_data"):
-			var data = target_module.get_meta("module_data")
-			if data.has("tweaks"):
-				start_tweaks = data["tweaks"].duplicate(true)
 
 
 func _on_drag_ended():

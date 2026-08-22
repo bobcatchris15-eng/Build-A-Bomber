@@ -49,10 +49,11 @@ func _build() -> void:
 func _on_tree_entered() -> void:
 	var settings = _get_settings()
 	if settings != null and settings.has_signal("settings_changed"):
-		settings.settings_changed.connect(_on_settings_changed)
+		if not settings.settings_changed.is_connected(_on_settings_changed):
+			settings.settings_changed.connect(_on_settings_changed)
 
 func _on_settings_changed(key: String, _value) -> void:
-	if key == "colourblind_mode":
+	if key == "colourblind_mode" or key == "reduced_motion":
 		_apply_phosphor_shader()
 
 func _apply_phosphor_shader() -> void:
@@ -71,6 +72,10 @@ func _apply_phosphor_shader() -> void:
 	_shader_material.set_shader_parameter("enable_vignette", show_vignette)
 	_shader_material.set_shader_parameter("enable_radar_sweep", false)
 	_shader_material.set_shader_parameter("show_range_rings", false)
+	var reduced := false
+	if settings != null and settings.has_method("get_value"):
+		reduced = bool(settings.get_value("reduced_motion"))
+	_shader_material.set_shader_parameter("flicker_amount", 0.0 if reduced else 0.012)
 	material = _shader_material
 
 func _get_settings():
@@ -79,10 +84,14 @@ func _get_settings():
 	var tree := get_tree()
 	if tree == null:
 		return null
+	var root := tree.root
+	if root != null and root.has_node("SettingsService"):
+		return root.get_node("SettingsService")
 	return tree.get_first_node_in_group("settings_service")
 
 func _bind_panel_size() -> void:
-	resized.connect(_on_resized)
+	if not resized.is_connected(_on_resized):
+		resized.connect(_on_resized)
 	_on_resized()
 
 func _on_resized() -> void:
