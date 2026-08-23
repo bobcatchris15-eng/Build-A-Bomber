@@ -16,62 +16,57 @@ cd prototype
 ./Godot_v4.7.1-stable_win64.exe -e       # open in the editor
 ```
 
-The main menu links the full game loop:
-1. **Design Lab** — Build blueprints on a 3D canvas. Drag parts from the left bin onto a hull, drag gizmo handles to stretch barrels/calibers (stats update live), pick armor material + thickness, toggle bilateral symmetry (M), rotate modules (R), and save to your Blueprint Library.
-2. **Skirmish** — C&C-style battle. Harvest metal/crystal with harvesters, build Refineries/Factories, produce saved designs from the bottom build bar, place custom defense blueprints, destroy the enemy HQ.
-3. **Test Range** — Drive your latest saved design against target dummies (some shoot back).
+The main menu (DEPLOY / DESIGN sections) links the full game loop:
 
-## Tests
+**DEPLOY**
+1. **SKIRMISH** — C&C-style battle (`MatchSetup.tscn` → `Battle.tscn`). Harvest metal/crystal with harvesters, build Refineries/Manufactories/Power Plants/labs, produce saved designs from the build bar, place custom defense blueprints, destroy the enemy HQ.
+2. **OPERATIONS** — a campaign of 3–12 engagements with roster re-drafts between them (`OperationsSetup.tscn` → `Battle.tscn`).
+3. **PROVING GROUND** — drive your latest scratch design against target dummies on `Battle.tscn` behind a chase camera (`test_range_launcher.gd`).
 
-**Always use the wrapper scripts** — the `.godot` import cache is gitignored and goes stale whenever a new autoload or `class_name` script lands, which breaks a direct `--headless --script run_tests.gd` run with a misleading `Identifier "X" not declared` error.
+**DESIGN**
 
-```bash
-cd prototype
-./run_tests.ps1   # Windows (PowerShell)
-./run_tests.sh    # Linux/macOS/Git Bash
-```
+4. **DESIGN LAB** — Build blueprints on a 3D canvas. Drag parts from the bin onto a hull, drag gizmo handles to stretch barrels/calibers (stats update live), pick armor paint + thickness, toggle bilateral symmetry (M), rotate modules (R), and save to your Blueprint Library.
+5. **BLUEPRINT LIBRARY** — browse, manage, preview saved designs; its "Test in Arena" button routes through the same Proving Ground launcher.
+6. **HULL AUTHORING** — shape new hull forms from primitives (SDF / marching-cubes bake).
 
-The wrapper reimports assets (regenerates the import cache) then runs the full headless test suite. The suite runs every registered test regardless of earlier failures and prints a full list of failing suite names at the end.
+Plus a guided TUTORIAL card, and LIVERY (cosmetic paint authoring) / RECORDS / SYSTEM along the bottom.
 
-### Test Architecture
+## Checks
 
-- `run_tests.gd` is only the driver — it owns the retry quarantine, the ordered manifest (`SUITE_ORDER`), the pass/fail tally, and the exit code.
-- The test suites live in `prototype/tests/` (split from the original 16,000-line monolith), grouped by area, all extending `tests/suite_base.gd`.
-- `SUITE_ORDER` is explicit because several navmesh/Recast suites flake depending on what ran before them — the order is deliberately pinned rather than derived.
-- To add a suite: write the function in an area file **and** add it to `SUITE_ORDER` in `run_tests.gd`.
+**There is no automated test suite.** The headless suite (`tests/`, `run_tests.{ps1,sh,gd}`, golden fixtures in `suite_base.gd`) was deleted on 2026-08-10 during the battle-system unification ("drop tests" commits; see PROGRESS.md). Do not reference it or try to revive it without asking. Verification today is:
 
-### Test File Layout
+1. **Parse check after edits.** Targeted first (edit the `FILES` list at the top to your touched scripts):
 
-| File | Suites | Covers |
-|---|---|---|
-| `test_terrain_and_maps.gd` | 38 | terrain build, navmesh, pathing, map JSON, spawn fairness |
-| `test_economy_and_production.gd` | 34 | resources, harvesting, queues, manufactories, energy, repair |
-| `test_weapons_and_damage.gd` | 35 | damage model, armor facets, arcs, ammo, missiles, LOS, sponson mounts |
-| `test_designer_lab.gd` | 21 | clipping, gizmos, tweaks, symmetry, blueprints, mounting |
-| `test_sim_and_stats.gd` | 18 | stat math, traits, combat sim, evasion, audio, parse checks |
-| `test_locomotion.gd` | 18 | all locomotion types, layout fixtures, drivetrain, animation |
-| `test_ai_and_win.gd` | 13 | enemy AI, waves, fog of war, team targeting, win condition |
-| `test_ui_and_camera.gd` | 13 | theme, icons, overflow, dock/flyout, RTS camera, control groups, in-match material split |
-| `test_base_building.gd` | 12 | placement legality, footprints, buildable area, ghost refunds |
-| `test_hull_and_armor.gd` | 9 | hull greebles, decals, foundations, factions, materials |
+   ```bash
+   cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script res://tools/compile_check_changed.gd --quit
+   ```
 
-### Quick Parse Check
+   Full-tree check when something structural changed (autoloads, `class_name`s):
 
-After any bulk edit, verify every script still parses:
+   ```bash
+   cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script res://tools/compile_check_all.gd
+   ```
 
-```bash
-cd prototype
-./Godot_v4.7.1-stable_win64_console.exe --headless --script tools/compile_check_all.gd
-```
+   This one is **slow** (loads 200+ interdependent scripts with `CACHE_MODE_IGNORE`, observed 20+ min). Godot block-buffers stdout when piped, so expect no output until it exits — always pass `--quit`/`--path`.
+
+2. **Headless probe scripts.** `tools/probe_*.gd` are one-off SceneTree scripts that boot a slice of the game (navmesh, economy, AI, placement…) and print findings — this is the de-facto regression harness now. Run pattern:
+
+   ```bash
+   cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script res://tools/probe_<area>.gd --quit
+   ```
+
+3. **Manual playtest** for anything visual/interactive.
+
+Note: the `.godot` import cache is gitignored and goes stale whenever a new autoload or `class_name` script lands — if a headless script dies with a misleading `Identifier "X" not declared`, reimport first (`--headless --editor --import`).
 
 ## High-Level Architecture
 
 ### Core Systems
 
-**Blueprint System** (`blueprint_manager.gd`, `module_catalog.gd`, `module_data.gd`)
-- Blueprints are JSON saved to `user://blueprints/` with versioning (current: 2.0).
+**Blueprint System** (`blueprint_manager.gd`, `module_catalog.gd`, `hull_loader.gd`)
+- Blueprints are JSON saved to `user://blueprints/` with versioning (current: 3.0).
 - `blueprint_manager.gd` handles serialize/deserialize, reconstruction into live vehicles, and the scratch vs. saved design split (scratch for test-range trips, saved only on explicit user Save).
-- `module_catalog.gd` defines all hull types, weapon modules, locomotion types, armor materials, and their stats.
+- `module_catalog.gd` defines weapon modules, locomotion types, armor materials, and their stats; **hull entries are data-driven** — `hull_loader.gd` scans `.glb`+`.json` sidecar pairs from `assets/models/hulls/` (plus player mods under `user://mods/hulls/`) once and merges them into the catalog shape.
 
 **Combat & Damage Model** (`damage_resolver.gd`, `battle/units/unit.gd`, `auto_weapon.gd`)
 - **Damage classes**: kinetic, thermal, explosive, energy.
@@ -84,20 +79,21 @@ cd prototype
 - Generic team-aware combat unit built from blueprint via `BlueprintManager.reconstruct_vehicle()`.
 - Handles armor/damage, subsystem stripping, movement orders, flying/naval/screw-drive locomotion, harvester economy loop.
 - Fog-of-war: vision range from hull base + sensor modules; `fog_hidden` gates rendering and targetability.
-- Navigation: uses `NavigationAgent3D` when a real Skirmish match controller exists; falls back to direct-line steering in tests.
+- Navigation: `NavigationAgent3D` under a real match controller; falls back to direct-line steering otherwise. Movement math lives in `battle/movement/` (`steering.gd`, `flow_field_service.gd`).
 
 **Design Lab** (`lab_document.gd`, `telemetry_rail.gd`, `lab_toolbar.gd`, `parts_menu.gd`, `gizmo_3d.gd`, `module_placer.gd`, `visual_builder.gd`)
 - There is no `main_lab.gd` and no `stat_calculator.gd`. `scenes/MainLab.tscn` is only the 3D world plus two UI sub-scenes: `UI_StatBlock.tscn` (script `telemetry_rail.gd` — the right-hand stat/tweak rail, backed by `lab_document.gd`'s `LabDocument` model and `lab_toolbar.gd`'s toolbar) and `UI_PartsMenu.tscn` (script `parts_menu.gd` — the parts bin).
 - 3D canvas for building blueprints. Drag parts from parts menu onto hull facets.
 - Gizmo handles for stretching barrels/calibers (live stat updates), bilateral symmetry (M), free rotation (R).
 - Clipping detection prevents overlapping modules.
-- `module_placer.gd` computes locomotion station positions (10 types × 3 hull sizes) — golden fixture in `suite_base.gd` must match exactly.
+- `module_placer.gd` computes locomotion station positions (10 types × 3 hull sizes) as pure functions of hull size — keep them stable; the old golden fixture went with the test suite.
 
-**Skirmish Match Controller** (`skirmish.gd`, `match_config.gd`, `match_setup.gd`)
-- RTS economy: metal/crystal harvested by harvester units, delivered to Refineries.
-- Production queues at Factories/Manufactories (tiered, parallel queues with 0.75× bonus for second same-tier factory).
-- Energy system: base from hull + generator modules; regenerates; spent by energy weapons; can be drained.
-- Enemy AI: wave-based, counter-picks player composition, places defenses when HQ threatened.
+**Match Controller** (`battle/match_director.gd`, `match_config.gd`, `match_rule_set.gd`, `match_setup.gd`)
+- Every mode boots `Battle.tscn` through a **`MatchRuleSet`** written by its setup screen (`match_setup.gd` / `operations_draft.gd` / `operations_setup.gd` / `test_range_launcher.gd`). `match_director.gd` reads only the rule set; `MatchConfig` (autoload) carries just `rule_set` + a display-only `selected_map_id`.
+- RTS economy: metal/crystal harvested by harvester units, delivered to Refineries (`battle/economy/` services).
+- Production queues at the three Manufactory tiers (light/medium/heavy); extra same-tier manufactories speed their queue (100/75/60/50% per contributor).
+- Energy system: base from hull + generator modules; regenerates; spent by energy weapons; can be drained (`power_budget.gd`, `boost_controller.gd`).
+- Enemy AI: wave-based (`battle/ai/`), counter-picks player composition, places defenses when HQ threatened.
 
 **Terrain & Navigation** (`terrain_builder.gd`, `map_catalog.gd`)
 - Maps are JSON (migrated from hardcoded constants). Heightmap-based terrain with 7 surface types.
@@ -131,6 +127,7 @@ cd prototype
 | `hud_root.gd` | Layout, the single refresh clock, hotkeys, camera focus. A new region goes in `_build_layout()` or it does not exist. |
 | `battle/hud/admin_menu.gd` | Session menu (pause / abandon / quit). Kept in `battle/hud/` because its lifetime is the match, but restyled to `hud_style.gd` and parented into the HUD column. |
 | `hud_style.gd` | Palette, metrics, type, and the panel/label/button/bar factories. |
+| `hud_skin.gd` | Optional texture/noise overlays over the flat panels (CIC instrument feel). Phase 1: returns nulls — pure flat fills are the default. |
 | `hud_icons.gd` | SVG icon loading and tinting. |
 | `hud_minimap.gd` | Tactical map: terrain bake, three-state fog, blips, frustum, click-to-jump, right-click orders. |
 | `hud_production_deck.gd` | The five queues as five tabs, queue strip, build palette, tech gating. |
@@ -153,26 +150,19 @@ Three things about it are load-bearing and were each a bug in the version it rep
   uploaded a texture every tick whether anything had moved or not.
 - **The HUD drives itself.** `hud_root._process()` is the only clock — map at 20 Hz,
   panels at 5 Hz. `match_director` no longer refreshes it from the vision tick, and
-  `battle_hud.refresh()` is a deliberate no-op kept for the old call contract.
+  `HUDRoot.refresh()` is a deliberate no-op kept for the old call contract.
 - **Everything lives in `HUDRoot.column`**, which is the viewport width capped at
   `COLUMN_MAX_WIDTH` (1920) and centred. At 1920 wide it is the whole screen; wider
   than that and the surplus becomes a symmetric gutter of battlefield rather than a
   stretched HUD. `layout_for(size)` is the single entry point — `fit_to_viewport()`
-  calls it with the viewport size, and the tests call it directly to assert the
-  layout at 1280x720 through 3440x1440 without resizing a window. Anything else that
-  needs to sit in the same column (the session menu, the debug overlay) goes in via
-  `attach_to_column()`, never onto the raw `CanvasLayer`.
+  calls it with the viewport size. Anything else that needs to sit in the same
+  column (the session menu, the debug overlay) goes in via `attach_to_column()`,
+  never onto the raw `CanvasLayer`.
 
-To look at it, use the capture harness (needs a real window, not `--headless`):
-
-```bash
-cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --path . res://tools/capture_hud.tscn
-```
-
-It selects units, queues jobs, prints a per-region rect report plus an overlap check
-and a fog-band histogram, and writes `visual_regression/captures/hud_full.png` and
-`hud_structures_tab.png`. `tools/capture_battle.gd` renders the world **without** the
-HUD layer — use this one for interface work.
+The automated HUD capture harness (`tools/capture_hud.tscn`, `tools/capture_battle.gd`,
+`visual_regression/`) went with the test suite. For interface work, run the game with
+a real window and eyeball it; `battle/hud/debug_overlay.gd`, `perf_hud.gd` and
+`battle/perf_toast.gd` are there for runtime inspection.
 
 **Out-of-match UI** (`ui_shell.gd`, `ui_dock.gd`, `ui_flyout.gd`, `ui_theme.gd`, `ui_tokens.gd`, `bomber_theme.tres`)
 - Menus, Design Lab, blueprint library. Animated cards, dock/flyout panels, control groups (assign/recall/double-tap recenter).
@@ -182,15 +172,17 @@ HUD layer — use this one for interface work.
 
 | File | Purpose |
 |---|---|
-| `scripts/module_catalog.gd` | All hull types, modules, locomotion, armor materials, weapon archetypes |
+| `scripts/module_catalog.gd` | Weapon modules, locomotion, armor materials, weapon archetypes (hulls merged in from `hull_loader.gd`) |
 | `scripts/damage_resolver.gd` | ARMOR_TABLE, damage math (threshold, chip, brute-force, module strip) |
 | `scripts/lab_document.gd` | LabDocument: live stat computation from blueprint (weight, speed, range, DPS, etc.) plus TWEAK_SPECS |
 | `scripts/telemetry_rail.gd` | The right-hand telemetry rail UI (readouts, cards, verdict) |
 | `scripts/lab_toolbar.gd` | The Design Lab top toolbar |
 | `scripts/drivetrain.gd` | Drivetrain analysis: weight capacity, overload penalty, top speed |
-| `scripts/faction_catalog.gd` | Faction passives (Industrialists: −20% armor weight, Technocrats: +5% speed, etc.) |
-| `data/loadout/` | Default player blueprints (JSON) |
+| `scripts/faction_catalog.gd` | Ten-faction visual identities; mechanical passives retired with Livery — only `armor_weight_mult` is still read (`armor_paint.gd`) |
+| `assets/blueprints/default_roster/` | Built-in default roster blueprints (JSON), loaded by `blueprint_manager.gd` |
+| `data/loadout/` | Default player designs — build palette, Proving Ground dummies, tutorial units |
 | `data/enemy/` | Enemy AI rosters (JSON) |
+| `data/maps/` | Map definitions + baked terrain textures, discovered by `map_catalog.gd` |
 
 ## Development Commands
 
@@ -201,11 +193,8 @@ cd prototype && ./Godot_v4.7.1-stable_win64.exe
 # Open editor
 cd prototype && ./Godot_v4.7.1-stable_win64.exe -e
 
-# Full test suite (reimports first)
-cd prototype && ./run_tests.sh
-
-# Parse check all scripts
-cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --script tools/compile_check_all.gd
+# Parse check all scripts (slow - see Checks)
+cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script res://tools/compile_check_all.gd
 
 # Regenerate ALL audio (SFX, vocalisations, comms, ambience; music is copied
 # from Tracks/, not synthesised - see below)
@@ -219,8 +208,8 @@ cd prototype && python tools/generate_audio.py --music-only --procedural-music
 # Then reimport so Godot writes the .import sidecars:
 cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --editor --import
 
-# Regenerate procedural meshes (Blender)
-cd prototype && ./UPBGE-0.30-windows-x86_64/blender.exe --background --python tools/blender/build_meshes.py
+# Regenerate parts/foundations/buildings meshes (Blender)
+cd prototype && "/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --python tools/blender/build_meshes.py
 # Then reimport in Godot:
 cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --editor --import
 ```
@@ -232,7 +221,7 @@ separate scripts, and the split matters:**
 
 | Script | Owns | Outputs |
 |---|---|---|
-| `tools/blender/build_vehicle_hulls.py` (+ `hull_forge.py`) | The 81 **vehicle hulls** — 8 manufacturers × 6 classes | `assets/models/hulls/*.glb` + matching `.json` sidecars (non-foundation) |
+| `tools/blender/build_vehicle_hulls.py` (+ `hull_forge.py`) | The vehicle hull roster — 114 hulls across 11 manufacturers | `assets/models/hulls/*.glb` + matching `.json` sidecars (non-foundation) |
 | `tools/blender/build_meshes.py` | Parts, foundations, buildings, terrain props | `assets/models/parts/*.glb`, the 13 `is_foundation: true` hulls, buildings |
 
 `build_meshes.py`'s `generate_hulls()` is **retired and raises if called**. It
@@ -258,8 +247,8 @@ Every hull ships a third file next to its mesh and sidecar:
 welded shell, mounted by `unit_assembly._add_hull_collider()` as one
 `CollisionShape3D` per piece. Without it a unit falls back to a single convex
 fit, which fills deck wells, the gap under a tapered keel and the space between
-sponsons. 34 of the 94 hulls split into 2–5 pieces; the other 60 are genuinely
-convex and get one, i.e. no change.
+sponsons. A minority of the roster splits into 2–5 pieces; most hulls are
+genuinely convex and get one, i.e. no change.
 
 ```bash
 # Re-derive collision for the whole roster WITHOUT touching hull geometry
@@ -271,7 +260,7 @@ Three things about this are non-obvious and were each found the hard way:
 - **`--collision-only` exists so adding collision data never rewrites a hull
   mesh.** A full bake regenerates every `<id>.res` — a large binary diff, and it
   re-runs marching cubes on geometry that already shipped. It also enumerates a
-  *different set*: the shipped roster is 94 Blender-authored `.glb` hulls with
+  *different set*: the shipped roster is 127 Blender-authored `.glb` hulls with
   no assembly sources at all, so collision-only lists the OUT_DIR sidecars and
   resolves each mesh through `MeshAssetLoader.get_hull_mesh()` — the same
   precedence chain the game uses, which is what guarantees the shell matches
@@ -359,18 +348,17 @@ interface, ambience — to be played straight. Ordnance banks come from
 
 ## Important Notes
 
-- **Godot version**: 4.7.1 (bundled executables in `prototype/`, gitignored). The README mentions 4.3. A 4.3 pair may still be present from before the upgrade — **do not use it**: the project is authored for 4.4+ (126 `.uid` sidecars, `bomber_theme.tres` at `format=4`), and opening it in 4.3 downgrades `config/features` and can strip UIDs.
-- **`compile_check_all.gd` is not a "quick" check** at this codebase's size. It loads 200+ interdependent scripts with `CACHE_MODE_IGNORE`, and has been observed running 20+ minutes without completing. Prefer `run_tests.ps1`. Also note Godot block-buffers stdout when piped, so a direct `--script` run shows no output until it exits — and needs `--quit`/`--path`, which the wrapper supplies.
+- **Godot version**: 4.7.1 (bundled executables in `prototype/`, gitignored; copies also sit at the repo root). **Do not open the project in Godot ≤4.3**: it is authored for 4.4+ (`.uid` sidecars, `bomber_theme.tres` at `format=4`, `config/features = ("4.7", ...)`), and an older editor downgrades features and can strip UIDs.
+- **`compile_check_all.gd` is not a "quick" check** at this codebase's size. It loads 200+ interdependent scripts with `CACHE_MODE_IGNORE`, and has been observed running 20+ minutes without completing. Prefer the targeted `compile_check_changed.gd` for routine edits, and probe scripts for behavior (see Checks).
 
 ### Art direction docs
 
 | Document | Owns |
 |---|---|
-| `CORE_DESIGN_LANGUAGE.md` | Whole-game identity: philosophy, camera optics, environment, unit finish, motion, FX/audio split. Start here. |
-| `VISUAL_ART_DIRECTION.md` | Faction material/shader parameters, the ten factions, per-terrain-type texture direction, weapon-module modelling rules. |
+| `docs/design/CORE_DESIGN_LANGUAGE.md` | Whole-game identity: philosophy, camera optics, environment, unit finish, motion, FX/audio split. Start here. |
+| `docs/design/VISUAL_ART_DIRECTION.md` | Faction material/shader parameters, the ten factions, per-terrain-type texture direction, weapon-module modelling rules. |
 | `prototype/docs/UI_STYLE_GUIDE.md` | Interface chrome only — tokens, type scale, materials, elevation, motion. |
-- **Test order matters**: `SUITE_ORDER` in `run_tests.gd` is pinned due to navmesh flakiness. Do not reorder.
-- **Golden fixtures**: `suite_base.gd` contains frozen locomotion layout data. Any intentional placement change must update the fixture in its own commit with explanation.
-- **No emoji/dingbats in UI text** — a standing rule, but note it is **not** currently enforced by anything. `ui_audit.gd` only checks panel overflow, offscreen controls, theme-resource validity, icon assets and cursor assets. Box-drawing and arrows are allowed (technical notation).
-- **Blueprint version**: Only bumped when JSON schema changes could silently mis-load older saves (currently 2.0 after SDF/Marching-Cubes hull rebuild).
+
+- **No emoji/dingbats in UI text** — a standing rule, but note it is **not** currently enforced by anything. `ui_audit.gd` checks theme-resource validity, icon/cursor assets, input-binding collisions, material luminance and layer discipline. Box-drawing and arrows are allowed (technical notation).
+- **Blueprint version**: Only bumped when JSON schema changes could silently mis-load older saves (currently 3.0).
 - **Scratch vs Saved designs**: "Test in Arena" writes a scratch file (`user://lab_scratch.json`), never a roster entry. Only explicit Save creates `user://blueprints/<id>.json`.

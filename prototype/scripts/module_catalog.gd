@@ -1307,6 +1307,60 @@ static func _build_catalog_literal() -> Dictionary:
 			"size": Vector3(0.5, 2.5, 0.5),
 			"color": Color.MEDIUM_PURPLE
 		},
+		"directional_radar": {
+			"name": "Phased Array Sector Radar",
+			"category": "module",
+			"required_building": "tech_lab",
+			"hp": 75.0,
+			"weight": 65.0,
+			"metal": 40,
+			"crystal": 50,
+			"dps": 0.0,
+			"vision_bonus": 85.0,
+			"scan_arc": 60.0,
+			"size": Vector3(0.9, 2.2, 0.6),
+			"color": Color.ROYAL_BLUE
+		},
+		"topographic_radar": {
+			"name": "Topographic Lidar Surveyor",
+			"category": "module",
+			"required_building": "tech_lab",
+			"hp": 90.0,
+			"weight": 75.0,
+			"metal": 45,
+			"crystal": 60,
+			"dps": 0.0,
+			"survey_radius": 140.0,
+			"size": Vector3(1.2, 2.0, 1.2),
+			"color": Color.MEDIUM_SEA_GREEN
+		},
+		"seismic_sensor": {
+			"name": "Seismic Acoustic Array",
+			"category": "module",
+			"required_building": "physics_lab",
+			"hp": 110.0,
+			"weight": 85.0,
+			"metal": 50,
+			"crystal": 25,
+			"dps": 0.0,
+			"seismic_range": 75.0,
+			"size": Vector3(0.8, 1.0, 0.8),
+			"color": Color.DARK_SLATE_GRAY
+		},
+		"thermal_imager": {
+			"name": "Cryo FLIR Thermal Imager",
+			"category": "module",
+			"required_building": "physics_lab",
+			"hp": 50.0,
+			"weight": 40.0,
+			"metal": 25,
+			"crystal": 45,
+			"dps": 0.0,
+			"vision_bonus": 35.0,
+			"thermal_sight": true,
+			"size": Vector3(0.6, 1.8, 0.6),
+			"color": Color.ORANGE_RED
+		},
 		"laser_designator": {
 			"name": "Laser Target Painter",
 			"category": "module",
@@ -2124,6 +2178,10 @@ const MODULE_FLAVOR = {
 	"resource_harvester": "Extracts and hauls. Slow, unarmed, and statistically the first thing shot at.",
 	"repair_array": "Field repair. Restores structure. Does not restore crews, morale, or paperwork.",
 	"sensor_suite": "Extends detection range. Emits constantly, and is therefore also easily detected.",
+	"directional_radar": "High-gain phased sector array. Exceptional reach forward; utterly blind behind.",
+	"topographic_radar": "Interferometric contour surveyor. Maps terrain elevations and horizons; ignores tactical contacts.",
+	"seismic_sensor": "Subsurface acoustic geophone. Detects moving ground hulls through solid rock; oblivious to air and idle units.",
+	"thermal_imager": "Cryogenically cooled infrared optics. Sees heat straight through smoke screens and obscurants.",
 	"armor_plating": "Additional plate. Adds mass. Physics has been consulted and remains unsympathetic.",
 	# Power
 	"fusion_generator": "Supplies heavy base power. Rated safe. Rating issued by the manufacturer.",
@@ -2481,7 +2539,11 @@ static func get_armor_module_bias(type_id: String, damage_type: String) -> float
 	return float(ARMOR_MODULE_BIAS[type_id].get(damage_type, 1.0))
 
 const SUPPORT_CATEGORIES = ["generator"]
-const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester", "sensor_suite", "laser_designator", "energy_barrier_projector", "fire_control_radar"]
+const SUPPORT_TYPE_IDS = [
+	"repair_array", "drone_carrier", "resource_harvester", "sensor_suite",
+	"laser_designator", "energy_barrier_projector", "fire_control_radar",
+	"directional_radar", "topographic_radar", "seismic_sensor", "thermal_imager"
+]
 
 # --- Continuous power draw --------------------------------------------------
 # Energy per second a module consumes just by being alive and switched on.
@@ -2512,6 +2574,10 @@ const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester",
 # the pool it spends to absorb a hit (unit.gd's _absorb_with_barrier).
 const POWER_DRAW := {
 	"sensor_suite": 2.5,
+	"directional_radar": 3.5,
+	"topographic_radar": 5.0,
+	"seismic_sensor": 1.5,
+	"thermal_imager": 2.0,
 	"fire_control_radar": 4.0,
 	"jammer_mast": 6.0,
 	"laser_designator": 2.0,
@@ -2613,6 +2679,10 @@ const MODULE_ROLES = {
 	"repair_array": "Support",
 	"resource_harvester": "Support",
 	"sensor_suite": "Support",
+	"directional_radar": "Support",
+	"topographic_radar": "Support",
+	"seismic_sensor": "Support",
+	"thermal_imager": "Support",
 
 	# Speed as a real, affectable stat (2026-08-08): category "module" like
 	# everything above, but browsed with the locomotion types they modify
@@ -2956,6 +3026,44 @@ const PROJECTILE_CLASS = {
 
 static func get_projectile_class(type_id: String) -> String:
 	return PROJECTILE_CLASS.get(type_id, "ballistic")
+
+# Cosmetic-only projectile identity. Nothing here feeds stats, damage,
+# range or interception - those stay in FIRE_PROFILES / PROJECTILE_CLASS /
+# auto_weapon.gd. Two tables, two readers:
+#
+# GUN_TRACER_VISUALS drives _fire_kinetic_projectile() for the direct-fire
+# guns, which used to share one tracer differing only in radius/length.
+# Fields: radius, length, duration (the old positional args), optional
+# explode_on_hit, streak (thinner, hotter dart read).
+#
+# GUIDED_MISSILE_MESH maps a guided launcher to the Blender-authored round
+# body its mounted hardware already carries (parts/*.glb), so the round in
+# flight is the same shape as the launcher on the vehicle. Missing parts
+# fall back to weapon_missile.gd's procedural body.
+const GUN_TRACER_VISUALS := {
+	"basic_cannon":       {"radius": 0.05, "length": 0.50, "duration": 0.18, "explode_on_hit": true},
+	"heavy_machine_gun":  {"radius": 0.015, "length": 0.25, "duration": 0.08},
+	"rotary_cannon":      {"radius": 0.012, "length": 0.20, "duration": 0.06, "streak": true},
+	"ciws":               {"radius": 0.010, "length": 0.22, "duration": 0.06, "streak": true},
+	"autocannon":         {"radius": 0.03, "length": 0.35, "duration": 0.12, "explode_on_hit": true},
+}
+
+const GUIDED_MISSILE_MESH := {
+	"guided_missile": "missile_body",
+	"missile_pod": "missile_pod_missile",
+	"sam_launcher": "sam_missile",
+	"cruise_missile": "cruise_body",
+	"loitering_munition": "loiter_body",
+	"anti_radiation_missile": "arm_missile",
+	"bunker_buster": "bb_body",
+	"hypervelocity_missile": "hvm_body",
+}
+
+static func get_gun_tracer_visual(type_id: String) -> Dictionary:
+	return GUN_TRACER_VISUALS.get(type_id, {})
+
+static func get_missile_mesh(type_id: String) -> String:
+	return GUIDED_MISSILE_MESH.get(type_id, "")
 
 # --- Ammunition types (cross-cutting payload selection) --------------------
 #

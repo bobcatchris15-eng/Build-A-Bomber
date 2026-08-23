@@ -227,6 +227,32 @@ static func make_flame_smoke_emitter(parent: Node3D, length: float = 8.0) -> GPU
 	return p
 
 
+# Thin grey trickle off a module knocked below its damage threshold
+# (module_damage_fx.gd). Continuous like the flame jet, not a one-shot puff:
+# the wound keeps smoking until the module is stripped, so the emitter is
+# created once, parented to the caller - the damaged MODULE - with
+# local_coords on, and rides the vehicle. Nothing ever toggles it; freeing the
+# module frees it. `intensity` scales amount/speed/size with the module's bulk
+# and is part of both cache keys, keeping the never-mutate-a-cached-material
+# rule intact.
+static func make_damage_smoke(parent: Node3D, intensity: float = 1.0) -> GPUParticles3D:
+	var p = GPUParticles3D.new()
+	p.name = "DamageSmoke"
+	p.amount = int(clampf(10.0 * intensity, 6, 18))
+	p.lifetime = 1.6
+	p.emitting = false
+	p.local_coords = true
+	p.draw_pass_1 = _get_quad()
+	p.material_override = _billboard_material(SMOKE_TEX, false, Color(0.18, 0.17, 0.16, 0.45))
+	p.process_material = _process_material(
+		"damagesmoke|%.2f" % intensity,
+		Vector3(0, 1, 0), 24.0, 0.6 * intensity, 1.2 * intensity,
+		Vector3(0, 0.6, 0), 0.45 * intensity, 1.0 * intensity, 0.8, 1.6, 0.7)
+	parent.add_child(p)
+	p.emitting = true
+	return p
+
+
 # --- One-shot puffs -----------------------------------------------------
 
 # A single burst of smoke (impact, wreck, cover). one_shot + `finished`

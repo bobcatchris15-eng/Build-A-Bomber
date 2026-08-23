@@ -26,6 +26,9 @@ enum Kind {
 	# Actively seek targets within vision once idle. What the old runtime did to
 	# everything, now something you opt into.
 	AGGRESSIVE,
+	# Do not fire or acquire targets unless explicitly ordered or attacked.
+	# Used for target dummies and passive hold-fire orders.
+	HOLD_FIRE,
 }
 
 # The default for a newly built unit. RETURN_FIRE rather than AGGRESSIVE because
@@ -39,7 +42,7 @@ const DEFAULT := Kind.RETURN_FIRE
 # its weapon range. HOLD_POSITION is zero: it does not chase at all.
 static func pursuit_range_multiplier(kind: Kind) -> float:
 	match kind:
-		Kind.HOLD_POSITION:
+		Kind.HOLD_POSITION, Kind.HOLD_FIRE:
 			return 0.0
 		Kind.RETURN_FIRE:
 			return 1.25
@@ -62,8 +65,10 @@ static func label(kind: Kind) -> String:
 			return "RETURN FIRE"
 		Kind.AGGRESSIVE:
 			return "AGGRESSIVE"
+		Kind.HOLD_FIRE:
+			return "HOLD FIRE"
 	return "UNKNOWN"
 
 
 static func all() -> Array:
-	return [Kind.HOLD_POSITION, Kind.RETURN_FIRE, Kind.AGGRESSIVE]
+	return [Kind.HOLD_POSITION, Kind.RETURN_FIRE, Kind.AGGRESSIVE, Kind.HOLD_FIRE]

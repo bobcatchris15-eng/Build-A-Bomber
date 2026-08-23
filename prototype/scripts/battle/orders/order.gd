@@ -137,7 +137,7 @@ func is_complete(unit_position: Vector3, arrive_distance: float) -> bool:
 		Type.MOVE, Type.ATTACK_MOVE:
 			return unit_position.distance_to(position) <= arrive_distance
 		Type.ATTACK, Type.HARVEST:
-			return not is_instance_valid(target)
+			return not is_instance_valid(target) or ("is_dead" in target and target.is_dead)
 		Type.ATTACK_GROUND:
 			return false
 	return false

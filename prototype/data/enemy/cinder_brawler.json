@@ -1,0 +1,106 @@
+{
+	"version": 1.0,
+	"id": "enemy_cinder_brawler",
+	"name": "Cinder Brawler",
+	"hull_type": "halvorsen_heavy_a",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 4.5, "y": 2.4, "z": 7.3},
+	"armor_material": "reactive_armor",
+	"armor_thickness": 1.3,
+	"faction": "crimson_concordat",
+	"locomotion": {
+		"type_id": "tracked_treads",
+		"settings": {"width": 1.5, "drive_sprocket": true}
+	},
+	"modules": [
+		{
+			"type_id": "flamethrower",
+			"name": "Flamethrower Emitter",
+			"position": {"x": -0.85, "y": 1.25, "z": -0.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.1, "y": 1.1, "z": 1.1},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "turret",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 19,
+				"cost_metal": 46,
+				"dps": 149.0,
+				"hp": 93.0,
+				"weight": 66.5
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "flamethrower",
+			"name": "Flamethrower Emitter",
+			"position": {"x": 0.85, "y": 1.25, "z": -0.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.1, "y": 1.1, "z": 1.1},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "turret",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 19,
+				"cost_metal": 46,
+				"dps": 149.0,
+				"hp": 93.0,
+				"weight": 66.5
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "smoke_discharger",
+			"name": "Smoke Discharger",
+			"position": {"x": 0.0, "y": 1.25, "z": 1.6},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "turret",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 18,
+				"dps": 0.0,
+				"hp": 40.0,
+				"weight": 30.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "tracked_treads",
+			"name": "Tracked Treads",
+			"position": {"x": -2.45, "y": -1.2, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 2.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 40,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 120.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "tracked_treads",
+			"name": "Tracked Treads",
+			"position": {"x": 2.45, "y": -1.2, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 2.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 40,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 120.0
+			},
+			"tweaks": {}
+		}
+	]
+}

@@ -1,7 +1,8 @@
-# build_vehicle_hulls.py - the vehicle hull catalogue: 8 manufacturers,
-# ~80 hulls. One bmesh per hull. Structural features (cabs, sponsons, casemates,
-# wheel arches, outriggers) are part of the cross-section evolution that gets
-# lofted through, not bolted-on chamfered boxes glued to the main body.
+# build_vehicle_hulls.py - the vehicle hull catalogue: 11 manufacturers,
+# 114 hulls. One bmesh per hull. Structural features (cabs, sponsons,
+# casemates, wheel arches, outriggers) are part of the cross-section evolution
+# that gets lofted through, not bolted-on chamfered boxes glued to the main
+# body.
 #
 # Run:
 #   cd prototype
@@ -35,7 +36,7 @@
 #     a face with the body. Still one mesh, just with the tier as its own
 #     loft. add_chamfered_box() / add_wedge() are the tiered helpers.
 #
-# The eight houses:
+# The eleven houses:
 #
 #   halvorsen  Boat hulls dragged ashore. Hard-chine section: wide flat deck,
 #              near-vertical topsides, a hard horizontal chine crease, steep
@@ -77,6 +78,29 @@
 #              "cells" (one cell = 1.0 hull-height cubed), visibly stacked in
 #              cross-section. Transport variants are a 2x2 cell wall with an
 #              open flat well between them; combat variants are solid stacks.
+#
+#   hartmann   Real tanks. A proper MBT tub: narrow flat belly, lower sides
+#              sloping out to a hard sponson crease, near-vertical sides up to
+#              the deck. The plan view is an ARROWHEAD - width collapses to a
+#              point over the front third, so the glacis plates meet at a
+#              centre seam like a Panther's nose. Rear engine deck sits one
+#              step below the fighting-compartment top. An optional turret
+#              race grows out of the deck as a cross-section mesa.
+#
+#   ballard    Submarines. A faceted teardrop: flat keel strip (so locomotion
+#              mounts still work), bilge panels flaring to maximum beam BELOW
+#              mid-height, slanted topsides curving in to a narrower deck.
+#              Blunt rounded bow growth, long parallel midbody, stern tapering
+#              to the propulsion gear in both axes. The conning sail is a
+#              centered mesa on the deck; periscope masts and missile trunks
+#              stay as role elements on top of it.
+#
+#   moreau     Wave-formers. The hull never touches its bounding box for most
+#              of its length: a 16-facet rounded superellipse section (flat
+#              keel chord kept for locomotion), BOTH ends taper away (rounded
+#              canoe, sharp arrowhead, or full diamond plan), and an optional
+#              waist pinches the plan view in around midships. Nothing about
+#              a Moreau reads as a box.
 
 import json
 import math
@@ -135,6 +159,21 @@ MANUFACTURERS = {
         "display": "Pillar Ironworks",
         # A pale steel blue - "modular container".
         "color": (0.420, 0.490, 0.560, 1.0),
+    },
+    "hartmann": {
+        "display": "Hartmann Panzerwerk",
+        # Olive drab - the conventional-armour read.
+        "color": (0.352, 0.392, 0.263, 1.0),
+    },
+    "ballard": {
+        "display": "Ballard Deepworks",
+        # A deep sea-water teal.
+        "color": (0.216, 0.329, 0.373, 1.0),
+    },
+    "moreau": {
+        "display": "Moreau Yards",
+        # Pale bone - the ocean-liner register.
+        "color": (0.780, 0.745, 0.660, 1.0),
     },
 }
 
@@ -1140,6 +1179,340 @@ def body_pillar(bm, w, h, l, opt):
     HF.loft_evolution(bm, -hl, hl, sec, n_sections=8, cap_chamfer=cut)
 
 
+# --- HARTMANN PANZERWERK ----------------------------------------------------
+
+def _hartmann_section(z, hl, l, w, h, cut, nose_frac, tip_w, belly_frac,
+                      sill_frac, engine_z, engine_drop,
+                      race_w, race_h, race_zc, race_zw):
+    """Cross-section for Hartmann at a given z.
+
+    A proper tank tub: narrow flat belly at y = -h/2, lower sides sloping
+    out to a hard sponson crease (the "chine" of the tub), near-vertical
+    sides up to the deck. The PLAN view is an arrowhead: width fraction
+    collapses toward a near-point over the front `nose_frac` of the length
+    (quadratic ease so the point stays sharp), holds full width through
+    mid-hull, then tapers slightly at the stern. Height rises out of the
+    bow tip as one long glacis ramp and drops one step for the rear engine
+    deck. An optional turret race is integrated as a 4-vertex mesa on the
+    deck (collapsed flat when inactive), same pattern as Orrin/Calder.
+
+    12 vertices always.
+    """
+    # Plan-view width fraction - the arrowhead.
+    nose_len = l * nose_frac
+    if z <= -hl:
+        fw = tip_w
+    elif z <= -hl + nose_len:
+        t = (z + hl) / nose_len
+        fw = tip_w + (1.0 - tip_w) * (t * t)
+    elif z >= hl - l * 0.10:
+        t = (z - (hl - l * 0.10)) / (l * 0.10)
+        fw = 1.0 - 0.06 * t
+    else:
+        fw = 1.0
+
+    # Height fraction - long glacis rise out of the bow tip, engine-deck
+    # step down at the rear.
+    if z <= -hl:
+        fh = 0.26
+    elif z <= -hl + nose_len:
+        t = (z + hl) / nose_len
+        fh = 0.26 + 0.74 * t
+    elif z <= hl * engine_z:
+        fh = 1.00
+    else:
+        t = (z - hl * engine_z) / max(hl * (1.0 - engine_z), 1e-6)
+        fh = 1.00 - engine_drop * t
+
+    W = w * fw
+    Hh = h * fh
+    floor_y = -h / 2.0
+    deck_y = floor_y + Hh
+    sill_y = floor_y + Hh * sill_frac
+    bw = W * belly_frac / 2.0
+
+    # Chamfers scale with THIS section's size, or the near-point bow would
+    # self-intersect once W drops below the global cut.
+    c = min(cut, W * 0.19, Hh * 0.22)
+    bw = max(bw, c * 1.3)
+
+    # Turret race mesa on the deck.
+    t_race = HF.smooth_transition(z, race_zc, race_zw) if race_w > 0 else 0.0
+    if race_w > 0 and t_race > 0.0:
+        rw = min(W * race_w / 2.0, (W / 2.0 - c) * 0.90)
+        rht = rw * 0.80
+        RH = h * race_h * t_race
+        v5_x, v5_y = rw, deck_y
+        v6_x, v6_y = rht, deck_y + RH
+        v7_x, v7_y = -rht, deck_y + RH
+        v8_x, v8_y = -rw, deck_y
+    else:
+        # Flat positions: a segment along the deck, well inside the deck
+        # chamfer corners (v4/v9), right-to-left so face normals point up.
+        v5_x, v5_y = W * 0.30, deck_y
+        v6_x, v6_y = W * 0.09, deck_y
+        v7_x, v7_y = -W * 0.09, deck_y
+        v8_x, v8_y = -W * 0.30, deck_y
+
+    return [
+        (-bw + c, floor_y),      # 0: belly port
+        (bw - c, floor_y),       # 1: belly starboard
+        (W / 2.0, sill_y),       # 2: starboard sponson crease
+        (W / 2.0, deck_y - c),   # 3: starboard side top
+        (W / 2.0 - c, deck_y),   # 4: starboard deck edge
+        (v5_x, v5_y),            # 5: race right base / flat
+        (v6_x, v6_y),            # 6: race right top / flat
+        (v7_x, v7_y),            # 7: race left top / flat
+        (v8_x, v8_y),            # 8: race left base / flat
+        (-W / 2.0 + c, deck_y),  # 9: port deck edge
+        (-W / 2.0, deck_y - c),  # 10: port side top
+        (-W / 2.0, sill_y),      # 11: port sponson crease
+    ]
+
+
+def body_hartmann(bm, w, h, l, opt):
+    """Real-tank hull. ONE loft: arrowhead plan bow, tank-tub section with
+    hard sponson crease, long frontal glacis rise, stepped rear engine deck,
+    optional turret race as an integrated deck mesa. Flat underside."""
+    hl = l / 2.0
+    cut = min(w, h) * 0.09
+    nose_frac = opt.get("nose_frac", 0.20)
+    tip_w = opt.get("tip_w", 0.06)
+    belly_frac = opt.get("belly_frac", 0.46)
+    sill_frac = opt.get("sill_frac", 0.40)
+    engine_z = opt.get("engine_z", 0.64)
+    engine_drop = opt.get("engine_drop", 0.16)
+    race_w = opt.get("race_w", 0.0)
+    race_h = opt.get("race_h", 0.11) if race_w > 0 else 0.0
+    race_zc = hl * opt.get("race_zc", -0.04)
+    race_zw = l * opt.get("race_zw", 0.17)
+
+    def sec(z):
+        return _hartmann_section(
+            z, hl, l, w, h, cut, nose_frac, tip_w, belly_frac, sill_frac,
+            engine_z, engine_drop, race_w, race_h, race_zc, race_zw,
+        )
+
+    HF.loft_evolution(bm, -hl, hl, sec, n_sections=14, cap_chamfer=cut * 0.7)
+
+
+# --- BALLARD DEEPWORKS ------------------------------------------------------
+
+def _ballard_section(z, hl, l, w, h, cut, keel_frac, deck_frac, beam_frac,
+                     sail_w, sail_h, sail_zc, sail_zw,
+                     bow_frac, stern_start, stern_w, stern_h):
+    """Cross-section for Ballard at a given z.
+
+    A faceted teardrop pressure hull. The bottom is a FLAT KEEL strip at
+    y = -h/2 (locomotion mounts still anchor to the AABB underside). Bilge
+    panels flare from the keel edges up to maximum beam BELOW mid-height,
+    then slanted topsides run in to a narrower top deck - the teardrop
+    read. The conning sail is a 4-vertex mesa on the deck, collapsed flat
+    outside its z range. Width/height fractions give a blunt rounded bow
+    growth, a long parallel midbody, and a stern that eases in to the
+    propulsion gear in both axes.
+
+    12 vertices always.
+    """
+    # Lengthwise evolution: bow growth, parallel midbody, stern taper.
+    bow_len = l * bow_frac
+    if z <= -hl:
+        fw, fh = 0.16, 0.42
+    elif z <= -hl + bow_len:
+        t = (z + hl) / bow_len
+        fw = 0.16 + 0.84 * (t * t)
+        fh = 0.42 + 0.58 * t
+    elif z <= hl * stern_start:
+        fw, fh = 1.00, 1.00
+    else:
+        t = (z - hl * stern_start) / max(hl * (1.0 - stern_start), 1e-6)
+        fw = 1.00 - (1.0 - stern_w) * (t * t)
+        fh = 1.00 - (1.0 - stern_h) * t
+
+    W = w * fw
+    H = h * fh
+    floor_y = -h / 2.0
+    deck_y = floor_y + H
+    hw = W / 2.0
+    kw = max(W * keel_frac / 2.0, 1e-3)
+    beam_y = floor_y + H * beam_frac
+
+    c = min(cut, kw * 0.55, H * 0.25)
+    dx = hw * deck_frac
+
+    # Conning sail mesa on the deck.
+    sail_on = sail_w > 0 and sail_h > 0
+    t_sail = HF.smooth_transition(z, sail_zc, sail_zw) if sail_on else 0.0
+    if sail_on and t_sail > 0.0:
+        sr = min(W * sail_w / 2.0, dx * 0.90)
+        srt = sr * 0.72
+        SH = h * sail_h * t_sail
+        v6_x, v6_y = sr, deck_y
+        v7_x, v7_y = srt, deck_y + SH
+        v8_x, v8_y = -srt, deck_y + SH
+        v9_x, v9_y = -sr, deck_y
+    else:
+        v6_x, v6_y = dx * 0.62, deck_y
+        v7_x, v7_y = dx * 0.20, deck_y
+        v8_x, v8_y = -dx * 0.20, deck_y
+        v9_x, v9_y = -dx * 0.62, deck_y
+
+    return [
+        (-kw + c, floor_y),     # 0: keel port
+        (kw - c, floor_y),      # 1: keel starboard
+        (hw, floor_y + c),      # 2: starboard bilge
+        (hw, beam_y),           # 3: starboard maximum beam
+        (dx, deck_y),           # 4: starboard deck edge
+        (v6_x, v6_y),           # 5: sail right base / flat
+        (v7_x, v7_y),           # 6: sail right top / flat
+        (v8_x, v8_y),           # 7: sail left top / flat
+        (v9_x, v9_y),           # 8: sail left base / flat
+        (-dx, deck_y),          # 9: port deck edge
+        (-hw, beam_y),          # 10: port maximum beam
+        (-hw, floor_y + c),     # 11: port bilge
+    ]
+
+
+def body_ballard(bm, w, h, l, opt):
+    """Submarine hull. ONE loft: faceted teardrop with flat keel, blunt
+    bow growth, parallel midbody, eased stern taper, integrated conning
+    sail. Flat underside."""
+    hl = l / 2.0
+    cut = min(w, h) * 0.09
+    keel_frac = opt.get("keel_frac", 0.36)
+    deck_frac = opt.get("deck_frac", 0.62)
+    beam_frac = opt.get("beam_frac", 0.46)
+    sail_w = opt.get("sail_w", 0.30)
+    sail_h = opt.get("sail_h", 0.34) if sail_w > 0 else 0.0
+    sail_zc = hl * opt.get("sail_zc", -0.18)
+    sail_zw = l * opt.get("sail_zw", 0.09)
+    bow_frac = opt.get("bow_frac", 0.20)
+    stern_start = opt.get("stern_start", 0.46)
+    stern_w = opt.get("stern_w", 0.30)
+    stern_h = opt.get("stern_h", 0.50)
+
+    def sec(z):
+        return _ballard_section(
+            z, hl, l, w, h, cut, keel_frac, deck_frac, beam_frac,
+            sail_w, sail_h, sail_zc, sail_zw,
+            bow_frac, stern_start, stern_w, stern_h,
+        )
+
+    HF.loft_evolution(bm, -hl, hl, sec, n_sections=12, cap_chamfer=cut * 0.7)
+
+
+# --- MOREAU YARDS -----------------------------------------------------------
+
+def _moreau_se(v, e):
+    """Signed power for the superellipse sampler: keeps the quadrant sign
+    so the outline stays a closed convex-ish ring."""
+    return math.copysign(abs(v) ** e, v)
+
+
+def _moreau_round_outline(w, h, n, cy=0.0):
+    """Rounded superellipse section sampled at n points.
+
+    Exponent 2.6 sits between an ellipse (2.0) and a rounded rectangle (4+):
+    round bilges, round shoulders, a softly flattened bottom. The two samples
+    straddling the lowest point are clamped to the section floor, so the hull
+    still sits on a real flat keel chord and locomotion mounts keep their
+    AABB-underside anchor. Every facet is flat; the roundness is the facet
+    count, not a shading trick.
+    """
+    a, b = w / 2.0, h / 2.0
+    e = 2.0 / 2.6
+    floor_y = cy - b
+    pts = []
+    for i in range(n):
+        # Half-step grid: no sample exactly at the bottom, so the two
+        # straddling points define the keel chord when clamped.
+        ang = -math.pi / 2.0 + (i + 0.5) * (2.0 * math.pi / n)
+        c, s = math.cos(ang), math.sin(ang)
+        pts.append((a * _moreau_se(c, e), cy + b * _moreau_se(s, e)))
+    pts[0] = (pts[0][0], floor_y)
+    pts[-1] = (pts[-1][0], floor_y)
+    return pts
+
+
+def _moreau_section(z, hl, l, w, h, facets, bow_style, bow_frac, tip_w, tip_h,
+                    stern_style, stern_frac, stern_tip_w, stern_tip_h,
+                    waist, waist_zc, waist_zw):
+    """Cross-section for Moreau at a given z.
+
+    A rounded superellipse ring scaled by width/height fractions that NEVER
+    plateau: both ends taper away (bow per bow_style - "rounded" smoothstep
+    or "arrow" quadratic - stern per stern_style), so the plan and profile
+    are curves end to end. An optional waist multiplies the width by
+    (1 - waist) around waist_zc, pinching the plan view in at midships.
+
+    `facets` vertices always.
+    """
+    bow_len = l * bow_frac
+    if z <= -hl:
+        fw_b, fh_b = tip_w, tip_h
+    elif z <= -hl + bow_len:
+        t = (z + hl) / bow_len
+        if bow_style == "arrow":
+            g = t * t
+        else:
+            g = t * t * (3.0 - 2.0 * t)
+        fw_b = tip_w + (1.0 - tip_w) * g
+        fh_b = tip_h + (1.0 - tip_h) * g
+    else:
+        fw_b, fh_b = 1.0, 1.0
+
+    stern_len = l * stern_frac
+    if z >= hl:
+        fw_s, fh_s = stern_tip_w, stern_tip_h
+    elif z >= hl - stern_len:
+        t = (hl - z) / stern_len
+        if stern_style == "point":
+            g = t * t
+        else:
+            g = t * t * (3.0 - 2.0 * t)
+        fw_s = stern_tip_w + (1.0 - stern_tip_w) * g
+        fh_s = stern_tip_h + (1.0 - stern_tip_h) * g
+    else:
+        fw_s, fh_s = 1.0, 1.0
+
+    fw = fw_b * fw_s
+    fh = fh_b * fh_s
+    fw *= 1.0 - waist * HF.smooth_transition(z, waist_zc, waist_zw)
+
+    W = max(w * fw, w * 0.03)
+    H = max(h * fh, h * 0.20)
+    return _moreau_round_outline(W, H, facets, cy=-h / 2.0 + H / 2.0)
+
+
+def body_moreau(bm, w, h, l, opt):
+    """Wave-former. ONE loft: rounded 16-facet section, double-ended taper
+    (rounded canoe / sharp arrowhead bow / full diamond plan), optional
+    midships waist. Flat keel chord, no flat transom, no parallel midbody
+    unless the taper fractions are set tiny."""
+    hl = l / 2.0
+    facets = opt.get("facets", 16)
+    bow_style = opt.get("bow_style", "rounded")
+    bow_frac = opt.get("bow_frac", 0.24)
+    tip_w = opt.get("tip_w", 0.30)
+    tip_h = opt.get("tip_h", 0.55)
+    stern_style = opt.get("stern_style", "rounded")
+    stern_frac = opt.get("stern_frac", 0.24)
+    stern_tip_w = opt.get("stern_tip_w", 0.30)
+    stern_tip_h = opt.get("stern_tip_h", 0.55)
+    waist = opt.get("waist", 0.0)
+    waist_zc = hl * opt.get("waist_zc", 0.0)
+    waist_zw = l * opt.get("waist_zw", 0.15)
+
+    def sec(z):
+        return _moreau_section(
+            z, hl, l, w, h, facets, bow_style, bow_frac, tip_w, tip_h,
+            stern_style, stern_frac, stern_tip_w, stern_tip_h,
+            waist, waist_zc, waist_zw,
+        )
+
+    HF.loft_evolution(bm, -hl, hl, sec, n_sections=18, cap_chamfer=min(w, h) * 0.05)
+
+
 BODIES = {
     "halvorsen": body_halvorsen,
     "kestrel": body_kestrel,
@@ -1149,6 +1522,9 @@ BODIES = {
     "rackham": body_rackham,
     "calder": body_calder,
     "pillar": body_pillar,
+    "hartmann": body_hartmann,
+    "ballard": body_ballard,
+    "moreau": body_moreau,
 }
 
 
@@ -1491,10 +1867,11 @@ ELEMENTS = {
 
 
 # ---------------------------------------------------------------------------
-# The lineup. 80 hulls. Deliberately unbalanced across manufacturers, per the
+# The lineup. 114 hulls. Deliberately unbalanced across manufacturers, per the
 # brief: Brenntal and Halvorsen carry the heavy end, Tallow owns transports at
 # every size, Kestrel skews small and fast, Orrin is symmetric salvage, Rackham
-# is industrial mid, Calder is fast-attack light, Pillar is modular boxy.
+# is industrial mid, Calder is fast-attack light, Pillar is modular boxy,
+# Hartmann is conventional tanks, Ballard is submarines.
 #
 # size is the Godot-space envelope (width, height, length) and it is EXACT:
 # autofit() solves for the working size whose natural AABB lands here, and
@@ -1796,6 +2173,156 @@ LINEUP = [
       {"transport_well": True}),
     H("pillar_transport_c", "pillar", "transport", "Pillar Twin Well",
       (4.3, 1.80, 8.9), [], {"transport_well": True}),
+
+    # -- HARTMANN PANZERWERK (8): real tanks ---------------------------
+    # Arrowhead plan bow, tank-tub section with a hard sponson crease,
+    # long glacis rise, stepped rear engine deck, optional turret race.
+    H("hartmann_scout_a", "hartmann", "scout", "Hartmann Ferret",
+      (2.5, 1.05, 4.2), [("mast", {"mh": 0.55, "z": 0.16})],
+      {"race_w": 0.0}),
+    H("hartmann_light_a", "hartmann", "light", "Hartmann Lancer",
+      (2.9, 1.10, 5.0), [],
+      {"race_w": 0.52, "race_h": 0.10, "race_zw": 0.16}),
+    H("hartmann_medium_a", "hartmann", "medium", "Hartmann Sabre",
+      (3.5, 1.35, 5.9), [],
+      {"race_w": 0.56, "race_h": 0.11, "race_zw": 0.17, "race_zc": -0.04}),
+    H("hartmann_medium_b", "hartmann", "medium", "Hartmann Command Sabre",
+      (3.5, 1.60, 6.0), [("barbette", {"z": 0.02, "r": 0.26, "bh": 0.16})],
+      {"race_w": 0.60, "race_h": 0.12, "race_zw": 0.20}),
+    H("hartmann_heavy_a", "hartmann", "heavy", "Hartmann Bastion",
+      (4.4, 1.70, 7.2), [("glacis", {})],
+      {"race_w": 0.58, "race_h": 0.12, "race_zw": 0.18, "belly_frac": 0.52}),
+    H("hartmann_heavy_b", "hartmann", "heavy", "Hartmann Breaker",
+      (4.6, 1.85, 7.6), [("barbette", {"z": -0.10, "r": 0.34, "bh": 0.20}),
+                         ("glacis", {"front": 0.34})],
+      {"race_w": 0.0, "belly_frac": 0.54, "nose_frac": 0.26}),
+    H("hartmann_transport_a", "hartmann", "transport", "Hartmann Grenadier",
+      (3.9, 1.55, 7.4), [("well", {"z0": -0.16, "z1": 0.88,
+                                   "wall_h": 0.26, "w": 0.78})],
+      {"nose_frac": 0.16, "race_w": 0.0, "engine_drop": 0.06}),
+    H("hartmann_oddball_a", "hartmann", "oddball", "Hartmann Long Nose",
+      (4.0, 1.25, 6.8), [("glacis", {"front": 0.22, "len": 0.44})],
+      {"nose_frac": 0.48, "tip_w": 0.03, "race_w": 0.0,
+       "engine_z": 0.98, "engine_drop": 0.0, "sill_frac": 0.34}),
+
+    # -- BALLARD DEEPWORKS (7): submarines ------------------------------
+    # Faceted teardrop: flat keel, max beam below mid-height, slanted
+    # topsides to a narrower deck, integrated conning sail.
+    H("ballard_scout_a", "ballard", "scout", "Ballard Minnow",
+      (2.4, 1.20, 4.1), [],
+      {"sail_w": 0.26, "sail_h": 0.30, "bow_frac": 0.24}, domain="Naval"),
+    H("ballard_light_a", "ballard", "light", "Ballard Pike",
+      (2.9, 1.35, 5.2), [("mast", {"mh": 0.42, "z": -0.18})],
+      {"sail_h": 0.38}, domain="Naval"),
+    H("ballard_medium_a", "ballard", "medium", "Ballard Greyback",
+      (3.5, 1.60, 6.2), [("barbette", {"z": -0.42, "r": 0.20, "bh": 0.14})],
+      {"sail_w": 0.32, "sail_h": 0.40}, domain="Naval"),
+    H("ballard_medium_b", "ballard", "medium", "Ballard Boomer",
+      (3.6, 1.80, 6.4), [("trunk", {"th": 0.24, "w": 0.46,
+                                    "z0": 0.12, "z1": 0.58})],
+      {"sail_zc": -0.30, "stern_start": 0.62, "stern_w": 0.38},
+      domain="Naval"),
+    H("ballard_heavy_a", "ballard", "heavy", "Ballard Leviathan",
+      (4.4, 1.90, 7.5), [("mast", {"mh": 0.46, "z": -0.18})],
+      {"sail_h": 0.36, "stern_w": 0.34}, domain="Naval"),
+    H("ballard_transport_a", "ballard", "transport", "Ballard Whale",
+      (3.9, 1.70, 8.4), [("trunk", {"th": 0.30, "w": 0.56,
+                                    "z0": -0.30, "z1": 0.40})],
+      {"sail_h": 0.30, "sail_w": 0.26, "deck_frac": 0.68}, domain="Naval"),
+    H("ballard_oddball_a", "ballard", "oddball", "Ballard Ram",
+      (4.1, 1.50, 6.5), [],
+      {"sail_w": 0.0, "bow_frac": 0.12, "keel_frac": 0.44,
+       "stern_w": 0.42}, domain="Naval"),
+
+    # -- TALLOW & VANCE additions (3): more real flatbeds ---------------
+    H("tallow_medium_c", "tallow", "medium", "Tallow Stake Bed",
+      (3.5, 1.45, 6.4), [("bolster", {"bh": 0.40, "z": (-0.10, 0.62)})],
+      {"cab_l": 0.26, "beams": 3}),
+    H("tallow_heavy_c", "tallow", "heavy", "Tallow Dropside",
+      (4.2, 1.55, 7.9), [("well", {"z0": -0.30, "wall_h": 0.24, "w": 0.86})],
+      {"cab_l": 0.24, "cab_h": 0.80, "beams": 4}),
+    H("tallow_transport_e", "tallow", "transport", "Tallow Cab-Over Flatbed",
+      (3.8, 1.60, 8.7), [("flatbed", {"z0": -0.06, "z1": 0.96,
+                                      "deck_h": 0.22, "rail_h": 0.18})],
+      {"cab_l": 0.15, "cab_h": 0.95, "cab_rake": 0.92, "beams": 4}),
+
+    # -- KESTREL AEROWORKS additions (2): more fuselages ----------------
+    H("kestrel_medium_c", "kestrel", "medium", "Kestrel Airliner",
+      (3.4, 1.50, 6.4), [],
+      {"canopies": (), "boom_frac": 0.34, "boom_z": 0.42,
+       "stub_w": 0.07, "fin_h": 0.44, "spine_h": 0.10, "spine_zw": 0.30}),
+    H("kestrel_transport_b", "kestrel", "transport", "Kestrel Airlifter",
+      (4.0, 1.85, 8.8), [("well", {"z0": 0.10, "wall_h": 0.26, "w": 0.70})],
+      {"canopies": (), "boom_frac": 0.70, "boom_z": 0.60,
+       "stub_w": 0.16, "fin_h": 0.48, "facet_cut": 0.20}),
+
+    # -- HALVORSEN YARD additions (3): more boats -----------------------
+    H("halvorsen_scout_b", "halvorsen", "scout", "Halvorsen Swift",
+      (2.5, 1.10, 4.4), [("mast", {"mh": 0.50, "z": 0.10})],
+      {"chine_frac": 0.24, "keel_frac": 0.22, "bulwark_h": 0.10}),
+    H("halvorsen_heavy_d", "halvorsen", "heavy", "Halvorsen Harbor Tug",
+      (4.3, 2.00, 7.0), [("bridge", {"steps": 3, "z": -0.18, "total": 0.85,
+                                     "w": 0.60}),
+                         ("mast", {"mh": 0.55, "z": -0.02})],
+      {"bulwark_h": 0.26, "chine_frac": 0.50, "keel_frac": 0.46}),
+    H("halvorsen_transport_d", "halvorsen", "transport", "Halvorsen Stone Scow",
+      (4.2, 1.40, 8.2), [("flatbed", {"z0": -0.40, "rail_h": 0.16})],
+      {"bulwark": False, "chine_frac": 0.64, "keel_frac": 0.74},
+      domain="Naval"),
+
+    # -- CALDER MOBILITY additions (2): extreme arrowheads --------------
+    H("calder_medium_c", "calder", "medium", "Calder Dart",
+      (3.3, 1.15, 6.0), [],
+      {"body_w_min": 0.14, "body_h_min": 0.34, "body_h_max": 0.66,
+       "sponson_w": 0.06, "sponson_zc": 0.10, "sponson_zw": 0.24,
+       "wing_w": 1.30}),
+    H("calder_heavy_b", "calder", "heavy", "Calder Lance",
+      (4.0, 1.50, 7.0), [],
+      {"body_w_min": 0.20, "body_h_min": 0.40, "body_h_max": 0.76,
+       "sponson_w": 0.10, "sponson_zc": 0.0, "sponson_zw": 0.30,
+       "wing_w": 1.30,
+       "barbette_w": 0.36, "barbette_h": 0.18,
+       "barbette_zc": 0.62, "barbette_zw": 0.05}),
+
+    # -- MOREAU YARDS (8): rounded, waisted, double-ended ---------------
+    # 16-facet rounded section, both ends taper away, optional midships
+    # waist. The hull leaves its bounding box alone for most of its length.
+    H("moreau_scout_a", "moreau", "scout", "Moreau Otter",
+      (2.5, 1.10, 4.3), [("mast", {"mh": 0.50, "z": 0.05})],
+      {"bow_frac": 0.22, "stern_frac": 0.22}, domain="Naval"),
+    H("moreau_light_a", "moreau", "light", "Moreau Wavepiercer",
+      (3.0, 1.25, 5.4), [],
+      {"bow_style": "arrow", "bow_frac": 0.30, "tip_w": 0.08,
+       "tip_h": 0.40, "stern_frac": 0.18}, domain="Naval"),
+    H("moreau_medium_a", "moreau", "medium", "Moreau Wasp",
+      (3.6, 1.50, 6.2), [("barbette", {"z": 0.10, "r": 0.24, "bh": 0.16})],
+      {"waist": 0.30, "waist_zw": 0.16, "bow_frac": 0.20,
+       "stern_frac": 0.20}, domain="Naval"),
+    H("moreau_medium_b", "moreau", "medium", "Moreau Leaf",
+      (3.4, 1.40, 6.0), [],
+      {"bow_style": "arrow", "bow_frac": 0.40, "tip_w": 0.05,
+       "tip_h": 0.34, "waist": 0.10}, domain="Naval"),
+    H("moreau_heavy_a", "moreau", "heavy", "Moreau Colossus",
+      (4.5, 1.90, 7.6), [("bridge", {"steps": 3, "z": 0.02, "total": 0.72,
+                                     "w": 0.52})],
+      {"waist": 0.24, "waist_zw": 0.14, "bow_frac": 0.22,
+       "stern_frac": 0.22}, domain="Naval"),
+    H("moreau_transport_a", "moreau", "transport", "Moreau Wellship",
+      (4.0, 1.60, 8.3), [("well", {"z0": -0.10, "z1": 0.80,
+                                   "wall_h": 0.28, "w": 0.70})],
+      {"waist": 0.10, "waist_zc": -0.40, "bow_frac": 0.20,
+       "stern_frac": 0.20}, domain="Naval"),
+    H("moreau_oddball_a", "moreau", "oddball", "Moreau Diamond",
+      (4.2, 1.45, 6.6), [],
+      {"bow_style": "arrow", "bow_frac": 0.46, "tip_w": 0.04,
+       "tip_h": 0.30, "stern_style": "point", "stern_frac": 0.46,
+       "stern_tip_w": 0.04, "stern_tip_h": 0.30, "waist": 0.10},
+      domain="Naval"),
+    H("moreau_oddball_b", "moreau", "oddball", "Moreau Skimmer",
+      (3.7, 1.25, 5.7), [],
+      {"waist": 0.34, "waist_zw": 0.15, "bow_style": "arrow",
+       "bow_frac": 0.28, "tip_w": 0.06, "tip_h": 0.38,
+       "stern_frac": 0.24}),
 ]
 
 

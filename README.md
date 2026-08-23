@@ -75,41 +75,34 @@ On a first run the menu shows a single card instead: a 15-step guided tutorial t
 
 > Faction *passives* no longer exist. Ten hand-authored factions each pairing a visual identity with a mechanical bonus were replaced by the player-authored Livery, which is cosmetic only — so two identical designs fight identically whatever colours they wear. Every stat now comes from what you actually built.
 
-## Tests
+## Checks
 
-Headless test suite. **Run via the wrapper, not a raw Godot invocation** — the `.godot` import cache is gitignored and goes stale whenever a new autoload or `class_name` script lands, which breaks a direct `--headless --script run_tests.gd` run with a misleading `Identifier "X" not declared` error before a single test executes:
+**There is no automated test suite.** The headless suite (`run_tests.ps1` / `run_tests.sh` / `tests/`) was deleted on 2026-08-10 during the battle-system unification; see [PROGRESS.md](PROGRESS.md) for that call. Verification today is:
 
-```
-cd prototype
-./run_tests.ps1   # Windows (PowerShell)
-./run_tests.sh    # Linux/macOS/Git Bash
-```
+1. **Parse checks** after edits — targeted via `prototype/tools/compile_check_changed.gd`, full tree via `compile_check_all.gd` (slow: loads 200+ interdependent scripts, observed 20+ min):
 
-The wrapper reimports assets first, then runs everything. The suite runs every registered test regardless of earlier failures and prints a full list of failing suite names at the end rather than stopping at the first one.
+   ```
+   cd prototype
+   ./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script res://tools/compile_check_all.gd
+   ```
 
-[`run_tests.gd`](prototype/run_tests.gd) is only the driver — it owns the retry quarantine, the pass/fail tally, the exit code, and `SUITE_ORDER`, the manifest that fixes execution order. The suites live in [`prototype/tests/`](prototype/tests) and [`prototype/tests/battle/`](prototype/tests/battle), grouped by area, all extending `tests/suite_base.gd`, which carries the shared preloads, golden fixtures and helpers.
+2. **Headless probe scripts** in `prototype/tools/probe_*.gd` — one-off SceneTree scripts that boot a slice of the game (navmesh, economy, AI, placement…) and print findings. This is the de-facto regression harness.
 
-`run_tests.gd`'s `SUITE_FILES` / `SUITE_ORDER` are the authoritative list of what exists — consult them rather than a table here, which drifts. Adding a suite means writing the function in an area file **and** registering it in both. The order is pinned deliberately, not derived: several navmesh suites flake depending on what ran before them.
+3. **Manual playtest** for anything visual/interactive.
 
-To check every script still parses after a bulk edit:
-
-```
-cd prototype
-./Godot_v4.7.1-stable_win64_console.exe --headless --script tools/compile_check_all.gd
-```
-
-Note this is **not** a quick check at this codebase's size — it loads 200+ interdependent scripts with `CACHE_MODE_IGNORE` and has been observed running 20+ minutes. Prefer the test wrapper.
+Note: the `.godot` import cache is gitignored and goes stale whenever a new autoload or `class_name` script lands, which breaks headless runs with a misleading `Identifier "X" not declared`. Reimport first with `--headless --editor --import`.
 
 ## Art pipeline
 
-Hulls and weapon/locomotion parts are authored **procedurally in Blender** (via the bundled `UPBGE-0.30-windows-x86_64/blender.exe`) rather than hand-modeled, so the whole kit can be regenerated or extended from one script:
+Hulls and weapon/locomotion parts are authored **procedurally in Blender** rather than hand-modeled, so the whole kit can be regenerated or extended from one script:
 
 ```
 cd prototype
-./UPBGE-0.30-windows-x86_64/blender.exe --background --python tools/blender/build_meshes.py
+"/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --python tools/blender/build_vehicle_hulls.py   # vehicle hulls -> assets/models/hulls/
+"/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --python tools/blender/build_meshes.py          # parts, foundations, buildings
 ```
 
-This writes `assets/models/hulls/*.glb` (one greebled chassis or foundation per catalog hull entry) and `assets/models/parts/*.glb` (barrels, breeches, drums, domes, missiles, wheels, legs, rings — assembled by `visual_builder.gd` per weapon type, tweak-deformable, with a coordinate convention documented at the top of `build_meshes.py`). `visual_builder.gd` falls back to procedural primitives for any part not yet authored.
+`build_vehicle_hulls.py` (with `hull_forge.py`) writes `assets/models/hulls/*.glb` plus a matching `.json` sidecar per hull and its convex collision decomposition. `build_meshes.py` writes `assets/models/parts/*.glb` (barrels, breeches, drums, domes, missiles, wheels, legs, rings — assembled by `visual_builder.gd` per weapon type, tweak-deformable), the foundation hulls, and buildings. Its old `generate_hulls()` is retired — see [`prototype/docs/HULL_NAMING.md`](prototype/docs/HULL_NAMING.md) for the Blender↔Godot axis chain and the rule that **forward is local −Z**. `visual_builder.gd` falls back to procedural primitives for any part not yet authored.
 
 The shared hull surface texture set (panel seams, rivets, grain, corrosion — pure value, no hue, so livery zone colours multiply over it cleanly) is generated separately:
 

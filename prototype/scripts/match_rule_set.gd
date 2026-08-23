@@ -134,6 +134,7 @@ var after_match_action: AfterMatchAction = AfterMatchAction.SHOW_AAR
 var operation_id: String = ""                   # Operations only
 var stage_index: int = 0                        # Operations only (0..N-1)
 var ai_difficulty: String = "normal"
+var ai_doctrine: String = ""  # Empty = auto-derived from difficulty
 
 # Physics. PERF_TESTING_RIG.md Fix A: 30Hz halves the per-unit cost of
 # unit.gd::_physics_process, which at ~2.4ms/unit headless means 60fps is
@@ -319,7 +320,15 @@ static func test_range(player_blueprint_path: String,
 	rs.enable_production = false
 	rs.enable_player_build = false
 	rs.enable_ai = false
-	rs.enable_fog_of_war = false
+	# Fog ON as of 2026-08-22. The dummies at HOLD_FIRE are not visible
+	# until a player's unit walks into sensor range, which is exactly the
+	# "range check" the player runs in the range. The previous no-fog
+	# default made the unit's vision_range disc purely decorative: the
+	# player could see the dummies from across the map regardless. With
+	# fog on, the disc IS the sensor coverage that determines what the
+	# player can shoot, which is the property the test range exists to
+	# measure.
+	rs.enable_fog_of_war = true
 	# Camera + HUD. BattleHUD is on (selection rings, HP bars, the player's
 	# HP label all live there). Minimap, production HUD, and admin menu
 	# are off - there is nothing to put in them.

@@ -2,6 +2,7 @@ extends Node3D
 const MunitionPool = preload("res://scripts/munition_pool.gd")
 const SimRNG = preload("res://scripts/battle/sim_rng.gd")
 const Profiler = preload("res://scripts/battle/battle_profiler.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 # Real, interceptable weapon missile (FABLE_REVIEW.md 2.2). Fired by
 # guided_missile / dual_stage_missile / missile_pod instead of the old
 # cosmetic tweened meshes - those never registered in the "missiles" group,
@@ -26,6 +27,10 @@ var speed: float = 16.0
 var is_top_attack: bool = false
 var salvo_jitter: float = 0.0 # missile_pod: sideways weave so a salvo reads as a swarm
 var is_destroyed: bool = false
+# Cosmetic round body (ModuleCatalog.GUIDED_MISSILE_MESH). Set before
+# add_child() - _ready() builds the visual. Empty string keeps the
+# procedural body+nose fallback.
+var mesh_part: String = ""
 
 var _climb_target_y: float = 0.0
 var _phase: int = 0 # 0 = climb (top-attack only), 1 = terminal
@@ -69,23 +74,40 @@ func _ready():
 	_phase = 0 if is_top_attack else 1
 	_climb_target_y = global_position.y + 9.0
 
-	# Visual: slim body + glowing nose cone (same read as the old cosmetic
-	# missile, now attached to a real entity)
-	var body = MeshInstance3D.new()
-	body.mesh = MunitionPool.unit_cylinder()
-	body.scale = Vector3(0.12, 0.35, 0.12)
-	body.material_override = MunitionPool.albedo(Color.DARK_SLATE_GRAY)
-	add_child(body)
-	body.rotate_x(PI / 2)
+	# Visual: authored round body when the launcher has one (same shape as the
+	# hardware mounted on the vehicle), else slim body + glowing nose cone
+	# (the original read). Authored meshes follow the project's forward -Z,
+	# which is also where look_at() aims this node.
+	var body_mesh: Mesh = MeshAssetLoader.get_part_mesh(mesh_part) if mesh_part != "" else null
+	if body_mesh != null:
+		var vis = MeshInstance3D.new()
+		vis.mesh = body_mesh
+		var aabb := body_mesh.get_aabb()
+		var s := aabb.size
+		var longest: float = max(s.x, max(s.y, s.z))
+		if longest > 0.001:
+			vis.scale = Vector3.ONE * (0.85 / longest)
+		if s.y >= s.x and s.y >= s.z:
+			vis.rotation.x = -PI / 2
+		elif s.x >= s.y and s.x >= s.z:
+			vis.rotation.y = PI / 2
+		add_child(vis)
+	else:
+		var body = MeshInstance3D.new()
+		body.mesh = MunitionPool.unit_cylinder()
+		body.scale = Vector3(0.12, 0.35, 0.12)
+		body.material_override = MunitionPool.albedo(Color.DARK_SLATE_GRAY)
+		add_child(body)
+		body.rotate_x(PI / 2)
 
-	var nose = MeshInstance3D.new()
-	# top_radius 0.0 over bottom 0.06 - a true cone, so taper ratio 0.
-	nose.mesh = MunitionPool.unit_taper(0.0)
-	nose.scale = Vector3(0.12, 0.12, 0.12)
-	nose.material_override = MunitionPool.emissive(Color.RED, Color.RED)
-	add_child(nose)
-	nose.position = Vector3(0, 0, -0.23)
-	nose.rotate_x(-PI / 2)
+		var nose = MeshInstance3D.new()
+		# top_radius 0.0 over bottom 0.06 - a true cone, so taper ratio 0.
+		nose.mesh = MunitionPool.unit_taper(0.0)
+		nose.scale = Vector3(0.12, 0.12, 0.12)
+		nose.material_override = MunitionPool.emissive(Color.RED, Color.RED)
+		add_child(nose)
+		nose.position = Vector3(0, 0, -0.23)
+		nose.rotate_x(-PI / 2)
 
 	# Smoke trail
 	var trail_timer = Timer.new()

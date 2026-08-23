@@ -414,80 +414,136 @@ func tick() -> void:
 	_update_shroud(local_constructs, _live_beacons(_local_team))
 
 
+func _pos_of(n: Node) -> Vector3:
+	if not is_instance_valid(n):
+		return Vector3.ZERO
+	if n is Node3D:
+		return n.global_position if n.is_inside_tree() else n.position
+	return Vector3.ZERO
+
+
+func _forward_of(n: Node) -> Vector3:
+	if not is_instance_valid(n) or not (n is Node3D):
+		return Vector3.FORWARD
+	var b: Basis = n.global_transform.basis if n.is_inside_tree() else n.transform.basis
+	return -b.z.normalized()
+
+
+func _get_prop(o: Object, prop: String, default_val = null):
+	if o == null or not is_instance_valid(o):
+		return default_val
+	var v = o.get(prop)
+	if v != null:
+		return v
+	if o.has_meta(prop):
+		return o.get_meta(prop)
+	return default_val
+
+
 func _is_spotted(c, viewers: Array, beacons: Array, was_visible: bool) -> bool:
-	var c_flying: bool = "is_flying" in c and c.is_flying
-	# The Bayou Irregulars' camouflage passive scaled every observer's range
-	# against the thing being looked at. Faction passives are gone (see
-	# livery.gd); spotting range is now the viewer's alone.
+	var c_flying: bool = bool(_get_prop(c, "is_flying", false))
+	var c_moving: bool = false
+	var vel = _get_prop(c, "velocity")
+	if vel is Vector3:
+		c_moving = vel.length() > 0.2
+	elif bool(_get_prop(c, "is_moving", false)):
+		c_moving = true
+
+	var c_pos := _pos_of(c)
+
 	for o in viewers:
 		if not is_instance_valid(o):
 			continue
+
+		var o_pos := _pos_of(o)
+
+		# 1. Seismic Sensing: Non-line-of-sight ground vibration sensing
+		var seismic: float = float(_get_prop(o, "seismic_range", 0.0))
+		if seismic > 0.0 and not c_flying and c_moving:
+			var reach_seis := seismic * HIDE_RANGE_MULT if was_visible else seismic
+			if c_pos.distance_to(o_pos) <= reach_seis:
+				return true
+
+		# 2. Check Directional Radar Sensors (focused sector reach)
+		var dir_sensors = _get_prop(o, "directional_sensors")
+		if dir_sensors is Array and not dir_sensors.is_empty():
+			var fwd := _forward_of(o)
+			var fwd_2d := Vector2(fwd.x, fwd.z).normalized()
+			for ds in dir_sensors:
+				var ds_range: float = float(ds.get("range", 0.0))
+				var ds_arc_rad: float = float(ds.get("arc_rad", PI / 3.0))
+				var ds_reach := ds_range * HIDE_RANGE_MULT if was_visible else ds_range
+				var to_c: Vector3 = c_pos - o_pos
+				var dist: float = to_c.length()
+				if dist <= ds_reach and dist > 0.001:
+					var to_c_2d := Vector2(to_c.x, to_c.z).normalized()
+					var dot_val := clampf(fwd_2d.dot(to_c_2d), -1.0, 1.0)
+					var angle := acos(dot_val)
+					if angle <= ds_arc_rad * 0.5:
+						var o_flying: bool = bool(_get_prop(o, "is_flying", false))
+						if o_flying or c_flying:
+							return true
+						var has_thermal: bool = bool(_get_prop(o, "has_thermal_sight", false)) or \
+							(is_instance_valid(o.get("hull_node")) and o.hull_node.has_meta("has_thermal_sight") and o.hull_node.get_meta("has_thermal_sight"))
+						if _check_los_cached(o, c, has_thermal):
+							return true
+
+		# 3. Standard Omni Vision (and Thermal FLIR Sight)
 		var vision := effective_vision(o)
-		# NO VISION MEANS NO VISION. Without this, the `distance <= reach` test
-		# below reads 0 <= 0 as true, so a construct with its sensors stripped -
-		# or one that never had any - still spots anything sharing its exact
-		# position. Degenerate in a real match, but it is the kind of edge that
-		# turns into a phantom reveal the moment two things stack.
-		if vision <= 0.0:
-			continue
-		# A fire-control radar lets a unit designate out to its weapons' reach
-		# rather than only as far as its own eyes.
-		if is_instance_valid(o.get("hull_node")) and o.hull_node.has_meta("has_fire_control_radar") \
-				and o.hull_node.get_meta("has_fire_control_radar"):
-			vision = maxf(vision, float(o.hull_node.get_meta("fire_control_max_range", vision)))
-		var reach := vision * HIDE_RANGE_MULT if was_visible else vision
-		if c.global_position.distance_to(o.global_position) > reach:
-			continue
-		# Airborne on either end skips the terrain ray - a plane is above the
-		# ridge the ray would hit, and so is anything looking at one.
-		var o_flying: bool = "is_flying" in o and o.is_flying
-		if o_flying or c_flying:
-			return true
-		# PR-4 (2026-08-19). LOS result cache. The raycast is the
-		# per-tick cost the 25 ms mean in the 22:54:40 capture is
-		# paying. The cache key includes both ends' quantized
-		# positions AND a geometry version that bumps on structure
-		# events, so a building going up between a viewer and a
-		# target correctly invalidates the prior "visible" answer.
-		var key := "%d:%d:%d:%d:%d:%d:%d" % [
-			_los_geom_version,
-			o.get_instance_id(), c.get_instance_id(),
-			int(floor(o.global_position.x / _LOS_CELL_SIZE)),
-			int(floor(o.global_position.z / _LOS_CELL_SIZE)),
-			int(floor(c.global_position.x / _LOS_CELL_SIZE)),
-			int(floor(c.global_position.z / _LOS_CELL_SIZE)),
-		]
-		var now := Time.get_ticks_msec()
-		if _los_cache.has(key):
-			var entry: Dictionary = _los_cache[key]
-			if entry.expires_at > now:
-				if entry.result:
+		if vision > 0.0:
+			if is_instance_valid(o.get("hull_node")) and o.hull_node.has_meta("has_fire_control_radar") \
+					and o.hull_node.get_meta("has_fire_control_radar"):
+				vision = maxf(vision, float(o.hull_node.get_meta("fire_control_max_range", vision)))
+			var reach := vision * HIDE_RANGE_MULT if was_visible else vision
+			if c_pos.distance_to(o_pos) <= reach:
+				var o_flying: bool = bool(_get_prop(o, "is_flying", false))
+				if o_flying or c_flying:
 					return true
-				continue
-			# Expired - fall through to a fresh raycast and overwrite
-		var visible: bool = _has_line_of_sight(o.global_position, c.global_position)
-		_los_cache[key] = {"result": visible, "expires_at": now + _LOS_CACHE_TTL_MS}
-		if visible:
-			return true
+				var has_thermal: bool = bool(_get_prop(o, "has_thermal_sight", false)) or \
+					(is_instance_valid(o.get("hull_node")) and o.hull_node.has_meta("has_thermal_sight") and o.hull_node.get_meta("has_thermal_sight"))
+				if _check_los_cached(o, c, has_thermal):
+					return true
+
 	for b in beacons:
-		if c.global_position.distance_to(b.pos) <= b.radius:
+		if c_pos.distance_to(b.pos) <= b.radius:
 			return true
 	return false
 
 
-func _has_line_of_sight(from_pos: Vector3, to_pos: Vector3) -> bool:
+func _check_los_cached(o: Node, c: Node, has_thermal: bool) -> bool:
+	var o_pos := _pos_of(o)
+	var c_pos := _pos_of(c)
+	var key := "%d:%d:%d:%d:%d:%d:%d:%d" % [
+		_los_geom_version,
+		o.get_instance_id(), c.get_instance_id(),
+		int(floor(o_pos.x / _LOS_CELL_SIZE)),
+		int(floor(o_pos.z / _LOS_CELL_SIZE)),
+		int(floor(c_pos.x / _LOS_CELL_SIZE)),
+		int(floor(c_pos.z / _LOS_CELL_SIZE)),
+		1 if has_thermal else 0,
+	]
+	var now := Time.get_ticks_msec()
+	if _los_cache.has(key):
+		var entry: Dictionary = _los_cache[key]
+		if entry.expires_at > now:
+			return entry.result
+	var visible: bool = _has_line_of_sight(o_pos, c_pos, has_thermal)
+	_los_cache[key] = {"result": visible, "expires_at": now + _LOS_CACHE_TTL_MS}
+	return visible
+
+
+func _has_line_of_sight(from_pos: Vector3, to_pos: Vector3, ignore_smoke: bool = false) -> bool:
 	if _controller == null or not _controller.is_inside_tree():
 		return true
 	var space: PhysicsDirectSpaceState3D = _controller.get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(
 		from_pos + Vector3(0, EYE_HEIGHT, 0),
 		to_pos + Vector3(0, EYE_HEIGHT, 0))
-	# Terrain and smoke, never other units - a unit does not block sight past it.
-	# Smoke denies SCOUTING as well as fire: a screen that hid you from being shot
-	# at but not from being seen would be a strange half-measure. Areas are off by
-	# default in a ray query, so smoke has to be opted into explicitly.
-	query.collision_mask = BattleLayers.TERRAIN + SmokeVolumeScript.SMOKE_COLLISION_LAYER
-	query.collide_with_areas = true
+	var mask: int = BattleLayers.TERRAIN
+	if not ignore_smoke:
+		mask += SmokeVolumeScript.SMOKE_COLLISION_LAYER
+	query.collision_mask = mask
+	query.collide_with_areas = not ignore_smoke
 	return space.intersect_ray(query).is_empty()
 
 
@@ -548,23 +604,38 @@ func _world_to_cell(x: float, z: float) -> Vector2i:
 func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 	if _texture == null:
 		return
-	# Fast path. The cell-visiting loop below is the 56 ms mean in the §12.1
-	# capture, and it runs on EVERY tick. When the player has held position for
-	# ten seconds, no viewer has moved more than a couple of metres, no beacon
-	# has changed, and the cell set we already wrote to _prev_cells is still
-	# correct. The hash below is a fixed-size fingerprint of the input, O(N) in
-	# the number of viewers, and a hit returns before the cell scan starts.
 	if _inputs_unchanged(local_constructs, beacons):
 		return
 	var viewers: Array = []
+	var topographic_scanners: Array = []
 	for o in local_constructs:
 		if not is_instance_valid(o):
 			continue
 		var v := effective_vision(o)
+		var o_pos := _pos_of(o)
 		if v > 0.0:
-			viewers.append({"pos": o.global_position, "vision": v})
+			viewers.append({"pos": o_pos, "vision": v, "type": "omni"})
+		var dir_sensors = _get_prop(o, "directional_sensors")
+		if dir_sensors is Array:
+			var fwd := _forward_of(o)
+			var fwd_2d := Vector2(fwd.x, fwd.z).normalized()
+			for ds in dir_sensors:
+				var ds_r: float = float(ds.get("range", 0.0))
+				var ds_arc: float = float(ds.get("arc_rad", PI / 3.0))
+				if ds_r > 0.0:
+					viewers.append({
+						"pos": o_pos,
+						"vision": ds_r,
+						"type": "directional",
+						"fwd": fwd_2d,
+						"arc_rad": ds_arc,
+					})
+		var topo_r: float = float(_get_prop(o, "topographic_range", 0.0))
+		if topo_r > 0.0:
+			topographic_scanners.append({"pos": o_pos, "radius": topo_r})
+
 	for b in beacons:
-		viewers.append({"pos": b.pos, "vision": b.radius})
+		viewers.append({"pos": b.pos, "vision": b.radius, "type": "omni"})
 
 	var now_visible: Dictionary = {}
 	var cell_size := _cell_size()
@@ -573,6 +644,10 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 		var centre: Vector3 = o.pos
 		var cell_radius := int(ceil(vision / cell_size)) + 1
 		var c0 := _world_to_cell(centre.x, centre.z)
+		var is_dir: bool = o.get("type", "omni") == "directional"
+		var fwd_2d: Vector2 = o.get("fwd", Vector2.ZERO)
+		var arc_rad: float = o.get("arc_rad", TAU)
+
 		for dz in range(-cell_radius, cell_radius + 1):
 			var gz := c0.y + dz
 			if gz < 0 or gz >= _dim:
@@ -583,7 +658,12 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 					continue
 				var wx := -_half + (gx + 0.5) * cell_size
 				var wz := -_half + (gz + 0.5) * cell_size
-				if Vector2(wx - centre.x, wz - centre.z).length() <= vision:
+				var d_vec := Vector2(wx - centre.x, wz - centre.z)
+				if d_vec.length() <= vision:
+					if is_dir and d_vec.length() > 0.001:
+						var angle := acos(clampf(fwd_2d.dot(d_vec.normalized()), -1.0, 1.0))
+						if angle > arc_rad * 0.5:
+							continue
 					now_visible[Vector2i(gx, gz)] = true
 
 	var changed := false
@@ -593,10 +673,35 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 			changed = true
 	for cell in _prev_cells:
 		if not now_visible.has(cell):
-			# Back to EXPLORED, not to unexplored. Somewhere you have been stays
-			# known.
+			# Back to EXPLORED, not to unexplored. Somewhere you have been stays known.
 			_image.set_pixel(cell.x, cell.y, Color(0, 0, 0, EXPLORED_ALPHA))
 			changed = true
+
+	# Topographic survey mapping (reveals terrain contours without tactical unit spotting)
+	for topo in topographic_scanners:
+		var t_pos: Vector3 = topo.pos
+		var t_rad: float = topo.radius
+		var cell_radius := int(ceil(t_rad / cell_size)) + 1
+		var c0 := _world_to_cell(t_pos.x, t_pos.z)
+		for dz in range(-cell_radius, cell_radius + 1):
+			var gz := c0.y + dz
+			if gz < 0 or gz >= _dim:
+				continue
+			for dx in range(-cell_radius, cell_radius + 1):
+				var gx := c0.x + dx
+				if gx < 0 or gx >= _dim:
+					continue
+				var cell_coord := Vector2i(gx, gz)
+				if now_visible.has(cell_coord):
+					continue
+				var wx := -_half + (gx + 0.5) * cell_size
+				var wz := -_half + (gz + 0.5) * cell_size
+				if Vector2(wx - t_pos.x, wz - t_pos.z).length() <= t_rad:
+					var cur_col = _image.get_pixel(gx, gz)
+					if cur_col.a >= UNEXPLORED_ALPHA - 0.01:
+						_image.set_pixel(gx, gz, Color(0, 0, 0, EXPLORED_ALPHA))
+						changed = true
+
 	_prev_cells = now_visible
 	if changed:
 		_texture.update(_image)
@@ -605,33 +710,17 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 		# where nothing moved far enough to uncover a new cell.
 		shroud_version += 1
 	# Cache the just-computed input for next tick's fast-path compare.
-	# Done at the end (not at the start) so we record what was actually
-	# processed; identical to what was passed in today, but the invariant
-	# is documented at the call site rather than in a comment that could
-	# drift. O(N) on local_constructs; cheap relative to the 16k cell scan
-	# above that we just skipped on the fast path.
 	_last_constructs_count = local_constructs.size()
 	_last_beacons_count = beacons.size()
 	_last_constructs_fingerprint.clear()
 	for c in local_constructs:
 		if is_instance_valid(c):
-			_last_constructs_fingerprint.append(c.global_position)
+			_last_constructs_fingerprint.append({"pos": _pos_of(c), "fwd": _forward_of(c)})
 
 
 # SKIRMISH_PERF_TROUBLESHOOTING.md §12.6. Input fingerprint for the _update_shroud
-# fast path. Stores a quantized (x, z) per viewer at 0.5 m resolution, the
-# vision radius truncated to an int, and the beacon count. Compared with
-# `==` against the new input; a hit means "nothing the scan would care
-# about changed", so the cell scan can be skipped entirely.
-#
-# 0.5 m is well under the new GRID_CELL (6.0 m), so a viewer that moved
-# inside its own cell still passes. A viewer that moved past a cell
-# boundary fails, which is the right answer - the cell set WILL differ.
-#
-# `_last_input_hash` is parallel to the LOS cache: both are invalidated
-# wholesale on structure events. The LOS cache goes via
-# invalidate_los_cache(); this one is bumped in the same place, see
-# _on_structure_event below.
+# fast path. Stores a quantized (x, z) per viewer at 0.5 m resolution, orientation,
+# and the beacon count.
 var _last_constructs_count: int = -1
 var _last_beacons_count: int = -1
 var _last_constructs_fingerprint: Array = []
@@ -642,23 +731,22 @@ func _inputs_unchanged(local_constructs: Array, beacons: Array) -> bool:
 		return false
 	if beacons.size() != _last_beacons_count:
 		return false
-	# Compare each viewer's quantised (x, z) and vision. A failure on
-	# any one viewer fails the whole check (cheaper than tracking a
-	# fine-grained "which ones moved" diff - the cell scan is the
-	# expensive part, and if ANY viewer moved, the cell set might
-	# differ and we have to scan).
 	for i in range(local_constructs.size()):
 		var c: Node = local_constructs[i]
 		if not is_instance_valid(c):
 			return false
-		var p: Vector3 = c.global_position
-		var prev: Vector3 = _last_constructs_fingerprint[i]
-		# 0.5 m cell quantisation; well under GRID_CELL=6.0.
-		if int(p.x * 2.0) != int(prev.x * 2.0):
+		var p: Vector3 = _pos_of(c)
+		var prev_entry = _last_constructs_fingerprint[i]
+		var prev_p: Vector3 = prev_entry["pos"] if prev_entry is Dictionary else prev_entry
+		if int(p.x * 2.0) != int(prev_p.x * 2.0):
 			return false
-		if int(p.z * 2.0) != int(prev.z * 2.0):
+		if int(p.z * 2.0) != int(prev_p.z * 2.0):
 			return false
-		continue
+		if prev_entry is Dictionary:
+			var cur_fwd: Vector3 = _forward_of(c)
+			var prev_fwd: Vector3 = prev_entry.get("fwd", Vector3.FORWARD)
+			if int(cur_fwd.x * 4.0) != int(prev_fwd.x * 4.0) or int(cur_fwd.z * 4.0) != int(prev_fwd.z * 4.0):
+				return false
 	return true
 # Whether a map cell has ever been seen. Exposed for the minimap, which draws
 # terrain only where the player has been.

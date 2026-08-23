@@ -199,6 +199,16 @@ const ACTIONS := {
 		"group": GROUP_COMMAND, "label": "Select all combat units",
 		"events": [{"key": KEY_F2}],
 	},
+	# Range / sensor overlay toggle. F12 because the F-row in the GROUP_COMMAND
+	# block is already crowded (F1 = idle harvester, F2 = select all army),
+	# and a debug-style preference toggle belongs on a function-key the
+	# player can find without looking. Routed through the InputService table
+	# so the Controls screen ships the binding without a later phase needing
+	# to touch this file.
+	"cmd_toggle_range_overlay": {
+		"group": GROUP_COMMAND, "label": "Toggle range / sensor overlay",
+		"events": [{"key": KEY_F12}],
+	},
 
 	# --- Design Lab -----------------------------------------------------------
 	"lab_mirror": {

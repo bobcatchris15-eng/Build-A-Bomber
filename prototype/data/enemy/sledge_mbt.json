@@ -1,0 +1,90 @@
+{
+	"version": 1.0,
+	"id": "enemy_sledge_mbt",
+	"name": "Sledge MBT",
+	"hull_type": "orrin_heavy_a",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 4.9, "y": 2.7, "z": 7.7},
+	"armor_material": "titanium_plate",
+	"armor_thickness": 1.5,
+	"faction": "industrialists",
+	"locomotion": {
+		"type_id": "tracked_treads",
+		"settings": {"width": 1.6, "drive_sprocket": true}
+	},
+	"modules": [
+		{
+			"type_id": "autocannon",
+			"name": "Autocannon",
+			"position": {"x": 0.0, "y": 1.38, "z": -0.6},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "turret",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 42,
+				"dps": 101.0,
+				"hp": 75.0,
+				"weight": 97.0
+			},
+			"tweaks": {
+				"caliber": 1.3,
+				"ammo": "ap"
+			}
+		},
+		{
+			"type_id": "heavy_machine_gun",
+			"name": "Heavy Machine Gun",
+			"position": {"x": 0.0, "y": 0.1, "z": -3.85},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 0.0, "z": -1.0},
+			"mount_style": "fixed",
+			"facet": "front",
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 15,
+				"dps": 32.5,
+				"hp": 60.0,
+				"weight": 40.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "tracked_treads",
+			"name": "Tracked Treads",
+			"position": {"x": -2.65, "y": -1.35, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 2.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 40,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 120.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "tracked_treads",
+			"name": "Tracked Treads",
+			"position": {"x": 2.65, "y": -1.35, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 2.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 40,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 120.0
+			},
+			"tweaks": {}
+		}
+	]
+}

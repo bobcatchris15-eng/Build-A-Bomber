@@ -67,6 +67,8 @@ const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.
 const CommanderScript = preload("res://scripts/battle/ai/commander.gd")
 const CounterDraftScript = preload("res://scripts/battle/ai/counter_draft.gd")
 const SquadScript = preload("res://scripts/battle/ai/squad.gd")
+const SquadManagerScript = preload("res://scripts/battle/ai/squad_manager.gd")
+const ThreatAnalyzerScript = preload("res://scripts/battle/ai/threat_analyzer.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
@@ -260,9 +262,8 @@ var vision: VisionService = null
 var battle_hud: HUDRoot = null
 var commander: Commander = null
 
-# One live squad per AI team. Kept between decisions so a squad's state -
-# retreating, regrouping, and the peak health those are measured against -
-# survives; rebuilding it each tick would reset its memory every two seconds.
+# AI OVERHAUL: SquadManager per AI team. Coordinates multi-squads (MBG, Raider, Base Guard, Scout).
+var _squad_managers: Dictionary = {}
 var _squads: Dictionary = {}
 
 # Per-team assigned base zone, indexed by team id.
@@ -623,12 +624,16 @@ func _ready() -> void:
 	# case via the same duck-typed null guard.
 	var ai_enabled: bool = true
 	var ai_diff: String = "normal"
+	var ai_doc: String = ""
 	if _match_rule_set != null:
 		ai_enabled = _match_rule_set.enable_ai
 		ai_diff = _match_rule_set.ai_difficulty
+		ai_doc = _match_rule_set.ai_doctrine
 	if ai_enabled:
 		commander = CommanderScript.new()
 		commander.setup(self, ENEMY_TEAM, ai_diff)
+		if not ai_doc.is_empty():
+			commander.doctrine = ai_doc
 		# PR5 (2026-08-15). The commander is now event-driven (see
 		# commander.gd's set_dirty()). Wire the structure-built event so
 		# the AI re-decides when something on the field actually changes,
@@ -1361,7 +1366,10 @@ func _spawn_test_range_force() -> void:
 			continue
 		var side_offset: float = float(dummy_index - (enemy_roster.size() - 1) * 0.5) * 6.0
 		var spawn_pos: Vector3 = base_anchor + right * side_offset
-		spawn_unit(design, ENEMY_TEAM, spawn_pos)
+		var dummy = spawn_unit(design, ENEMY_TEAM, spawn_pos)
+		if dummy != null:
+			# Test range dummies are target dummies: they hold fire until fired upon.
+			dummy.stance = StanceScript.Kind.HOLD_FIRE
 		dummy_index += 1
 
 
@@ -3489,26 +3497,23 @@ func ai_build_unit(for_team: int, role: String) -> bool:
 func _ai_build_unit_impl(for_team: int, role: String) -> bool:
 	var pick: Dictionary = ai_design_for_role(for_team, role)
 	# No design fills the role - fall back to any VEHICLE rather than stalling.
-	# An AI that refuses to build because it has no dedicated AA is worse than
-	# one that builds a tank. Routed through ai_design_for_role so the fallback
-	# cannot land on a turret and try to drive it out of a factory.
 	if pick.is_empty():
 		pick = ai_design_for_role(for_team, "general")
 	if pick.is_empty():
 		return false
 
+	# AI OVERHAUL: Ammo adaptation.
+	# If the commander has observed dominant enemy armor, adapt weapon ammo if possible!
+	if commander != null and not commander.observed_enemy_armor.is_empty():
+		var unlocked: Array = []
+		for s in get_team_structures(for_team):
+			if is_instance_valid(s) and not s.is_dead:
+				unlocked.append(s.kind)
+		pick = ThreatAnalyzerScript.adapt_ammo(pick, commander.observed_enemy_armor, unlocked)
+
 	var cost: int = DesignCostingScript.blueprint_cost(pick)
 	var queue_name: String = DesignCostingScript.queue_for_design(pick)
 
-	# SELF-THROTTLE. The commander re-decides every DECISION_INTERVAL and calls
-	# this each time, so without a depth cap it enqueues another unit every two
-	# seconds forever. Production drip-feeds cost, so a deep queue drains every
-	# credit as it arrives: the AI sat pinned at 0 credits with three harvesters
-	# queued, and every other action - which all gate on having money - was
-	# vetoed. It looked like an AI with one idea and was really an AI that had
-	# spent everything before it could have a second one.
-	#
-	# Two deep, the same cap the old runtime used (enemy_ai.gd's _queue_entry).
 	if production.queue(for_team, queue_name).size() >= AI_MAX_QUEUE_DEPTH:
 		return false
 	return not production.enqueue_unit(for_team, pick, cost,
@@ -3519,26 +3524,10 @@ const AI_MAX_QUEUE_DEPTH := 2
 
 
 # A design on a foundation hull is a static defence, not a vehicle.
-#
-# Worth a named helper rather than an inline check, because the two places that
-# need it fail in completely different and equally quiet ways: spawning one as a
-# starting unit gives you an immobile thing that looks like a unit, and queueing
-# one into a VEHICLE queue produces a turret that tries to drive out of a
-# factory exit.
 static func is_defence_design(blueprint: Dictionary) -> bool:
 	return ModuleCatalog.is_foundation(blueprint.get("hull_type", ""))
 
 
-# The design the AI would build for `role`, or {} if it has none.
-#
-# Foundations are excluded from every MOBILE role, including the catch-all
-# "general" - design_fills_role() answers true for anything there, so without
-# this filter the AI could pick a gun turret as its general-purpose tank.
-# Timed because it is the one thing EVERY ai_build_* path calls, sometimes
-# twice (ai_build_unit falls back to "general"), and ai_can_build_role calls it
-# again on top - so a modest per-call cost multiplies through the whole
-# decision. design_fills_role() walks a blueprint's module list per candidate,
-# which is not free on a large roster.
 func ai_design_for_role(for_team: int, role: String) -> Dictionary:
 	var _t := Profiler.start()
 	var out := _ai_design_for_role_impl(for_team, role)
@@ -3549,10 +3538,11 @@ func ai_design_for_role(for_team: int, role: String) -> Dictionary:
 func _ai_design_for_role_impl(_for_team: int, role: String) -> Dictionary:
 	var pool: Array = enemy_roster if not enemy_roster.is_empty() else roster
 	var want_defence := role == "defense"
+	var target_armor: String = commander.observed_enemy_armor if commander != null else ""
 	for design in pool:
 		if is_defence_design(design) != want_defence:
 			continue
-		if want_defence or CommanderScript.design_fills_role(design, role):
+		if want_defence or CommanderScript.design_fills_role(design, role, target_armor):
 			return design
 	return {}
 
@@ -3658,17 +3648,24 @@ func _ai_build_structure_impl(for_team: int, kind: String) -> bool:
 		cost, b_time).is_empty()
 
 
-# Pull everything home. The rally is the AI's own HQ, which is the thing worth
-# defending - losing it ends the match.
+# Pull everything home. The rally is the AI's own HQ.
 func ai_defend(for_team: int, combat: Array) -> void:
 	var home := _team_home(for_team)
-	_ai_squad(for_team, combat, home).objective = home
+	var sm = _ai_squad_manager(for_team, combat, home)
+	if sm != null:
+		sm.defend()
+	else:
+		_ai_squad(for_team, combat, home).objective = home
 
 
 # Commit to an attack on the enemy HQ.
 func ai_push(for_team: int, combat: Array) -> void:
 	var target := _team_home(PLAYER_TEAM if for_team != PLAYER_TEAM else ENEMY_TEAM)
-	_ai_squad(for_team, combat, _team_home(for_team)).objective = target
+	var sm = _ai_squad_manager(for_team, combat, _team_home(for_team))
+	if sm != null:
+		sm.push(target)
+	else:
+		_ai_squad(for_team, combat, _team_home(for_team)).objective = target
 
 
 func _team_home(for_team: int) -> Vector3:
@@ -3680,9 +3677,24 @@ func _team_home(for_team: int) -> Vector3:
 	return spawn.get("hq", Vector3.ZERO) if not spawn.is_empty() else Vector3.ZERO
 
 
-# One squad per AI team, rebuilt from whatever is alive. Kept as a live object
-# rather than re-created each decision so its state - retreating, regrouping, and
-# the peak health those are measured against - survives between ticks.
+func _ai_squad_manager(for_team: int, combat: Array, rally: Vector3) -> SquadManager:
+	var target := _team_home(PLAYER_TEAM if for_team != PLAYER_TEAM else ENEMY_TEAM)
+	var bounds := Rect2()
+	if current_map.has("map_half_extents"):
+		var h: float = float(current_map.get("map_half_extents", 80.0))
+		bounds = Rect2(-h, -h, h * 2.0, h * 2.0)
+
+	if not _squad_managers.has(for_team):
+		var sm: SquadManager = SquadManagerScript.new()
+		sm.setup(self, orders, for_team, rally, target, bounds)
+		_squad_managers[for_team] = sm
+
+	var mgr: SquadManager = _squad_managers[for_team]
+	mgr.assign_units(combat)
+	return mgr
+
+
+# Fallback for single-squad / test access
 func _ai_squad(for_team: int, combat: Array, rally: Vector3):
 	if not _squads.has(for_team) or _squads[for_team].is_spent():
 		var squad = SquadScript.new()
@@ -3869,6 +3881,8 @@ func _physics_process(delta: float) -> void:
 	# seconds: the macro choice is slow, but a squad deciding to retreat cannot
 	# wait two seconds for the next decision window.
 	t = Profiler.start()
+	for sm in _squad_managers.values():
+		sm.tick(delta)
 	for squad in _squads.values():
 		squad.tick(delta)
 	Profiler.stop("squads", t)
@@ -4096,6 +4110,19 @@ func _handle_key(event: InputEventKey) -> void:
 		if latest != null and camera != null:
 			camera.global_position.x = latest.world_pos.x
 			camera.global_position.z = latest.world_pos.z
+	elif event.is_action_pressed("cmd_toggle_range_overlay"):
+		# Toggle the sensor/weapon discs on every currently-selected unit.
+		# The new value is the inverse of the first selected unit's current
+		# setting, so pressing F12 with no selection does nothing (no
+		# unit to read state from) and pressing F12 with a mixed
+		# selection forces everything to one consistent value.
+		var sel: Array = selection.selected
+		if not sel.is_empty():
+			var first = sel[0]
+			var new_value: bool = not (("show_range_overlay" in first) and first.show_range_overlay)
+			for u in sel:
+				if "set_range_overlay_visible" in u:
+					u.set_range_overlay_visible(new_value)
 	elif event.is_action_pressed("sys_perf"):
 		_toggle_perf_hud()
 	elif event.is_action_pressed("sys_perf_dump"):

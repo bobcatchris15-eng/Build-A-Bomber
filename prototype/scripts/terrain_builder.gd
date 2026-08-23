@@ -2572,19 +2572,27 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D, prop_s
 # ambient_tree_*.glb pool instead of the 3-variant resource_lumber_* one,
 # (b) NEVER regrow once depleted.
 #
-# AVOIDANCE IS THE SAME SET AS _spawn_grassland_clutter ABOVE - water,
-# obstacles, bridges, surface_zones, spawn structures, AND the
-# harvestable resource_nodes themselves (the lumber fields that DO
-# regrow). The avoid radius is larger than the grass-tuft 7.0 because
-# trees are bigger and a forest grown right up to an HQ is busy enough
-# to compete visually with the buildings.
+# AVOIDANCE (Chris, 2026-08-23: "trees avoid lakes but not marshes"):
+# water is _pos_on_lake() - rect water_areas AND shallow_water_areas AND
+# organic water_blobs, with AMBIENT_SHORE_MARGIN of standoff past each
+# shoreline (blobs enforce at least their own shore_blend, since the bed
+# stays below sea level that far out - see that function's comment).
+# Marshes are surface_zones, NOT water - a marsh reed bed is exactly where
+# a tree may stand - so the tree pass deliberately passes NO surface_rects
+# down to the cluster helpers and grows through marsh, forest-floor, ice
+# and every other land zone alike. Still avoided: bridges, spawn
+# structures, and the harvestable resource_nodes themselves (the lumber
+# fields that DO regrow). The avoid radius is larger than the grass-tuft
+# 7.0 because trees are bigger and a forest grown right up to an HQ is
+# busy enough to compete visually with the buildings.
 #
-# DENSITY: ~1 tree per AMBIENT_TREE_DENSITY_M2 of eligible area, capped
-# so a 4x-scaled map (world_scale) doesn't multiply the tree count by
-# 16x the way area does. The cap is the same order of magnitude as
-# `_spawn_slope_rocks` (SLOPE_ROCK_MAX_COUNT = 260) - deliberately NOT
-# a fixed-per-half-extent, since the user-facing constraint is
-# "looks like a forest" rather than "exactly N trees per map."
+# DENSITY: grove-shaped, capped so a 4x-scaled map (world_scale) doesn't
+# multiply the tree count by 16x the way area does. The cap is the same
+# order of magnitude as `_spawn_slope_rocks` (SLOPE_ROCK_MAX_COUNT = 260)
+# - deliberately NOT a fixed-per-half-extent, since the user-facing
+# constraint is "looks like a forest" rather than "exactly N trees per
+# map."
+#
 # CLUSTER-BASED AMBIENT SCATTER (Chris, 2026-08-10).
 #
 # Old: Poisson-disc-style random scatter across the whole map at ~1 item
@@ -2594,12 +2602,18 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D, prop_s
 # the `resource_nodes` group.
 #
 # New: K cluster centers, each carrying M items in a Gaussian falloff
-# around the center. Same avoidance rules (water, obstacles, bridges,
-# surface zones, spawns, the other ambient kind). Fewer nodes than
-# the pre-cluster ~1650 (30 * 27 + 20 * 19 = ~1190 typical, ~1.4x
-# reduction) AND visibly larger, denser groves locally - which is the
-# playtest ask ("the ambient forest should be in patches, not spread
-# at random, and not quite dense or large enough as is").
+# around the center.
+#
+# 2026-08-23 retune (second playtest ask, "more in groves/forests"). The
+# first-pass numbers could not physically fill: CLUSTER_RADIUS 9 with an
+# 8.0 per-tree clearance fits ~4-6 trees in a whole grove (hexagonal
+# packing at 8-unit spacing gives one tree per ~55 m² against a 254 m²
+# disc), so requesting 22-32 mostly failed and the map showed scattered
+# pairs instead of woods. Radius 14 + clearance 6.0 fits ~15+ per grove -
+# canopies nearly touching, which is what reads as FOREST from RTS camera
+# height - while the typical placed total (~30 x ~17 = ~510) lands BELOW
+# the old nominal ~810, because bigger clusters waste far fewer attempts
+# on mutual-clearance rejections.
 #
 # Why the count cut matters. Every ResourceNode is a node in the scene
 # tree and an entry in the `resource_nodes` group. match_director.gd's
@@ -2610,24 +2624,27 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D, prop_s
 # ~3.7x. The MultiMesh draw batching in ambient_scatter.gd is unchanged
 # (visual draw-call cost was already addressed there).
 #
-# The avoidance lists are unchanged: a tree cannot be on a water blob,
-# an ore cannot be on a spawn point, an ore and a tree cannot be at
-# the same world point. Cluster centers are mutually-avoided at the
-# cluster scale (no two clusters within CLUSTER_AVOID_RADIUS of each
+# The avoidance lists are unchanged: an ore cannot be on a spawn point, an
+# ore and a tree cannot be at the same world point. Cluster centers are
+# mutually-avoided at the cluster scale (no two clusters within CLUSTER_AVOID_RADIUS of each
 # other) so the patches read as discrete, not a single mega-patch.
 # Bumped 2026-08-10 (second pass, ~30 min after first): playtest saw the
 # first-pass clusters as too small / too sparse to read as forest groves
 # from RTS camera height. FPS at ~47 is the "acceptable for dev" budget;
 # these numbers trade iteration cost for visual weight and stay well
-# under the pre-cluster ~1650-instance total (30 * 27 + 20 * 19 = ~1190).
-const AMBIENT_TREE_AVOID_RADIUS: float = 8.0
+# under the pre-cluster ~1650-instance total.
+#
+# 2026-08-23: see the AVOIDANCE/DENSITY paragraphs above for the lake rule
+# and the grove-size retune rationale.
+const AMBIENT_SHORE_MARGIN: float = 1.5
+const AMBIENT_TREE_AVOID_RADIUS: float = 6.0
 const AMBIENT_TREE_CLUSTER_COUNT: int = 30
-const AMBIENT_TREE_CLUSTER_RADIUS: float = 9.0
-const AMBIENT_TREE_CLUSTER_AVOID_RADIUS: float = 46.0
-const AMBIENT_TREE_ITEMS_MIN: int = 22
-const AMBIENT_TREE_ITEMS_MAX: int = 32
+const AMBIENT_TREE_CLUSTER_RADIUS: float = 14.0
+const AMBIENT_TREE_CLUSTER_AVOID_RADIUS: float = 54.0
+const AMBIENT_TREE_ITEMS_MIN: int = 26
+const AMBIENT_TREE_ITEMS_MAX: int = 40
 const AMBIENT_TREE_MIN_COUNT: int = 40
-const AMBIENT_TREE_MAX_COUNT: int = 960   # = 30 clusters * 32 items ceiling
+const AMBIENT_TREE_MAX_COUNT: int = 1200  # = 30 clusters * 40 items ceiling
 
 const AMBIENT_ORE_AVOID_RADIUS: float = 9.0
 const AMBIENT_ORE_CLUSTER_COUNT: int = 20
@@ -2658,11 +2675,15 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 	var items_min: int = int(round(float(AMBIENT_TREE_ITEMS_MIN) * density))
 	var max_count: int = cluster_count * items_max
 
-	# Avoidance set, identical to _spawn_grassland_clutter() so the two
-	# passes can't disagree on "where is it legal to put a prop."
+	# Avoidance set. Deliberately NOT identical to _spawn_grassland_clutter()
+	# anymore (Chris, 2026-08-23): the grass pass keeps its blanket
+	# surface-zone rejection because its props would fight each zone's own
+	# dedicated dressing, but a TREE is exactly what a forest/marsh zone
+	# wants standing in it - so this pass passes NO surface_rects and
+	# relies on _pos_on_lake() for everything watery. Bridges, spawns and
+	# harvestable fields stay rejected.
 	var avoid_points := _ambient_avoid_points(map_def)
 	var bridge_rects = _collect_bridges(map_def)
-	var surface_rects = _surface_rects(map_def)
 
 	# Seeded off the map name (same convention as _spawn_grassland_
 	# clutter): a given map dresses identically run to run, which is
@@ -2677,13 +2698,13 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 	var placed_positions: Array = []
 	var clusters := _pick_cluster_centers(
 		rng, half, cluster_count, AMBIENT_TREE_CLUSTER_AVOID_RADIUS,
-		avoid_points, bridge_rects, surface_rects)
+		avoid_points, bridge_rects, [], map_def)
 	for cluster_center in clusters:
 		var items := rng.randi_range(items_min, items_max)
 		var placed_in_cluster := _place_in_cluster(
 			rng, cluster_center, AMBIENT_TREE_CLUSTER_RADIUS, items,
-			avoid_points, bridge_rects, surface_rects,
-			AMBIENT_TREE_AVOID_RADIUS, max_count - placed)
+			avoid_points, bridge_rects, [],
+			AMBIENT_TREE_AVOID_RADIUS, max_count - placed, map_def)
 		for pos in placed_in_cluster:
 			pos.y = terrain_height_at(map_def, pos)
 			TerrainGreeblesScript.spawn_ambient_tree(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_TREE_AMOUNT)
@@ -2705,6 +2726,13 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 #   * MUST RUN AFTER _spawn_ambient_trees, and consumes the trees'
 #     already-placed positions as an extra avoidance set so an ore
 #     doesn't land on top of a tree (or vice versa on a future pass).
+#   * Same avoidance rules as the trees EXCEPT surface zones: an ore keeps
+#     the blanket surface_rects rejection (an outcrop fighting a marsh's
+#     reeds reads as two terrain treatments, unlike a tree in a marsh),
+#     and gains _pos_on_lake() via the shared cluster helpers - the
+#     2026-08-10 rewrite dropped the pre-cluster scatter's water check
+#     for BOTH passes; the trees got it back first (2026-08-23), the ore
+#     with it.
 #   * Uses its OWN RNG seed (off the map name, +0xB5C6D7E8) so the
 #     same map-name determinism contract holds and the two passes
 #     never draw the same RNG sequence for the same attempt.
@@ -2733,13 +2761,13 @@ static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale:
 	var placed = 0
 	var clusters := _pick_cluster_centers(
 		rng, half, cluster_count, AMBIENT_ORE_CLUSTER_AVOID_RADIUS,
-		avoid_points, bridge_rects, surface_rects)
+		avoid_points, bridge_rects, surface_rects, map_def)
 	for cluster_center in clusters:
 		var items := rng.randi_range(items_min, items_max)
 		var placed_in_cluster := _place_in_cluster(
 			rng, cluster_center, AMBIENT_ORE_CLUSTER_RADIUS, items,
 			avoid_points, bridge_rects, surface_rects,
-			AMBIENT_ORE_AVOID_RADIUS, max_count - placed)
+			AMBIENT_ORE_AVOID_RADIUS, max_count - placed, map_def)
 		for pos in placed_in_cluster:
 			pos.y = terrain_height_at(map_def, pos)
 			TerrainGreeblesScript.spawn_ambient_ore(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_ORE_AMOUNT)
@@ -2773,6 +2801,27 @@ static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale:
 # Purely decorative - no StaticBody3D, matching terrain_greebles.gd's own
 # contract. Rock that appeared on a slope and also blocked movement would turn
 # a visual cue into a silent gameplay change.
+#
+# CLUSTERED (Chris, 2026-08-23: "boulders need to cluster together too").
+# The pass above placed each slope-approved boulder immediately at its own
+# grid sample - geologically honest about WHERE rock sheds (steep ground)
+# but visually wrong about HOW: real talus gathers in fields at a cliff's
+# toe and in ravine mouths, not as uniformly spaced single stones down the
+# whole hillside. Two phases now:
+#
+#   Phase 1 (unchanged gate): walk the coarse grid, jitter each sample,
+#   roll against slope_rock_density() - but COLLECT accepted points
+#   instead of placing them.
+#   Phase 2: seeds are picked from those candidates with mutual avoidance
+#   (BOULDER_SEED_AVOID_RADIUS), then every candidate within
+#   BOULDER_CLUSTER_RADIUS of a seed is placed; candidates claimed by no
+#   seed are dropped. Steepness still decides whether rock exists at all -
+#   clustering just decides which of it survives - so the densest fields
+#   still land on the steepest, least walkable ground.
+#
+# Determinism is preserved end to end: one seeded RNG, phase 1 walks and
+# rolls exactly as before, so a given map proposes an identical candidate
+# set run to run.
 const SLOPE_ROCK_GRID_DIVISIONS: int = 44
 # Below this slope, bare ground: flat terrain has no reason to be shedding
 # bedrock, and rocks everywhere would read as noise rather than as a cue.
@@ -2782,6 +2831,14 @@ const SLOPE_ROCK_MIN_SLOPE: float = 0.12
 # everywhere would otherwise scale straight into a wall of geometry, which is
 # the same trap terrain_greebles.gd's _scaled_count() exists to avoid.
 const SLOPE_ROCK_MAX_COUNT: int = 260
+# Field shape: candidates within BOULDER_CLUSTER_RADIUS of a seed form one
+# boulder field; seeds sit at least BOULDER_SEED_AVOID_RADIUS apart so the
+# fields read as discrete talus piles, not one continuous apron. Sized
+# against the grid step ((2*half)/44 ~= 9.5 units on a 210-half map): a
+# 16-unit radius spans several cells of steep ground per field.
+const BOULDER_CLUSTER_RADIUS: float = 16.0
+const BOULDER_SEED_AVOID_RADIUS: float = 42.0
+const BOULDER_MAX_SEEDS: int = 48
 
 # Placement probability for a given local slope, 0..1. Reaches 1 only at
 # genuinely unwalkable ground, so the densest rock cover always coincides with
@@ -2811,11 +2868,13 @@ static func _spawn_slope_rocks(map_def: Dictionary, parent: Node3D) -> int:
 	# this project uses depends on it.
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(map_def.get("name", "slope_rocks")) + 977
-	var placed := 0
+
+	# Phase 1: propose slope-approved candidates (no placement yet).
+	var candidates: Array = []
 	var y := -half + step * 0.5
-	while y < half and placed < SLOPE_ROCK_MAX_COUNT:
+	while y < half:
 		var x := -half + step * 0.5
-		while x < half and placed < SLOPE_ROCK_MAX_COUNT:
+		while x < half:
 			var px: float = x + rng.randf_range(-step * 0.4, step * 0.4)
 			var pz: float = y + rng.randf_range(-step * 0.4, step * 0.4)
 			x += step
@@ -2836,8 +2895,38 @@ static func _spawn_slope_rocks(map_def: Dictionary, parent: Node3D) -> int:
 					if Vector2(pos.x - a.x, pos.z - a.z).length() < GRASSLAND_CLUTTER_AVOID_RADIUS:
 						rejected = true
 						break
-			if rejected:
+			if not rejected:
+				candidates.append(pos)
+		y += step
+
+	# Phase 2a: pick field seeds from the candidates themselves - a seed IS
+	# a slope-approved point, so every field is anchored on genuine rock
+	# ground by construction.
+	var seeds: Array = []
+	for c in candidates:
+		if seeds.size() >= BOULDER_MAX_SEEDS:
+			break
+		var too_close := false
+		for s in seeds:
+			if Vector2(c.x - s.x, c.z - s.z).length() < BOULDER_SEED_AVOID_RADIUS:
+				too_close = true
+				break
+		if not too_close:
+			seeds.append(c)
+
+	# Phase 2b: place each candidate that falls inside some seed's field;
+	# drop the stragglers. `claimed` stops a candidate shared between two
+	# overlapping fields from placing twice.
+	var placed := 0
+	var claimed := {}
+	for s in seeds:
+		for i in range(candidates.size()):
+			if claimed.has(i):
 				continue
+			var c: Vector3 = candidates[i]
+			if Vector2(c.x - s.x, c.z - s.z).length() > BOULDER_CLUSTER_RADIUS:
+				continue
+			claimed[i] = true
 			var packed := load(BOULDER_MODEL_DIR % (rng.randi() % BOULDER_POOL_SIZE)) as PackedScene
 			if packed == null:
 				continue
@@ -2858,10 +2947,11 @@ static func _spawn_slope_rocks(map_def: Dictionary, parent: Node3D) -> int:
 			# (and log) for any caller whose parent isn't in the tree yet -
 			# tests and probes especially. See _spawn_bridge()'s own note on
 			# exactly this trap.
-			inst.position = Vector3(px, terrain_height_at(map_def, pos) - rng.randf_range(0.05, 0.45), pz)
+			inst.position = Vector3(c.x, terrain_height_at(map_def, c) - rng.randf_range(0.05, 0.45), c.z)
 			parent.add_child(inst)
 			placed += 1
-		y += step
+			if placed >= SLOPE_ROCK_MAX_COUNT:
+				return placed
 	return placed
 
 # --- Queries (pure functions, no Node dependency - callable from tests
@@ -2928,6 +3018,44 @@ static func is_water_at(map_def: Dictionary, x: float, z: float) -> bool:
 			return true
 	return false
 
+# Lake avoidance for the ambient scatter passes (Chris, 2026-08-23: "trees
+# avoid lakes but not marshes"). Covers all three water footprints - rect
+# water_areas, rect shallow_water_areas, and organic water_blobs - with a
+# `margin` standoff past the shoreline.
+#
+# The margin is NOT optional for blobs: a water_blob's ground doesn't rise
+# back to sea level at the coastline, it rises over `shore_blend` units
+# OUTSIDE the per-angle radius (see _water_blob_height_contribution), so a
+# tree accepted exactly AT the blob boundary still stands in the submerged
+# blend ring. Blobs therefore always get max(margin, shore_blend); rects
+# get the plain margin (their bed is flat and the visual water plane ends
+# at the rect edge, so a small aesthetic standoff is enough).
+#
+# Marshes are deliberately absent: a marsh is a surface_zone (walkable,
+# just slow - see get_surface_type_at()), not water. Trees are ALLOWED in
+# marshes and every other land surface zone; this function is the only
+# water-facing gate the tree pass uses.
+static func _pos_on_lake(map_def: Dictionary, pos: Vector3, margin: float = 0.0) -> bool:
+	for w in map_def.get("water_areas", []):
+		var r := _rect_from(w.center, w.half_extents)
+		if pos.x > r.x0 - margin and pos.x < r.x1 + margin \
+				and pos.z > r.z0 - margin and pos.z < r.z1 + margin:
+			return true
+	for sw in map_def.get("shallow_water_areas", []):
+		var rs := _rect_from(sw.center, sw.half_extents)
+		if pos.x > rs.x0 - margin and pos.x < rs.x1 + margin \
+				and pos.z > rs.z0 - margin and pos.z < rs.z1 + margin:
+			return true
+	for blob in map_def.get("water_blobs", []):
+		var c: Vector3 = blob.center
+		var dx = pos.x - c.x
+		var dz = pos.z - c.z
+		var theta = atan2(dz, dx)
+		var standoff = maxf(margin, float(blob.get("shore_blend", 4.0)))
+		if Vector2(dx, dz).length() <= _water_blob_radius_at_angle(blob, theta) + standoff:
+			return true
+	return false
+
 # Water or an obstacle footprint, with no slope check - split out of
 # is_position_blocked() so the grassland-clutter tall/short decor split
 # (see _spawn_grassland_clutter()'s CORE_DESIGN_LANGUAGE.md §3.1 comment)
@@ -2962,11 +3090,13 @@ static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
 # --- Cluster-scatter helpers (2026-08-10, Chris) ---
 #
 # Reused by both _spawn_ambient_trees and _spawn_ambient_ores; the
-# avoid-points / surface-rects collection is identical between the
-# two passes (and identical to _spawn_grassland_clutter()'s), so it
-# lives in one place. Cluster-center picking and per-cluster item
-# placement are the structural change that turned the random scatter
-# into the patchy scatter the playtest asked for.
+# avoid-points collection is identical between the two passes. The
+# surface-rects list is NOT: since 2026-08-23 the tree pass passes none
+# (trees belong in marsh/forest zones - see _spawn_ambient_trees), the
+# ore pass keeps the full set. Both passes DO share the map_def-driven
+# lake rejection inside these helpers. Cluster-center picking and
+# per-cluster item placement are the structural change that turned the
+# random scatter into the patchy scatter the playtest asked for.
 
 # Same avoid-set the two ambient passes AND _spawn_grassland_clutter() use.
 # Spawns + resource_node field centers - nothing of a resource_node's own
@@ -2991,17 +3121,22 @@ static func _surface_rects(map_def: Dictionary) -> Array:
 
 
 # Picks up to `count` cluster centers with mutual avoidance. A cluster
-# center is rejected if it lands on water/an obstacle/a bridge/a surface
-# zone/a spawn/resource_node (the same rules _spawn_grassland_clutter()
+# center is rejected if it lands on a bridge/a surface zone/a spawn/
+# resource_node (the same rules _spawn_grassland_clutter()
 # uses), OR if it is within `cluster_avoid_radius` of an already-accepted
-# cluster. The 0.94 inner-edge of the playable rectangle keeps every
-# cluster on real ground (not on the lip of the map).
+# cluster, OR - when the caller passes a map_def - if it lands on or near
+# a lake (_pos_on_lake; the ambient passes are the only callers that do,
+# and both want it: the 2026-08-10 cluster rewrite silently dropped the
+# water check the pre-cluster scatter had, which is how trees ended up
+# standing in lakes). The 0.94 inner-edge of the playable rectangle keeps
+# every cluster on real ground (not on the lip of the map).
 #
 # Returns an Array of Vector2 (xz, y=0). The caller is responsible for
 # sampling the actual terrain height at the item-placement phase.
 static func _pick_cluster_centers(
 		rng: RandomNumberGenerator, half: float, count: int, cluster_avoid_radius: float,
-		avoid_points: Array, bridge_rects: Array, surface_rects: Array) -> Array:
+		avoid_points: Array, bridge_rects: Array, surface_rects: Array,
+		map_def: Dictionary = {}) -> Array:
 	var out: Array = []
 	var max_attempts: int = count * 16
 	var attempts := 0
@@ -3010,6 +3145,8 @@ static func _pick_cluster_centers(
 		var pos := Vector2(rng.randf_range(-half * 0.94, half * 0.94),
 				rng.randf_range(-half * 0.94, half * 0.94))
 		if is_position_blocked_in_dict(pos, avoid_points, bridge_rects, surface_rects, 0.0):
+			continue
+		if not map_def.is_empty() and _pos_on_lake(map_def, Vector3(pos.x, 0, pos.y), AMBIENT_SHORE_MARGIN):
 			continue
 		# Mutual cluster avoidance: no two cluster centers within the
 		# cluster_avoid_radius of each other. Tested as a flat 2D distance
@@ -3032,14 +3169,17 @@ static func _pick_cluster_centers(
 # to the edge - the visual that says "this is a patch, not a perfect
 # grid." Items are rejected against the same avoid set as the cluster
 # center, AND against the already-placed items in this cluster, using
-# `per_item_avoid_radius` as the per-item clearance.
+# `per_item_avoid_radius` as the per-item clearance - and against lakes,
+# exactly like _pick_cluster_centers above (a whole grove's worth of
+# individual rejections near a shoreline is what keeps a forest edge
+# reading as a coastline instead of a grid of drowned trunks).
 #
 # Returns an Array of Vector3 with y=0. The caller resolves the actual
 # terrain height for each item.
 static func _place_in_cluster(
 		rng: RandomNumberGenerator, center: Vector2, cluster_radius: float, max_items: int,
 		avoid_points: Array, bridge_rects: Array, surface_rects: Array,
-		per_item_avoid_radius: float, hard_cap: int) -> Array:
+		per_item_avoid_radius: float, hard_cap: int, map_def: Dictionary = {}) -> Array:
 	var out: Array = []
 	var attempts := 0
 	var placed_in_cluster := 0
@@ -3054,6 +3194,8 @@ static func _place_in_cluster(
 		var jitter_z: float = (rng.randf_range(-1.0, 1.0) + rng.randf_range(-1.0, 1.0)) * 0.5 * cluster_radius
 		var pos := Vector2(center.x + jitter_x, center.y + jitter_z)
 		if is_position_blocked_in_dict(pos, avoid_points, bridge_rects, surface_rects, 0.0):
+			continue
+		if not map_def.is_empty() and _pos_on_lake(map_def, Vector3(pos.x, 0, pos.y), AMBIENT_SHORE_MARGIN):
 			continue
 		# Per-item mutual avoidance inside the cluster.
 		var too_close := false

@@ -59,14 +59,18 @@ const ENTRIES: Array = [
 	{"id": "hold", "action": "cmd_hold", "label": "Hold", "icon": "cmd_hold", "row": 2, "col": 3},
 	{"id": "stance_hold_fire", "action": "cmd_hold_fire", "label": "Hold Fire", "icon": "cmd_stance_hold", "row": 2, "col": 4},
 
-	# Row 3: mouse-only overflow. No default key bindings; the cell is
-	# reserved for verbs the next phase (formation presets, etc.) will
-	# define. action="" so the cell has no InputService entry to claim
-	# a binding from.
-	{"id": "formation_wedge", "action": "", "label": "Wedge", "icon": "menu", "row": 3, "col": 1},
-	{"id": "formation_line", "action": "", "label": "Line", "icon": "menu", "row": 3, "col": 2},
-	{"id": "formation_column", "action": "", "label": "Column", "icon": "menu", "row": 3, "col": 3},
-	{"id": "spread", "action": "", "label": "Spread", "icon": "menu", "row": 3, "col": 4},
+	# Row 3: mouse-only overflow. No default key bindings for the
+	# formation/spread placeholders; the cell is reserved for verbs
+	# the next phase (formation presets, etc.) will define.
+	# The (3, 1) slot is in use: the range-overlay toggle. It is the
+	# only "verb" that is a UI preference rather than a unit command,
+	# but the player reaches for it from the same place they reach for
+	# stances, so it sits in the command card.
+	{"id": "toggle_range_overlay", "action": "cmd_toggle_range_overlay",
+		"label": "Range", "icon": "cmd_stance_aggressive", "row": 3, "col": 1},
+	{"id": "formation_wedge", "action": "", "label": "Wedge", "icon": "menu", "row": 3, "col": 2},
+	{"id": "formation_line", "action": "", "label": "Line", "icon": "menu", "row": 3, "col": 3},
+	{"id": "formation_column", "action": "", "label": "Column", "icon": "menu", "row": 3, "col": 4},
 ]
 
 

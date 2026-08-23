@@ -1,0 +1,138 @@
+{
+	"version": 1.0,
+	"id": "enemy_haze_ew",
+	"name": "Haze EW Platform",
+	"hull_type": "calder_medium_a",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 3.4, "y": 1.7, "z": 5.9},
+	"armor_material": "carbon_fiber",
+	"armor_thickness": 0.8,
+	"faction": "bayou_irregulars",
+	"locomotion": {
+		"type_id": "hover_engine",
+		"settings": {"size": 1.0}
+	},
+	"modules": [
+		{
+			"type_id": "microwave_emitter",
+			"name": "Microwave Emitter",
+			"position": {"x": 0.0, "y": 0.88, "z": -0.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "turret",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 32,
+				"cost_metal": 30,
+				"dps": 30.0,
+				"hp": 65.0,
+				"weight": 105.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "chaff_dispenser",
+			"name": "Chaff Dispenser",
+			"position": {"x": 0.0, "y": 0.88, "z": 0.3},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "fixed",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 4,
+				"cost_metal": 16,
+				"dps": 0.0,
+				"hp": 45.0,
+				"weight": 35.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "jammer_mast",
+			"name": "Jammer Mast",
+			"position": {"x": 0.0, "y": 0.88, "z": 1.4},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "fixed",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 22,
+				"dps": 0.0,
+				"hp": 55.0,
+				"weight": 70.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "hover_engine",
+			"name": "Hover Pad",
+			"position": {"x": 1.75, "y": -0.6, "z": 1.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "hover_engine",
+			"name": "Hover Pad",
+			"position": {"x": -1.75, "y": -0.6, "z": 1.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "hover_engine",
+			"name": "Hover Pad",
+			"position": {"x": 1.75, "y": -0.6, "z": -1.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "hover_engine",
+			"name": "Hover Pad",
+			"position": {"x": -1.75, "y": -0.6, "z": -1.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {}
+		}
+	]
+}

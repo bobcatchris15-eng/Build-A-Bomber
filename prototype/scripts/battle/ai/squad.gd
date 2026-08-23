@@ -20,6 +20,11 @@ extends RefCounted
 # own grammar would be an AI the player cannot read.
 
 const StanceScript = preload("res://scripts/battle/orders/stance.gd")
+const MicroScript = preload("res://scripts/battle/ai/micro.gd")
+# SquadManager owns the SquadRole enum (MBG, RAIDER, BASE_GUARD, SCOUT). Pulled
+# in here so the role checks below name the role rather than a magic int —
+# reordering the enum would silently flip Scout and Base Guard on the same line.
+const SquadManagerScript = preload("res://scripts/battle/ai/squad_manager.gd")
 
 enum State {
 	# Moving to the objective, engaging what it meets on the way.
@@ -32,20 +37,14 @@ enum State {
 	REGROUPING,
 }
 
-# Fraction of the squad's starting health pool below which it breaks off. A squad
-# that fights to the last unit trades badly: the survivors of a withdrawal are
-# the core of the next push, and the old AI never had any.
+# Fraction of the squad's starting health pool below which it breaks off.
 const RETREAT_HEALTH_FRACTION := 0.4
-# And the fraction it must recover to before committing again. The gap between
-# the two is deliberate - equal thresholds make a squad oscillate at the boundary
-# for the same reason the fog needed a hysteresis dead zone.
+# And the fraction it must recover to before committing again.
 const REGROUP_HEALTH_FRACTION := 0.75
 
 # How close to the objective counts as arrived.
 const ARRIVE_DISTANCE := 12.0
-# Re-issue orders no more often than this. Every re-issue rebuilds formation
-# slots and restarts the flow field's trip, so spamming them each tick makes a
-# squad stutter in place.
+# Re-issue orders no more often than this.
 const ORDER_INTERVAL := 3.0
 
 var team: int = 1
@@ -53,11 +52,16 @@ var state: State = State.ADVANCING
 var units: Array = []
 var objective: Vector3 = Vector3.ZERO
 var rally: Vector3 = Vector3.ZERO
+var role: int = 0  # SquadManager.SquadRole (0: MBG, 1: RAIDER, 2: BASE_GUARD, 3: SCOUT)
 
 var _orders = null
 var _world = null
 var _order_timer: float = 0.0
 var _peak_health: float = 0.0
+
+
+func set_role(squad_role: int) -> void:
+	role = squad_role
 
 
 func setup(world, orders, squad_team: int, squad_units: Array, rally_point: Vector3) -> void:
@@ -67,11 +71,15 @@ func setup(world, orders, squad_team: int, squad_units: Array, rally_point: Vect
 	units = squad_units
 	rally = rally_point
 	_peak_health = total_health()
-	# Aggressive: a squad on the attack should take targets of opportunity. The
-	# player's own units default to RETURN_FIRE, which is right for units you are
-	# steering by hand and wrong for ones acting on their own.
+	# RETURN_FIRE is the squad baseline: a squad that scatters after every
+	# passing target is worse than one that needs to be told to attack. The
+	# previous hardcoded AGGRESSIVE here was the entire reason a RETREATING
+	# squad would break formation to chase something at 3x weapon range -
+	# `pursuit_range_multiplier(AGGRESSIVE) = 3.0` is the chassis that drove
+	# the failure, and it stays out of the squad unless `_act()` explicitly
+	# turns it on for ADVANCING / ENGAGING.
 	if _orders != null:
-		_orders.set_stance(units, StanceScript.Kind.AGGRESSIVE)
+		_orders.set_stance(units, StanceScript.Kind.RETURN_FIRE)
 
 
 func prune() -> void:
@@ -150,11 +158,19 @@ func tick(delta: float) -> void:
 
 func _evaluate() -> State:
 	var health := health_fraction()
+	# Scout role: flees on contact, never commits to engagement
+	if role == SquadManagerScript.SquadRole.SCOUT:
+		var candidates: Array = _candidates(centroid(), 35.0)
+		if not candidates.is_empty():
+			return State.RETREATING
+		return State.ADVANCING
+
+	# Raider role: breaks off earlier at 60% health
+	var retreat_thresh: float = 0.6 if role == SquadManagerScript.SquadRole.RAIDER else RETREAT_HEALTH_FRACTION
+
 	if state == State.REGROUPING:
-		# Only rejoin once genuinely recovered - the gap to the retreat threshold
-		# is what stops a squad bouncing in and out of the fight.
 		return State.ADVANCING if health >= REGROUP_HEALTH_FRACTION else State.REGROUPING
-	if health < RETREAT_HEALTH_FRACTION:
+	if health < retreat_thresh:
 		return State.RETREATING
 	if state == State.RETREATING:
 		return State.REGROUPING if centroid().distance_to(rally) <= ARRIVE_DISTANCE \
@@ -169,18 +185,49 @@ func _act() -> void:
 		return
 	match state:
 		State.ADVANCING:
-			# ATTACK-MOVE, not MOVE. A squad crossing the map should stop and fight
-			# what it meets rather than driving past it to a point on the ground.
+			# AGGRESSIVE on the way to the objective: targets of opportunity
+			# are exactly what the squad should pick up on the way in.
+			_orders.set_stance(units, StanceScript.Kind.AGGRESSIVE)
 			_orders.attack_move(units, objective)
 		State.ENGAGING:
+			_orders.set_stance(units, StanceScript.Kind.AGGRESSIVE)
 			var target = _priority_target()
 			if target != null:
-				_orders.attack(units, target)
+				# Apply per-unit tactical micro behaviors
+				for u in units:
+					if not is_instance_valid(u) or u.is_dead:
+						continue
+					var micro_decision: Dictionary = MicroScript.evaluate(u, target, units, _world)
+					var m_type: String = micro_decision.get("type", "close")
+					# The micro decision names its OWN target. Peel needs this:
+					# a brawler that broke off to save an artillery piece must
+					# shoot the threat to that piece, not the squad's priority
+					# target. Defaulting to the squad target keeps "close" and
+					# the no-decision path honest.
+					var micro_target: Node3D = micro_decision.get("target", target)
+					if m_type in ["kite", "flank"] and micro_decision.has("position"):
+						# Kite wants a plain MOVE: ATTACK_MOVE engages anything
+						# in the way, which defeats the whole point of backing up
+						# to maintain a range advantage. Flank keeps attack_move
+						# because the unit is moving into a side arc, not
+						# retreating - engagements on the way are fine.
+						if m_type == "kite":
+							_orders.move([u], micro_decision["position"])
+						else:
+							_orders.attack_move([u], micro_decision["position"])
+					else:
+						_orders.attack([u], micro_target)
 			else:
 				_orders.attack_move(units, objective)
 		State.RETREATING:
+			# RETURN_FIRE keeps the squad's guns live for whatever is on its
+			# tail but caps the chase at 1.25x weapon range, so a retreating
+			# squad does not break formation to run down a flanking scout
+			# (which is what AGGRESSIVE's 3.0x multiplier would have caused).
+			_orders.set_stance(units, StanceScript.Kind.RETURN_FIRE)
 			_orders.move(units, rally)
 		State.REGROUPING:
+			_orders.set_stance(units, StanceScript.Kind.RETURN_FIRE)
 			_orders.move(units, rally)
 
 

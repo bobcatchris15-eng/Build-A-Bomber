@@ -4,6 +4,7 @@ extends SceneTree
 # specific files I edited in this turn still parse.
 
 const FILES := [
+	"res://scripts/module_catalog.gd",
 	"res://scripts/battle/battle_logger.gd",
 	"res://scripts/battle/battle_profiler.gd",
 	"res://scripts/battle/match_director.gd",

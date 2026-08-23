@@ -1,0 +1,87 @@
+{
+	"version": 1.0,
+	"id": "enemy_sentinel_aa",
+	"name": "Sentinel AA Platform",
+	"hull_type": "brenntal_medium_a",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 3.6, "y": 1.9, "z": 5.9},
+	"armor_material": "reactive_armor",
+	"armor_thickness": 1.0,
+	"faction": "salvage_union",
+	"locomotion": {
+		"type_id": "half_track",
+		"settings": {"front_axle_size": 1.0, "tread_width": 1.2}
+	},
+	"modules": [
+		{
+			"type_id": "flak_cannon",
+			"name": "Flak Cannon PD",
+			"position": {"x": 0.0, "y": 0.98, "z": -0.9},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "turret",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 10,
+				"cost_metal": 45,
+				"dps": 15.0,
+				"hp": 90.0,
+				"weight": 110.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "sam_launcher",
+			"name": "SAM Launcher",
+			"position": {"x": 0.0, "y": 0.98, "z": 0.8},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"mount_normal": {"x": 0.0, "y": 1.0, "z": 0.0},
+			"mount_style": "turret",
+			"facet": "top",
+			"stats": {
+				"cost_crystal": 20,
+				"cost_metal": 40,
+				"dps": 70.0,
+				"hp": 75.0,
+				"weight": 130.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "half_track",
+			"name": "Half-Track",
+			"position": {"x": -1.95, "y": -0.85, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.5},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 30,
+				"dps": 0.0,
+				"hp": 150.0,
+				"weight": 85.0
+			},
+			"tweaks": {}
+		},
+		{
+			"type_id": "half_track",
+			"name": "Half-Track",
+			"position": {"x": 1.95, "y": -0.85, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.5},
+			"yaw_offset": 0.0,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 30,
+				"dps": 0.0,
+				"hp": 150.0,
+				"weight": 85.0
+			},
+			"tweaks": {}
+		}
+	]
+}

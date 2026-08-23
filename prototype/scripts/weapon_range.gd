@@ -129,9 +129,10 @@ static func analyze(hull_node: Node3D) -> Dictionary:
 		if not child.has_meta("module_data"):
 			continue
 		var data = child.get_meta("module_data")
-		if data == null or data.type_id != "sensor_suite":
+		if data == null:
 			continue
-		vision += data.get_vision_bonus()
+		if data.has_method("get_vision_bonus"):
+			vision += data.get_vision_bonus()
 	out["vision"] = vision
 
 	var shortest: float = INF

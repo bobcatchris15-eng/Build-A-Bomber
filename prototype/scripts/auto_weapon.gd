@@ -12,6 +12,13 @@ const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # logger is off.
 const BattleLogger = preload("res://scripts/battle/battle_logger.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
+# Stance gate. The HOLD_FIRE short-circuit in _find_nearest_target and
+# _is_current_target_still_valid is the only weapon-level enforcement of
+# the stance - unit.gd's _tick_targeting also skips the auto-scan loop
+# when stance is HOLD_FIRE, but a weapon on a unit whose stance just
+# flipped needs to re-check the parent at fire time, not rely on the
+# unit-level scan to have already cleared the cache.
+const StanceScript = preload("res://scripts/battle/orders/stance.gd")
 # Shared unit meshes + cached materials for every munition visual below. See
 # munition_pool.gd's header for the measurements that motivated it; the short
 # version is that a fresh primitive Mesh per projectile was costing more frame
@@ -583,7 +590,7 @@ func _is_los_blocked_to(candidate: Node3D) -> bool:
 	# bolted to.
 	var muzzle_up = global_transform.basis.y.normalized()
 	var ray_start = global_position + muzzle_up * _los_height_offset + muzzle_forward * 0.8
-	var ray_end = candidate.global_position + Vector3(0, 0.5, 0) # target center
+	var ray_end = candidate.global_position + Vector3(0, 1.25, 0) # target center (elevated to match hull center and avoid ground grazing)
 
 	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
 	# Ground/obstacles (1), Modules (2), Buildings (8), Smoke (32) - not
@@ -916,6 +923,27 @@ func _tick_weapon(delta):
 			dish.rotate_y(delta * 2.5)
 		return
 
+	if type_id == "directional_radar":
+		var dish = get_node_or_null("directional_radar_dish")
+		if dish:
+			# Sector scan oscillation
+			var t: float = float(Time.get_ticks_msec()) * 0.003
+			dish.rotation.y = sin(t) * 0.4
+		return
+
+	if type_id == "topographic_radar":
+		var dome = get_node_or_null("topographic_scanner_dome")
+		if dome:
+			dome.rotate_y(delta * 1.8)
+		return
+
+	if type_id == "thermal_imager":
+		var pod = get_node_or_null("thermal_flir_pod")
+		if pod:
+			var t: float = float(Time.get_ticks_msec()) * 0.0015
+			pod.rotation.y = sin(t) * 0.25
+		return
+
 	if type_id == "fire_control_radar":
 		var dish = get_node_or_null("fire_control_radar_dish")
 		if not dish:
@@ -1123,6 +1151,23 @@ func _is_current_target_still_valid(resting_forward: Vector3) -> bool:
 	# of reacquiring one it can actually engage.
 	if _is_los_blocked_cached(target):
 		return false
+
+	# If the vehicle has acquired or switched to a primary combat target that we can range to,
+	# and our current target is different, invalidate so we switch to the unit's target.
+	var root_vehicle := get_vehicle_root()
+	if root_vehicle != null and not targets_allies and not (type_id in PD_WEAPON_TYPES):
+		var unit_target: Node3D = null
+		if root_vehicle.has_method("get_combat_target"):
+			unit_target = root_vehicle.get_combat_target()
+		elif "target" in root_vehicle and root_vehicle.target is Node3D:
+			unit_target = root_vehicle.target
+		if is_instance_valid(unit_target) and target != unit_target and not ("is_dead" in unit_target and unit_target.is_dead):
+			var u_dist := global_position.distance_to(unit_target.global_position)
+			if u_dist <= fire_range and _team_can_see(unit_target):
+				var u_dir := (unit_target.global_position - global_position).normalized()
+				if _can_aim_at(resting_forward, u_dir) and not _is_los_blocked_cached(unit_target):
+					return false
+
 	return true
 
 # PERFORMANCE_PLAN.md P1: cached wrapper around _is_los_blocked_to() for the
@@ -1268,6 +1313,44 @@ func _find_nearest_target(delta: float = -1.0):
 			if closest_m:
 				target = closest_m
 				return
+		# Prioritize the parent vehicle's designated combat target if in range, arc, and LOS
+		var root_veh := get_vehicle_root()
+		if root_veh != null:
+			# HOLD_FIRE check: If the vehicle is in HOLD_FIRE stance, it only fires at its designated
+			# combat target (e.g. ordered attack or retaliating against an attacker) and never auto-acquires ambient candidates.
+			if "stance" in root_veh and root_veh.stance == StanceScript.Kind.HOLD_FIRE:
+				var unit_target: Node3D = null
+				if root_veh.has_method("get_combat_target"):
+					unit_target = root_veh.get_combat_target()
+				elif "target" in root_veh and root_veh.target is Node3D:
+					unit_target = root_veh.target
+				if is_instance_valid(unit_target) and not ("is_dead" in unit_target and unit_target.is_dead):
+					var u_team = unit_target.get_meta("team") if unit_target.has_meta("team") else -1
+					if not _teams_allied(u_team, my_team) and _team_can_see(unit_target):
+						var u_dist := global_position.distance_to(unit_target.global_position)
+						if u_dist <= fire_range:
+							var u_dir := (unit_target.global_position - global_position).normalized()
+							if _can_aim_at(resting_forward, u_dir) and not _is_los_blocked_to(unit_target):
+								target = unit_target
+								return
+				target = null
+				return
+
+			var unit_target: Node3D = null
+			if root_veh.has_method("get_combat_target"):
+				unit_target = root_veh.get_combat_target()
+			elif "target" in root_veh and root_veh.target is Node3D:
+				unit_target = root_veh.target
+			if is_instance_valid(unit_target) and not ("is_dead" in unit_target and unit_target.is_dead):
+				var u_team = unit_target.get_meta("team") if unit_target.has_meta("team") else -1
+				if not _teams_allied(u_team, my_team) and _team_can_see(unit_target):
+					var u_dist := global_position.distance_to(unit_target.global_position)
+					if u_dist <= fire_range:
+						var u_dir := (unit_target.global_position - global_position).normalized()
+						if _can_aim_at(resting_forward, u_dir) and not _is_los_blocked_to(unit_target):
+							target = unit_target
+							return
+
 		var candidates = _damageable_candidates(global_position, fire_range)
 		var closest_c: Node3D = null
 		var closest_c_dist: float = fire_range
@@ -1363,12 +1446,8 @@ func _fire_at_target():
 
 	# Call unique visual functions
 	match type_id:
-		"basic_cannon":
-			_fire_kinetic_projectile(0.05, 0.5, 0.18, laser_color, true)
-		"heavy_machine_gun":
-			_fire_kinetic_projectile(0.015, 0.25, 0.08, laser_color, false)
-		"rotary_cannon":
-			_fire_kinetic_projectile(0.012, 0.2, 0.06, laser_color, false)
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon":
+			_fire_gun_tracer()
 		"gauss_railgun":
 			_fire_railgun_beam()
 		"artillery":
@@ -1422,7 +1501,7 @@ func _fire_at_target():
 		"plasma_lobber":
 			_fire_plasma_lobber()
 		"ciws":
-			_fire_kinetic_projectile(0.01, 0.18, 0.06, laser_color, false)
+			_fire_gun_tracer()
 		"pd_laser":
 			_fire_continuous_beam()
 		"flak_cannon":
@@ -1436,7 +1515,7 @@ func _fire_at_target():
 		"coil_gun":
 			_fire_coil_gun()
 		"autocannon":
-			_fire_kinetic_projectile(0.03, 0.35, 0.12, laser_color, true)
+			_fire_gun_tracer()
 		"anti_materiel_rifle":
 			_fire_anti_materiel_rifle()
 		"napalm_mortar":
@@ -1475,10 +1554,20 @@ func _fire_pd_at_missile():
 	if target.has_method("destroy_missile"):
 		target.destroy_missile(true)
 
-func _fire_kinetic_projectile(radius: float, length: float, duration: float, color: Color, explode_on_hit: bool):
+func _fire_gun_tracer():
+	var v: Dictionary = ModuleCatalog.get_gun_tracer_visual(type_id)
+	_fire_kinetic_projectile(
+		v.get("radius", 0.03), v.get("length", 0.35), v.get("duration", 0.12),
+		laser_color, v.get("explode_on_hit", false), v)
+
+func _fire_kinetic_projectile(radius: float, length: float, duration: float, color: Color, explode_on_hit: bool, profile: Dictionary = {}):
+	if profile.get("streak", false):
+		radius *= 0.45
+		length *= 1.3
+	var energy := 1.6 if profile.get("streak", false) else 1.0
 	var tracer = MeshInstance3D.new()
 	tracer.mesh = MunitionPool.unit_cylinder()
-	tracer.material_override = MunitionPool.emissive(color, color)
+	tracer.material_override = MunitionPool.emissive(color, color, energy)
 	_effects_parent().add_child(tracer)
 
 	var start = global_position + Vector3(0, 0.4, 0)
@@ -1516,6 +1605,57 @@ func _fire_kinetic_projectile(radius: float, length: float, duration: float, col
 		if is_instance_valid(target) and explode_on_hit:
 			_spawn_explosion_visual(end, 0.4, color)
 	)
+	if profile.get("trail", "") == "embers":
+		for i in range(3):
+			var t := (float(i) + 1.0) / 4.0
+			_spawn_flight_mote(start.lerp(end, t), color, radius * 1.6, duration * t)
+
+func _spawn_flight_mote(pos: Vector3, color: Color, size: float, delay: float):
+	get_tree().create_timer(delay).timeout.connect(func():
+		if not is_inside_tree(): return
+		var scene = get_tree().current_scene if get_tree().current_scene != null else get_tree().root
+		var mote = MeshInstance3D.new()
+		mote.mesh = MunitionPool.unit_sphere()
+		mote.scale = Vector3.ONE * size
+		mote.material_override = MunitionPool.alpha_emissive(Color(color.r, color.g, color.b, 0.55), color, 0.8)
+		scene.add_child(mote)
+		mote.global_position = pos
+		var mt = mote.create_tween()
+		mt.tween_property(mote, "scale", Vector3.ZERO, 0.3)
+		mt.finished.connect(func(): if is_instance_valid(mote): mote.queue_free())
+	)
+
+# Composite round bodies for the arcing paths: a pivot oriented along its own
+# velocity each tick, so a bomb reads nose-forward with a visible tail and a
+# rocket reads as a rocket instead of a coloured ball.
+func _make_round_body(kind: String, radius: float, colour: Color) -> Node3D:
+	var pivot = Node3D.new()
+	var body = MeshInstance3D.new()
+	body.material_override = MunitionPool.emissive(colour, colour)
+	pivot.add_child(body)
+	match kind:
+		"bomb":
+			body.mesh = MunitionPool.unit_sphere()
+			body.scale = Vector3.ONE * radius
+			var tail = MeshInstance3D.new()
+			tail.mesh = MunitionPool.unit_taper(0.25)
+			tail.scale = Vector3(radius * 0.7, radius * 1.4, radius * 0.7)
+			tail.material_override = MunitionPool.albedo(Color(0.25, 0.23, 0.2))
+			pivot.add_child(tail)
+			tail.position = Vector3(0, 0, radius * 1.15)
+			tail.rotate_x(-PI / 2)
+		"rocket":
+			body.mesh = MunitionPool.unit_cylinder()
+			body.scale = Vector3(radius * 0.5, radius * 2.6, radius * 0.5)
+			body.rotate_x(PI / 2)
+			var nose = MeshInstance3D.new()
+			nose.mesh = MunitionPool.unit_taper(0.0)
+			nose.scale = Vector3(radius * 0.5, radius * 0.9, radius * 0.5)
+			nose.material_override = MunitionPool.emissive(colour, Color.WHITE, 1.4)
+			pivot.add_child(nose)
+			nose.position = Vector3(0, 0, -radius * 1.75)
+			nose.rotate_x(-PI / 2)
+	return pivot
 
 func _fire_railgun_beam():
 	var beam = MeshInstance3D.new()
@@ -1551,15 +1691,14 @@ func _fire_railgun_beam():
 	tween.finished.connect(func(): beam.queue_free())
 
 func _fire_artillery():
-	var shell = MeshInstance3D.new()
-	shell.mesh = MunitionPool.unit_sphere()
-	shell.scale = Vector3(0.4, 0.4, 0.4)
-	shell.material_override = MunitionPool.emissive(Color.SADDLE_BROWN, Color.ORANGE)
+	var shell = _make_round_body("bomb", 0.4, Color.SADDLE_BROWN)
 	_effects_parent().add_child(shell)
-	
+
 	var start = global_position
 	var end = target.global_position
 	var tween = create_tween()
+	var last_pos := [start]
+	var puff_mark := [0.0]
 	var callable = func(val: float):
 		if not is_instance_valid(shell): return
 		var current_target = end
@@ -1568,7 +1707,16 @@ func _fire_artillery():
 		var pos = start.lerp(current_target, val)
 		pos.y += sin(val * PI) * 12.0
 		shell.global_position = pos
-		
+		if val > 0.01:
+			var seg: Vector3 = pos - last_pos[0]
+			if seg.length_squared() > 0.0001:
+				shell.look_at(pos + seg, Vector3.UP)
+			last_pos[0] = pos
+			shell.rotate_object_local(Vector3(0, 0, 1), 0.18)
+		if val > puff_mark[0]:
+			puff_mark[0] = val + 0.2
+			_spawn_flight_mote(pos + Vector3(0, -0.25, 0), Color(0.62, 0.6, 0.58), 0.35, 0.0)
+
 	tween.tween_method(callable, 0.0, 1.0, 0.8)
 	tween.finished.connect(func():
 		if is_instance_valid(shell): shell.queue_free()
@@ -1647,6 +1795,7 @@ func _spawn_missile(tgt: Node, dmg: float, seconds_to_max: float, is_top: bool =
 		return
 	var missile = Node3D.new()
 	missile.set_script(WeaponMissileScene)
+	missile.mesh_part = ModuleCatalog.get_missile_mesh(type_id)
 	missile.position = global_position + Vector3(0, y_offset, 0)
 	missile.is_top_attack = is_top
 	missile.speed = _munition_speed(seconds_to_max)
@@ -1672,6 +1821,7 @@ func _fire_swarm_missiles():
 			if not is_instance_valid(target): return
 			var missile = Node3D.new()
 			missile.set_script(WeaponMissileScene)
+			missile.mesh_part = ModuleCatalog.get_missile_mesh(type_id)
 			# SIM. A weapon_missile is a real interceptable entity in the
 			# "missiles" group, not a tweened visual - where it starts changes
 			# its flight time and the geometry point defence gets to engage it
@@ -1698,16 +1848,21 @@ const ARC_REFERENCE_DISTANCE: float = 25.0
 # made five. Takes the aim offset so a salvo can scatter.
 func _fire_arcing_shell_at(shell_radius: float, arc_height: float, colour: Color,
 						   blast_radius: float, damage: float, aim_offset: Vector3 = Vector3.ZERO,
-						   flight_time: float = 0.8) -> void:
+						   flight_time: float = 0.8, profile: Dictionary = {}) -> void:
 	if not is_instance_valid(target):
 		return
 	var parent = _effects_parent()
 	if parent == null:
 		return
-	var shell = MeshInstance3D.new()
-	shell.mesh = MunitionPool.unit_sphere()
-	shell.scale = Vector3.ONE * shell_radius
-	shell.material_override = MunitionPool.emissive(colour, colour)
+	var shell: Node3D
+	if profile.has("body"):
+		shell = _make_round_body(profile.get("body", "bomb"), shell_radius, colour)
+	else:
+		var ball = MeshInstance3D.new()
+		ball.mesh = MunitionPool.unit_sphere()
+		ball.scale = Vector3.ONE * shell_radius
+		ball.material_override = MunitionPool.emissive(colour, colour)
+		shell = ball
 	parent.add_child(shell)
 
 	var start = global_position
@@ -1735,12 +1890,24 @@ func _fire_arcing_shell_at(shell_radius: float, arc_height: float, colour: Color
 	var scaled_apex: float = arc_height * 12.0 * reach_mult
 
 	var tween = create_tween()
+	var last_pos := [start]
+	var puff_mark := [0.0]
 	tween.tween_method(func(val: float):
 		if not is_instance_valid(shell):
 			return
 		var pos = start.lerp(end, val)
 		pos.y += sin(val * PI) * scaled_apex
 		shell.global_position = pos
+		if profile.has("body") and val > 0.01:
+			var seg: Vector3 = pos - last_pos[0]
+			if seg.length_squared() > 0.0001:
+				shell.look_at(pos + seg, Vector3.UP)
+			last_pos[0] = pos
+			if profile.get("tumble", false):
+				shell.rotate_object_local(Vector3(0, 0, 1), 0.22)
+		if profile.get("trail", "") == "smoke" and val > puff_mark[0]:
+			puff_mark[0] = val + 0.16
+			_spawn_flight_mote(pos + Vector3(0, -shell_radius * 0.5, 0), Color(0.62, 0.6, 0.58), shell_radius * 0.9, 0.0)
 	, 0.0, 1.0, scaled_flight)
 	tween.finished.connect(func():
 		if is_instance_valid(shell):
@@ -1757,7 +1924,7 @@ func _fire_spigot_mortar():
 	if has_meta("module_data"):
 		pay = float(get_meta("module_data").tweaks.get("payload_size", 1.0))
 	_fire_arcing_shell_at(0.5 * pay, 0.55, laser_color, SPIGOT_BLAST_RADIUS * pay,
-						  dps * fire_rate, Vector3.ZERO, 1.1)
+						  dps * fire_rate, Vector3.ZERO, 1.1, {"body": "bomb", "tumble": true})
 
 # Rocket artillery: the whole rack empties in a couple of seconds, then the
 # long fire_rate interval is the reload. Damage is split across the salvo, so
@@ -1783,7 +1950,8 @@ func _fire_rocket_artillery():
 			# it becomes _fire_arcing_shell_at's aim_offset, which becomes the
 			# `end` that _deal_aoe_damage() detonates on.
 			var scatter = SimRNG.scatter_xz(1.0) * spread * 1.6
-			_fire_arcing_shell_at(0.25, 0.45, laser_color, 2.4 * spread, per_rocket, scatter, 0.7)
+			_fire_arcing_shell_at(0.25, 0.45, laser_color, 2.4 * spread, per_rocket, scatter, 0.7,
+				{"body": "rocket", "trail": "smoke"})
 		)
 
 # The six guided launchers all resolve through weapon_missile.gd, so they are
@@ -1806,6 +1974,7 @@ func _fire_hypervelocity_missile():
 				return
 			var m = Node3D.new()
 			m.set_script(WeaponMissileScene)
+			m.mesh_part = ModuleCatalog.get_missile_mesh(type_id)
 			# SIM, for the same reason as the swarm launcher above - a real
 			# interceptable missile's start point. Written inline rather than
 			# via scatter_xz() because the ripple offsets the tubes across the
@@ -1882,7 +2051,10 @@ func _target_is_airborne(t: Node) -> bool:
 
 # Does this target carry anything that emits? Walks its module children for a
 # sensor/radar module, which is exactly the thing the missile homes on.
-const SENSOR_MODULE_IDS := ["sensor_suite", "ciws", "sam_launcher", "microwave_emitter"]
+const SENSOR_MODULE_IDS := [
+	"sensor_suite", "directional_radar", "topographic_radar",
+	"fire_control_radar", "ciws", "sam_launcher", "microwave_emitter"
+]
 
 func _target_carries_sensors(t: Node) -> bool:
 	if t == null or not is_instance_valid(t):
@@ -2699,6 +2871,9 @@ func _fire_napalm_mortar():
 		pos.y += sin(val * PI) * 7.0
 		canister.global_position = pos
 	tween.tween_method(callable, 0.0, 1.0, 0.7)
+	for i in range(3):
+		var t := (float(i) + 1.0) / 4.0
+		_spawn_flight_mote(start.lerp(end, t) + Vector3(0, sin(t * PI) * 7.0 - 0.2, 0), Color(1.0, 0.5, 0.15), 0.28, 0.7 * t)
 	tween.finished.connect(func():
 		if is_instance_valid(canister): canister.queue_free()
 		_deal_aoe_damage(end, 4.0, dps * fire_rate)

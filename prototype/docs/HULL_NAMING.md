@@ -1,6 +1,6 @@
 # Vehicle hull catalogue
 
-81 vehicle hulls from 8 fictional manufacturers, across 6 classes. Built by
+114 vehicle hulls from 11 fictional manufacturers, across 6 classes. Built by
 [`tools/blender/build_vehicle_hulls.py`](../tools/blender/build_vehicle_hulls.py)
 on the geometry core in
 [`tools/blender/hull_forge.py`](../tools/blender/hull_forge.py).
@@ -26,7 +26,7 @@ Useful flags after a `--` separator: `--list` (print the lineup and exit),
 Three segments, lowercase snake_case (`HullLoader` rejects anything else).
 `brenntal_medium_a` is the Brenntal Schwerbau, Medium class, variant A hull.
 
-## Manufacturers (8)
+## Manufacturers (11)
 
 The manufacturer owns the **body structure**. This is the primary axis of
 difference, and it is structural rather than decorative: two hulls from
@@ -43,6 +43,9 @@ silhouette. There is no "same hull in a different livery" anywhere here.
 | `rackham` | Rackham Forge | Industrial crawler. Stout octagonal body, exposed boiler barrel on top, deep front radiator grille, full-length side rails at deck level | The boiler + smokestack silhouette, plus the tall front grille |
 | `calder` | Calder Mobility | Fast-attack wedge. Body cross-section widens and shortens as z moves aft, narrow nose to full-width tail | Side sponsons bulge out of the mid-z range; small rear wing on top |
 | `pillar` | Pillar Ironworks | Modular boxy. Body is a stack of chamfered rectangular cells (one cell = 1.0 hull-height cubed) | Combat variants are solid stacks with a visible cell seam; transport variants are two parallel cell walls with an open flatbed well between them |
+| `hartmann` | Hartmann Panzerwerk | Conventional tank. Tank-tub section: narrow flat belly, lower sides sloping out to a hard sponson crease, near-vertical sides to the deck. Rear engine deck sits one step below the fighting top | Arrowhead plan bow (the glacis plates meet at a centre seam), long frontal glacis, optional turret race grown out of the deck as a mesa |
+| `ballard` | Ballard Deepworks | Submarine. Faceted teardrop: flat keel strip, bilge panels to maximum beam below mid-height, slanted topsides to a narrower deck, blunt bow growth, eased stern taper | The conning sail - a centered mesa on the deck - plus periscope masts and missile trunks on top of it |
+| `moreau` | Moreau Yards | Wave-former. 16-facet rounded superellipse section (flat keel chord kept), BOTH ends taper away, optional midships waist pinching the plan view | Nothing touches the bounding box for most of its length: rounded canoe ends, sharp teardrop arrowheads, or a full diamond plan |
 
 Colours in the `.glb` are Blender-preview only - `hull_material_builder.gd`'s
 `apply_hull_materials()` replaces both material slots at runtime.
@@ -69,24 +72,29 @@ transports at every size has those instead.
 
 | | scout | light | medium | heavy | transport | oddball | total |
 |---|---|---|---|---|---|---|---|
-| `halvorsen` | 1 | 2 | 2 | 3 | 3 | 2 | **13** |
-| `kestrel` | 3 | 3 | 2 | 1 | 1 | 2 | **12** |
+| `halvorsen` | 2 | 2 | 2 | 4 | 4 | 2 | **16** |
+| `kestrel` | 3 | 3 | 3 | 1 | 2 | 2 | **14** |
 | `brenntal` | 1 | 1 | 3 | 4 | 2 | 2 | **13** |
-| `tallow` | 1 | 2 | 2 | 2 | 4 | 1 | **12** |
+| `tallow` | 1 | 2 | 3 | 3 | 5 | 1 | **15** |
 | `orrin` | 2 | 1 | 1 | 1 | 1 | 2 | **8** |
 | `rackham` | 1 | 2 | 2 | 2 | 1 | 0 | **8** |
-| `calder` | 2 | 3 | 2 | 1 | 0 | 0 | **8** |
+| `calder` | 2 | 3 | 3 | 2 | 0 | 0 | **10** |
 | `pillar` | 0 | 0 | 2 | 2 | 3 | 0 | **7** |
-| | 11 | 14 | 16 | 16 | 15 | 9 | **81** |
+| `hartmann` | 1 | 1 | 2 | 2 | 1 | 1 | **8** |
+| `ballard` | 1 | 1 | 2 | 1 | 1 | 1 | **7** |
+| `moreau` | 1 | 1 | 2 | 1 | 1 | 2 | **8** |
+| | 15 | 17 | 23 | 23 | 21 | 15 | **114** |
 
 Brenntal and Halvorsen carry the heavy end. Tallow owns transports at
 every weight class. Kestrel skews small and fast. Calder is light/medium
 attack. Rackham is industrial mid-tier. Pillar is modular transport/heavy.
-Orrin is mostly oddballs.
+Orrin is mostly oddballs. Hartmann is conventional tanks, Ballard is
+submarines, Moreau is rounded waisted wave-formers.
 
-Four hulls are `domain: "Naval"` - `halvorsen_light_b`,
-`halvorsen_transport_b`, `halvorsen_oddball_a` and `kestrel_oddball_b` -
-covering the range the retired `skiff_*` family used to.
+Nineteen hulls are `domain: "Naval"` - `halvorsen_light_b`,
+`halvorsen_transport_b`, `halvorsen_transport_d`, `halvorsen_oddball_a`,
+`kestrel_oddball_b`, all seven `ballard_*`, and every `moreau_*` except
+`moreau_oddball_b`.
 
 ## Single-mesh build
 
@@ -131,7 +139,9 @@ the silhouette.
 The **prominent greebles** (masts, dorsal spines, barbettes) are now
 **integrated into the hull as cross-section peaks** for the houses where
 they read as part of the body — Orrin (spine + mast), Kestrel (spine),
-Rackham (mast), Calder (barbette), Pillar (barbette). Each peak is a
+Rackham (mast), Calder (barbette), Pillar (barbette), Hartmann (turret
+race), Ballard (conning sail), Moreau (waist, as a width modulation).
+Each peak is a
 4-vertex mesa bump on top of the chassis, active only in a small z
 range, with the peak vertices held in the outline at every z (collapsed
 to a flat segment on the deck when not active) so the cross-section
@@ -220,7 +230,7 @@ known-good sign.
 |---|---|---|---|
 | `aa_barrel` (renders correctly) | -1.000 | +1.000 | +1.000 |
 | `pod_heavy_osterholm` (was inside out) | +0.979 | -0.979 | -1.000 |
-| all 81 current hulls | negative | positive | positive |
+| all 114 current hulls | negative | positive | positive |
 
 ## Sizes, stats and the envelope
 

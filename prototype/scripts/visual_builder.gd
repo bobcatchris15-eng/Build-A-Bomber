@@ -436,6 +436,7 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"sensor_suite": true, "resource_harvester": true, "resource_bay": true,
 	"repair_array": true, "drone_carrier": true,
 	"laser_designator": true, "energy_barrier_projector": true, "fire_control_radar": true,
+	"directional_radar": true, "topographic_radar": true, "seismic_sensor": true, "thermal_imager": true,
 	# Power & energy generation / storage modules
 	"fusion_generator": true, "diesel_generator": true, "thermo_generator": true,
 	"capacitor_bank": true, "flywheel_storage": true, "solid_state_battery": true,
@@ -503,6 +504,10 @@ const MODULAR_AUTHORED_SIZES := {
 	"anti_grav_plate": Vector3(0.9, 0.25, 0.9),
 	"pontoon_wheels": Vector3(0.75, 0.7, 0.75),
 	"sensor_suite": Vector3(0.5, 2.5, 0.5),
+	"directional_radar": Vector3(0.9, 2.2, 0.6),
+	"topographic_radar": Vector3(1.2, 2.0, 1.2),
+	"seismic_sensor": Vector3(0.8, 1.0, 0.8),
+	"thermal_imager": Vector3(0.6, 1.8, 0.6),
 	"resource_harvester": Vector3(1.5, 1.0, 1.5),
 	"resource_bay": Vector3(1.4, 1.0, 1.8),
 	"repair_array": Vector3(0.8, 0.8, 1.0),
@@ -600,7 +605,7 @@ static func make_module_data(type_id: String) -> ModuleData:
 	mod_data.base_energy_capacity = catalog_data.get("base_energy_capacity", 0.0)
 	mod_data.base_power_output = catalog_data.get("base_power_output", 0.0)
 	mod_data.base_heal_rate = catalog_data.get("base_heal_rate", 0.0)
-	mod_data.base_vision_bonus = catalog_data.get("base_vision_bonus", 0.0)
+	mod_data.base_vision_bonus = catalog_data.get("vision_bonus", catalog_data.get("base_vision_bonus", 0.0))
 	if catalog_data.has("default_tweaks"):
 		mod_data.tweaks = catalog_data["default_tweaks"].duplicate()
 	return mod_data
@@ -2157,7 +2162,8 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			parent_node.add_child(welder)
 
 	elif type_id == "sensor_suite":
-		var mast_h = tweaks.get("mast_height", 1.0)
+		var mast_h = clampf(float(tweaks.get("mast_height", 1.0)), 0.5, 2.0)
+		var dish_ap = clampf(float(tweaks.get("dish_aperture", 1.0)), 0.5, 2.0)
 
 		# 1. MAST PEDESTAL BASE (sensor_suite_mount.glb)
 		var mount_mesh = _part("sensor_suite_mount")
@@ -2205,19 +2211,152 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 		var dish_y = 1.00 * mast_h
 		if dish_mesh:
 			dish = _mesh_inst(dish_mesh, Color(0.85, 0.88, 0.90))
-			dish.scale = Vector3(1.0, 1.0, 1.0)
+			dish.scale = Vector3(dish_ap, dish_ap, dish_ap)
 			dish.position = Vector3(0, dish_y, 0)
 		else:
 			dish = MeshInstance3D.new()
 			var d_sph = SphereMesh.new()
-			d_sph.radius = 0.25
-			d_sph.height = 0.20
+			d_sph.radius = 0.25 * dish_ap
+			d_sph.height = 0.20 * dish_ap
 			dish.mesh = d_sph
 			var d_mat = StandardMaterial3D.new()
 			d_mat.albedo_color = Color(0.85, 0.88, 0.90)
 			dish.material_override = d_mat
 			dish.position = Vector3(0, dish_y, 0)
+		dish.name = "sensor_suite_dish"
 		parent_node.add_child(dish)
+
+	elif type_id == "directional_radar":
+		var mast_h = clampf(float(tweaks.get("mast_height", 1.0)), 0.5, 2.0)
+		var arc_deg = clampf(float(tweaks.get("scan_arc", 60.0)), 40.0, 120.0)
+		var array_width = clampf(arc_deg / 60.0, 0.6, 2.0)
+
+		# 1. HEAVY RADAR MOUNT BASE
+		var mount_mesh = _part("fire_control_radar_mount")
+		if not mount_mesh:
+			mount_mesh = _part("sensor_suite_mount")
+		var mount: MeshInstance3D = _mesh_inst(mount_mesh, base_color.darkened(0.2)) if mount_mesh else MeshInstance3D.new()
+		parent_node.add_child(mount)
+
+		# 2. SECTOR MAST COLUMN
+		var mast_mesh = _part("fire_control_radar_mast")
+		if not mast_mesh:
+			mast_mesh = _part("sensor_suite_mast")
+		var mast: MeshInstance3D = _mesh_inst(mast_mesh, Color(0.22, 0.25, 0.28)) if mast_mesh else MeshInstance3D.new()
+		mast.scale = Vector3(1.0, mast_h, 1.0)
+		parent_node.add_child(mast)
+
+		# 3. PHASED ARRAY SECTOR DISH
+		var dish_mesh = _part("fire_control_radar_dish")
+		if not dish_mesh:
+			dish_mesh = _part("sensor_suite_dish")
+		var dish: MeshInstance3D = _mesh_inst(dish_mesh, Color(0.40, 0.60, 0.90)) if dish_mesh else MeshInstance3D.new()
+		dish.name = "directional_radar_dish"
+		dish.scale = Vector3(array_width, 1.0, 1.0)
+		dish.position = Vector3(0, 0.85 * mast_h, 0)
+		parent_node.add_child(dish)
+
+	elif type_id == "topographic_radar":
+		var pylon_h = clampf(float(tweaks.get("pylon_height", 1.0)), 0.5, 2.0)
+		var dome_s = clampf(float(tweaks.get("survey_radius", 1.0)), 0.6, 1.8)
+
+		# 1. PEDESTAL BASE
+		var mount_mesh = _part("sensor_suite_mount")
+		var mount: MeshInstance3D = _mesh_inst(mount_mesh, base_color.darkened(0.2)) if mount_mesh else MeshInstance3D.new()
+		parent_node.add_child(mount)
+
+		# 2. LATTICE PYLON MAST
+		var mast_mesh = _part("sensor_suite_mast")
+		var mast: MeshInstance3D = _mesh_inst(mast_mesh, Color(0.28, 0.32, 0.30)) if mast_mesh else MeshInstance3D.new()
+		mast.scale = Vector3(1.0, pylon_h, 1.0)
+		parent_node.add_child(mast)
+
+		# 3. TOPOGRAPHIC SCANNER DOME
+		var dome_mesh = _part("sensor_dome")
+		var dome: MeshInstance3D
+		if dome_mesh:
+			dome = _mesh_inst(dome_mesh, Color(0.35, 0.75, 0.55))
+			dome.scale = Vector3(dome_s, dome_s, dome_s)
+			dome.position = Vector3(0, 0.95 * pylon_h, 0)
+		else:
+			dome = MeshInstance3D.new()
+			var d_sph = SphereMesh.new()
+			d_sph.radius = 0.35 * dome_s
+			d_sph.height = 0.35 * dome_s
+			dome.mesh = d_sph
+			var d_mat = StandardMaterial3D.new()
+			d_mat.albedo_color = Color(0.35, 0.75, 0.55)
+			dome.material_override = d_mat
+			dome.position = Vector3(0, 0.95 * pylon_h, 0)
+		dome.name = "topographic_scanner_dome"
+		parent_node.add_child(dome)
+
+		# 4. WHIP ANTENNA ATOP DOME
+		var whip_mesh = _part("antenna_whip")
+		if whip_mesh:
+			var whip = _mesh_inst(whip_mesh, Color(0.80, 0.85, 0.80))
+			whip.position = Vector3(0, 0.95 * pylon_h + 0.25 * dome_s, 0)
+			parent_node.add_child(whip)
+
+	elif type_id == "seismic_sensor":
+		var coupling = clampf(float(tweaks.get("ground_coupling", 1.0)), 0.5, 2.0)
+		var girth = clampf(float(tweaks.get("housing_girth", 1.0)), 0.5, 2.0)
+
+		# 1. HEAVY BOLT-PAD BASE
+		var mount_mesh = _part("struct_bolt_pad")
+		if not mount_mesh:
+			mount_mesh = _part("sensor_suite_mount")
+		var mount: MeshInstance3D = _mesh_inst(mount_mesh, base_color.darkened(0.3)) if mount_mesh else MeshInstance3D.new()
+		parent_node.add_child(mount)
+
+		# 2. ACOUSTIC DAMPER HOUSING / COLLAR
+		var collar_mesh = _part("struct_splice_collar")
+		if not collar_mesh:
+			collar_mesh = _part("canister_small")
+		var collar: MeshInstance3D = _mesh_inst(collar_mesh, Color(0.30, 0.33, 0.35)) if collar_mesh else MeshInstance3D.new()
+		collar.name = "seismic_damper_housing"
+		collar.scale = Vector3(girth, 1.0, girth)
+		collar.position = Vector3(0, 0.14, 0)
+		parent_node.add_child(collar)
+
+		# 3. TRANSDUCER GROUND PROBE SPIKE
+		var spike_mesh = _part("spigot_rod")
+		if not spike_mesh:
+			spike_mesh = _part("beacon_tube")
+		var spike: MeshInstance3D = _mesh_inst(spike_mesh, Color(0.70, 0.65, 0.50)) if spike_mesh else MeshInstance3D.new()
+		spike.name = "seismic_probe_spike"
+		spike.scale = Vector3(1.0, coupling, 1.0)
+		spike.position = Vector3(0, 0.05 - 0.20 * coupling, 0)
+		parent_node.add_child(spike)
+
+	elif type_id == "thermal_imager":
+		var mast_h = clampf(float(tweaks.get("mast_height", 1.0)), 0.5, 2.0)
+		var aperture = clampf(float(tweaks.get("optic_aperture", 1.0)), 0.5, 2.0)
+
+		# 1. GIMBAL MOUNT
+		var mount_mesh = _part("laser_designator_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D = _mesh_inst(mount_mesh, base_color.darkened(0.2)) if mount_mesh else MeshInstance3D.new()
+		parent_node.add_child(mount)
+
+		# 2. TELESCOPING SENSOR MAST
+		var mast_mesh = _part("sensor_mast")
+		if not mast_mesh:
+			mast_mesh = _part("sensor_suite_mast")
+		var mast: MeshInstance3D = _mesh_inst(mast_mesh, Color(0.20, 0.22, 0.25)) if mast_mesh else MeshInstance3D.new()
+		mast.scale = Vector3(1.0, mast_h, 1.0)
+		parent_node.add_child(mast)
+
+		# 3. CRYO FLIR OPTICAL POD
+		var pod_mesh = _part("amr_sensor_pod")
+		if not pod_mesh:
+			pod_mesh = _part("dazzler_head")
+		var pod: MeshInstance3D = _mesh_inst(pod_mesh, Color(0.85, 0.45, 0.25)) if pod_mesh else MeshInstance3D.new()
+		pod.name = "thermal_flir_pod"
+		pod.scale = Vector3(aperture, aperture, aperture)
+		pod.position = Vector3(0, 0.85 * mast_h, 0)
+		parent_node.add_child(pod)
 
 	elif type_id == "laser_designator":
 		var mount_mesh = _part("laser_designator_mount")

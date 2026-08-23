@@ -28,6 +28,7 @@ const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const BattleWreckScript = preload("res://scripts/battle/units/battle_wreck.gd")
+const ModuleDamageFxScript = preload("res://scripts/battle/units/module_damage_fx.gd")
 # The simulation random stream - see its header. This file's only draws are the
 # subsystem-strip roll and the choice of which module it takes, both of which
 # change the outcome of a fight, so both are SIM.
@@ -100,6 +101,12 @@ var _brownout: Dictionary = {
 # Set by the vision service. True means the LOCAL team cannot see this unit, so
 # it is neither rendered nor targetable by them.
 var fog_hidden: bool = false
+
+# Specialized sensor properties (Phase 4 / Sensor suites overhaul)
+var directional_sensors: Array = []
+var topographic_range: float = 0.0
+var seismic_range: float = 0.0
+var has_thermal_sight: bool = false
 
 # Longest reach of anything mounted on this unit, and the range an ATTACK order
 # closes to. Derived from the weapons at assembly time.
@@ -181,8 +188,42 @@ var harvester: HarvesterFSM = null
 
 var _controller: Node = null
 var _selection_ring: MeshInstance3D = null
+# HUD overlay distinguishing what the unit can SEE (visible overlay, sensor
+# range) from what its weapons can HIT (targetable overlay, weapon range).
+# Both are toggle-visible together with the selection ring so a player
+# clicking a unit reads the gap between "I spotted it" and "I can kill it".
+# Both are terrain-projected Decals that drape smoothly over slopes, hills,
+# and valleys, accounting for true terrain relief and 2.5D heightmap line-of-sight.
+var _targetable_overlay: Decal = null
+var _visible_overlay: Decal = null
+# Stash the last position we rebuilt the overlay at. A unit that hasn't
+# moved more than ~0.5 m since the last rebuild can skip the calculation
+# entirely - a selected unit idling pays zero cost.
+var _overlay_last_pos: Vector3 = Vector3.INF
+var _overlay_last_targetable_range: float = -1.0
+var _overlay_last_visible_range: float = -1.0
 var _is_selected: bool = false
 var _separation_radius: float = 3.0
+
+# Per-match UI preference: should the selection-time range discs be drawn
+# at all? Lives on the unit because that is where the discs are built; the
+# command-card toggle and the F12 key both write to it through
+# set_range_overlay_visible(). Default true because the discs are the
+# player's main source of "what can this thing actually do".
+var show_range_overlay: bool = true
+
+# --- Range overlay constants --------------------------------------------------
+#
+# Both overlays are projected via Decal nodes vertically onto the terrain,
+# conforming smoothly over slopes, hills, ravines, and obstacles.
+const _OVERLAY_RAY_SEGMENTS := 96
+const _OVERLAY_TEX_SIZE := 128
+const _OVERLAY_REBUILD_MOVE_THRESHOLD := 0.5
+# Sensor-coverage disc colour: crisp, subtle tactical emerald green.
+const _OVERLAY_VISION_COLOR := Color(0.24, 0.94, 0.58, 0.90)
+# Weapon-coverage disc colour: crisp, subtle tactical amber-orange.
+const _OVERLAY_WEAPONS_COLOR := Color(1.0, 0.52, 0.16, 0.90)
+const _OVERLAY_RAY_HEIGHT := 1.5
 
 # Where the harvester FSM wants to go. Kept apart from the order system on
 # purpose: hauling ore is not a player order and must not overwrite one. A
@@ -190,6 +231,11 @@ var _separation_radius: float = 3.0
 # again, which is the behaviour every RTS player already expects.
 var _internal_destination: Vector3 = Vector3.ZERO
 var _has_internal_destination: bool = false
+
+# Unit-level combat target (auto-acquired when idle / in stance, or from taking fire)
+var _auto_target: Node3D = null
+var _target_scan_timer: float = 0.0
+const TARGET_SCAN_INTERVAL := 0.25
 
 # Boost controller for burst speed parts (nitrous_injector, booster_rack)
 var boost_controller: BoostController = null
@@ -351,6 +397,8 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 
 	_p = Profiler.start()
 	_create_selection_ring(base_size)
+	_create_targetable_overlay()
+	_create_visible_overlay()
 	Profiler.stop("spawn.selection_ring", _p)
 	_log_collider_census()
 	_detect_harvester(controller)
@@ -403,30 +451,59 @@ func _recalculate_vision() -> void:
 	var base: float = ModuleCatalog.get_base_vision(_hull_type)
 	var bonus := 0.0
 	var has_radar := false
+	directional_sensors.clear()
+	topographic_range = 0.0
+	seismic_range = 0.0
+	has_thermal_sight = false
+
 	for m in DamageModelScript.active_modules(hull_node):
 		var data = m.get_meta("module_data")
 		if data == null:
 			continue
 		if data.type_id == "sensor_suite":
 			bonus += data.get_vision_bonus()
+		elif data.type_id == "directional_radar":
+			var dir_reach = base + data.get_vision_bonus()
+			var arc = data.get_scan_arc() if data.has_method("get_scan_arc") else 60.0
+			directional_sensors.append({
+				"range": dir_reach,
+				"arc_deg": arc,
+				"arc_rad": deg_to_rad(arc),
+				"node": m
+			})
+		elif data.type_id == "topographic_radar":
+			if data.has_method("get_survey_radius"):
+				topographic_range = maxf(topographic_range, data.get_survey_radius())
+			else:
+				topographic_range = maxf(topographic_range, 140.0)
+		elif data.type_id == "seismic_sensor":
+			if data.has_method("get_seismic_range"):
+				seismic_range = maxf(seismic_range, data.get_seismic_range())
+			else:
+				seismic_range = maxf(seismic_range, 75.0)
+		elif data.type_id == "thermal_imager":
+			bonus += data.get_vision_bonus()
+			has_thermal_sight = true
 		elif data.type_id == "fire_control_radar":
 			has_radar = true
-	vision_range = base + bonus
-	# Brownout applied LAST, as a multiplier on the finished figure, so it
-	# composes with the faction passive above rather than competing with it: a
-	# Technocrat scout that browns out should lose the same PROPORTION of its
-	# sight as anyone else, not have its passive silently cancelled.
-	#
-	# This is also why _recalculate_vision() is called when the brownout state
-	# changes and not only when modules are lost - vision is recomputed from
-	# scratch each time, so a stale multiplier cannot accumulate.
-	vision_range *= PowerBudgetScript.vision_multiplier(_brownout)
+
+	var brownout_mult = PowerBudgetScript.vision_multiplier(_brownout)
+	vision_range = (base + bonus) * brownout_mult
+	topographic_range *= brownout_mult
+	seismic_range *= brownout_mult
+	for ds in directional_sensors:
+		ds["range"] *= brownout_mult
+
 	if is_instance_valid(hull_node):
 		# Read off the HULL by auto_weapon.gd's spotting check, not off the unit -
 		# a radar lets this unit's weapons engage out to their own reach rather
 		# than only as far as it can see.
 		hull_node.set_meta("has_fire_control_radar", has_radar)
 		hull_node.set_meta("fire_control_max_range", maxf(vision_range, attack_range))
+		hull_node.set_meta("has_thermal_sight", has_thermal_sight)
+	# Refresh the sensor-range disc on every recalc. Brownout, sensor module
+	# strip, and hull change all land here, and they all change vision_range.
+	_create_visible_overlay()
 
 
 # A design is a harvester if it actually mounts the module. Derived from the
@@ -621,6 +698,12 @@ func _physics_process(delta: float) -> void:
 	_p = Profiler.start()
 	_advance_orders()
 	Profiler.stop("unit.advance_orders", _p)
+	_p = Profiler.start()
+	_tick_targeting(delta)
+	Profiler.stop("unit.tick_targeting", _p)
+	_p = Profiler.start()
+	_refresh_overlays_if_stale()
+	Profiler.stop("unit.overlays", _p)
 	_p = Profiler.start()
 	_tick_economy(delta)
 	Profiler.stop("unit.tick_economy", _p)
@@ -844,6 +927,199 @@ func halt() -> void:
 	velocity.z = 0.0
 
 
+# --- Target Acquisition ----------------------------------------------
+func get_combat_target() -> Node3D:
+	if current_order != null and current_order.type == Order.Type.ATTACK:
+		if is_instance_valid(current_order.target) and not ("is_dead" in current_order.target and current_order.target.is_dead):
+			return current_order.target
+	if is_instance_valid(_auto_target) and not ("is_dead" in _auto_target and _auto_target.is_dead):
+		var t_team = _auto_target.get_meta("team") if _auto_target.has_meta("team") else -1
+		if t_team != team:
+			var visible: bool = _controller == null or not _controller.has_method("is_visible_to_team") or _controller.is_visible_to_team(_auto_target, team)
+			if visible and _has_line_of_sight_to(_auto_target):
+				return _auto_target
+	_auto_target = null
+	return null
+
+
+func _has_line_of_sight_to(candidate: Node3D) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	# Indirect fire weapons can arc over intervening terrain
+	if is_instance_valid(hull_node):
+		var main_data := AssemblyScript.compute_main_weapon(hull_node)
+		var main_type: String = str(main_data.get("type_id", ""))
+		if ModuleCatalog.is_indirect_fire(main_type):
+			return true
+
+	var space_state = get_world_3d().direct_space_state if is_inside_tree() else null
+	if space_state == null:
+		return true
+
+	var ray_start = global_position + Vector3(0, 1.5, 0)
+	var ray_end = candidate.global_position + Vector3(0, 1.25, 0)
+
+	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+	# Terrain/obstacles (1), Buildings (8)
+	query.collision_mask = BattleLayers.TERRAIN | BattleLayers.BUILDINGS
+	query.collide_with_areas = true
+
+	var excludes: Array = []
+	_collect_colliders(self, excludes)
+	_collect_colliders(candidate, excludes)
+	query.exclude = excludes
+
+	var result = space_state.intersect_ray(query)
+	return result.is_empty()
+
+
+func _collect_colliders(node: Node, list: Array) -> void:
+	if not is_instance_valid(node):
+		return
+	if node is CollisionObject3D:
+		list.append(node.get_rid())
+	for child in node.get_children():
+		_collect_colliders(child, list)
+
+
+func _tick_targeting(delta: float) -> void:
+	# HOLD_FIRE units never auto-acquire. They still engage an explicit
+	# ATTACK order, and a `_auto_target` snap set by take_damage() is
+	# still honored as a combat target (auto_weapon.gd gates its
+	# acquisition on stance, so an ambient enemy never picks up a shot
+	# the unit did not agree to fire), but the scan loop itself is a
+	# no-op. Test-range dummies live entirely behind this gate.
+	if stance == StanceScript.Kind.HOLD_FIRE:
+		_auto_target = null
+		return
+	if current_order != null and current_order.type == Order.Type.ATTACK:
+		return
+
+	_target_scan_timer -= delta
+	if _target_scan_timer > 0.0:
+		return
+	_target_scan_timer = TARGET_SCAN_INTERVAL
+
+	var current_tgt := get_combat_target()
+	if current_tgt != null:
+		var max_pursuit: float = maxf(attack_range, vision_range) * StanceScript.pursuit_range_multiplier(stance)
+		if max_pursuit <= 0.0 or global_position.distance_to(current_tgt.global_position) > max_pursuit:
+			_auto_target = null
+		else:
+			return
+
+	if attack_range <= 0.0:
+		return
+
+	_acquire_auto_target()
+
+
+func _acquire_auto_target() -> void:
+	var search_radius: float = vision_range
+	if StanceScript.seeks_targets(stance):
+		search_radius = maxf(vision_range, attack_range * 1.5)
+	elif stance == StanceScript.Kind.HOLD_POSITION:
+		search_radius = attack_range
+	else:
+		search_radius = maxf(attack_range * 1.25, vision_range * 0.8)
+
+	if search_radius <= 0.0:
+		return
+
+	var candidates: Array = []
+	if _controller != null and _controller.has_method("get_nearby_damageable"):
+		candidates = _controller.get_nearby_damageable(global_position, search_radius)
+	elif is_inside_tree():
+		var raw = get_tree().get_nodes_in_group("damageable")
+		for c in raw:
+			if is_instance_valid(c) and global_position.distance_to(c.global_position) <= search_radius:
+				candidates.append(c)
+
+	var best: Node3D = null
+	# TERRAIN-AWARE SCORING. Pure distance was always wrong: a half-dead
+	# tank at 60 m is a strictly better target than a full-HP scout at
+	# 55 m, and a target on open ground is a strictly better target than
+	# one behind a wall at the same distance. We score on three terms:
+	#   - distance penalty (linear in metres, so a closer target wins
+	#     unless something else outweighs it)
+	#   - wound bonus (mirrors squad._priority_target's 40x term, so the
+	#     same target the squad would pick wins here too)
+	#   - terrain bonus: low-ground targets preferred (attacker on the
+	#     hill gets a 0.85x damage threshold from damage_resolver.gd),
+	#     and unreachable targets (locomotion can't traverse) are
+	#     dropped entirely rather than scored
+	# The score is "lower is better"; we keep the candidate with the
+	# smallest score.
+	var best_score: float = INF
+	var my_y: float = global_position.y
+	var consider_terrain: bool = (not is_flying) and (not is_naval) \
+			and _controller != null and _controller.has_method("get_surface_type_at")
+
+	for c in candidates:
+		if c == self or not is_instance_valid(c) or ("is_dead" in c and c.is_dead):
+			continue
+		var other_team: int = c.get_meta("team") if c.has_meta("team") else -1
+		if other_team == team or other_team < 0:
+			continue
+		if _controller != null and _controller.has_method("is_visible_to_team") and not _controller.is_visible_to_team(c, team):
+			continue
+		# Terrain reachability: a tracked unit cannot chase a target on
+		# water, a wheeled one will not chase into a marsh. The terrain
+		# speed table's missing row falls through to 1.0 (unaffected),
+		# which is the same default a flyer's "I can be anywhere" case
+		# gets. We treat a literal 0.0 as a hard block, anything else
+		# (including the 0.1..0.3 marsh range) as "ugly but possible".
+		if consider_terrain:
+			var surface: String = _controller.get_surface_type_at(c.global_position)
+			if surface != "":
+				var mult: float = ModuleCatalog.get_terrain_speed_multiplier(
+					locomotion_type, surface)
+				if mult <= 0.0:
+					continue
+		# Terrain & obstacle line-of-sight check
+		if not _has_line_of_sight_to(c):
+			continue
+		var dist: float = global_position.distance_to(c.global_position)
+		var score: float = dist
+		# Wound bonus: same magnitude the squad uses, so a unit acting
+		# on its own picks the same wounded target the squad would.
+		if "max_hp" in c and c.max_hp > 0.0:
+			score -= (1.0 - float(c.hp) / float(c.max_hp)) * 40.0
+		# Terrain bonus: a target below me is preferred (I get the
+		# 0.85x damage threshold on the way in), a target significantly
+		# above me is avoided. 12 m of elevation delta is the threshold
+		# that flips a "hmm" into a "no" for a typical fight.
+		if is_flying:
+			pass  # air-to-air or air-to-ground, elevation is meaningless
+		else:
+			var dy: float = c.global_position.y - my_y
+			if dy < -1.0:
+				score -= 18.0
+			elif dy > 4.0:
+				score += 12.0
+		if score < best_score:
+			best_score = score
+			best = c
+
+	_auto_target = best
+
+
+func _recalculate_weapons() -> void:
+	if not is_instance_valid(hull_node):
+		return
+	attack_range = 0.0
+	for child in hull_node.get_children():
+		if not is_instance_valid(child) or child.is_queued_for_deletion():
+			continue
+		if "fire_range" in child:
+			attack_range = maxf(attack_range, float(child.fire_range))
+	var main_weapon: Dictionary = AssemblyScript.compute_main_weapon(hull_node)
+	main_weapon_range = float(main_weapon.get("range", attack_range))
+	if main_weapon_range <= 0.0:
+		main_weapon_range = attack_range
+	_create_targetable_overlay()
+
+
 # --- Boost controller helper methods ---
 
 func get_remaining_distance() -> float:
@@ -892,10 +1168,22 @@ func get_energy_fraction() -> float:
 
 func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 	var destination: Vector3
-	if current_order != null and current_order.type == Order.Type.ATTACK:
+	var combat_tgt := get_combat_target()
+	var has_attack_order := current_order != null and current_order.type == Order.Type.ATTACK
+	var is_auto_engaging := current_order == null and combat_tgt != null and stance != StanceScript.Kind.HOLD_POSITION
+
+	if has_attack_order or is_auto_engaging:
 		if not _resolve_attack_station():
 			velocity.x = 0.0
 			velocity.z = 0.0
+			# Orient chassis toward combat target so main weapon can bear
+			if combat_tgt != null and is_instance_valid(combat_tgt):
+				var to_target := combat_tgt.global_position - global_position
+				to_target.y = 0.0
+				if to_target.length_squared() > 0.01:
+					var current_yaw := rotation.y
+					var target_yaw := SteeringScript.yaw_for(to_target, current_yaw)
+					rotation.y = SteeringScript.turn_toward(current_yaw, target_yaw, TURN_RATE * delta)
 			return
 		destination = _internal_destination
 	elif current_order != null and current_order.has_destination():
@@ -906,6 +1194,13 @@ func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 		if current_order.type == Order.Type.ATTACK_MOVE and _hostile_within_reach():
 			velocity.x = 0.0
 			velocity.z = 0.0
+			if combat_tgt != null and is_instance_valid(combat_tgt):
+				var to_target := combat_tgt.global_position - global_position
+				to_target.y = 0.0
+				if to_target.length_squared() > 0.01:
+					var current_yaw := rotation.y
+					var target_yaw := SteeringScript.yaw_for(to_target, current_yaw)
+					rotation.y = SteeringScript.turn_toward(current_yaw, target_yaw, TURN_RATE * delta)
 			return
 		destination = current_order.position
 	elif _has_internal_destination:
@@ -913,6 +1208,13 @@ func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 	else:
 		velocity.x = 0.0
 		velocity.z = 0.0
+		if combat_tgt != null and is_instance_valid(combat_tgt):
+			var to_target := combat_tgt.global_position - global_position
+			to_target.y = 0.0
+			if to_target.length_squared() > 0.01:
+				var current_yaw := rotation.y
+				var target_yaw := SteeringScript.yaw_for(to_target, current_yaw)
+				rotation.y = SteeringScript.turn_toward(current_yaw, target_yaw, TURN_RATE * delta)
 		return
 
 	if move_speed <= 0.0:
@@ -1107,7 +1409,8 @@ func _engagement_distance() -> float:
 # _internal_destination to where it is going. False means stand still - either
 # already in range, or there is nothing left to shoot.
 func _resolve_attack_station() -> bool:
-	if current_order == null or not is_instance_valid(current_order.target):
+	var target = get_combat_target()
+	if target == null or not is_instance_valid(target):
 		return false
 	# HOLD_POSITION does not chase, even under a direct attack order. The order is
 	# still honoured - the guns engage if the target comes to them - but the wheels
@@ -1115,11 +1418,11 @@ func _resolve_attack_station() -> bool:
 	if stance == StanceScript.Kind.HOLD_POSITION:
 		return false
 	var gap: float = Vector2(
-		current_order.target.global_position.x - global_position.x,
-		current_order.target.global_position.z - global_position.z).length()
+		target.global_position.x - global_position.x,
+		target.global_position.z - global_position.z).length()
 	if gap <= _engagement_distance():
 		return false
-	_internal_destination = current_order.target.global_position
+	_internal_destination = target.global_position
 	return true
 
 
@@ -1315,6 +1618,21 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	if _controller != null and _controller.has_method("record_combat_damage"):
 		_controller.record_combat_damage(self, hit_origin, dealt, damage_type)
 
+	# Acquire attacker if idle, not holding position, and not on hold-fire.
+	# HOLD_FIRE is a fully passive stance for test-range dummies and any
+	# future "stand here and be shot" use case; the unit does not retaliate
+	# when fired upon. RETURN_FIRE is the player's "fight back but don't
+	# chase" stance if a real unit wants to answer incoming fire.
+	if hit_origin != null and _auto_target == null and current_order == null \
+			and stance != StanceScript.Kind.HOLD_POSITION \
+			and stance != StanceScript.Kind.HOLD_FIRE:
+		if hit_origin is Node3D and is_instance_valid(hit_origin) and not ("is_dead" in hit_origin and hit_origin.is_dead):
+			var o_team = hit_origin.get_meta("team") if hit_origin.has_meta("team") else -1
+			if o_team != team:
+				_auto_target = hit_origin
+		elif hit_origin is Vector3:
+			_acquire_auto_target()
+
 	# DEPLOYABLE_MODULES_OVERHAUL.md §2: emergency smoke auto-pop at <10% HP.
 	# Fires the smoke_discharger toward the hit origin if the weapon is ready.
 	# Gated on hp > 0 (don't double-trigger on the killing blow) and cooldown.
@@ -1402,11 +1720,24 @@ func _absorb_with_barrier(amount: float, modules: Array, hit_origin) -> float:
 # and recalculating now would count the module that just died.
 func _strip_module(module: Node3D, amount: float) -> void:
 	if not DamageModelScript.damage_module(module, amount):
+		# Survived the hit with partial damage. Past the damaged threshold the
+		# module starts smoking and wears the cracked stencil, so a half-stripped
+		# vehicle is legible mid-fight instead of changing state only when a
+		# part finally comes off.
+		ModuleDamageFxScript.module_damaged(self, module)
 		return
+	# One-shot destruction burst at the module's own position - spawned BEFORE
+	# queue_free() and parented clear of the dying node so it plays out rather
+	# than vanishing with it.
+	ModuleDamageFxScript.module_destroyed(self, module)
 	var data = module.get_meta("module_data")
 	var was_locomotion: bool = data != null and data.category == "locomotion"
 	var was_generator: bool = data != null and data.category == "generator"
-	var was_sensor: bool = data != null and data.type_id in ["sensor_suite", "fire_control_radar"]
+	var was_sensor: bool = data != null and data.type_id in [
+		"sensor_suite", "directional_radar", "topographic_radar",
+		"seismic_sensor", "thermal_imager", "fire_control_radar"
+	]
+	var was_weapon: bool = data != null and ModuleCatalog.needs_combat_script(data.type_id)
 	module.queue_free()
 	if was_locomotion:
 		# Losing the running gear is what immobilises a vehicle. Recalculating
@@ -1417,6 +1748,8 @@ func _strip_module(module: Node3D, amount: float) -> void:
 		call_deferred("_recalculate_energy")
 	if was_sensor:
 		call_deferred("_recalculate_vision")
+	if was_weapon:
+		call_deferred("_recalculate_weapons")
 
 
 # --- Energy ------------------------------------------------------------------
@@ -1465,6 +1798,16 @@ func set_selected(value: bool) -> void:
 	_is_selected = value
 	if is_instance_valid(_selection_ring):
 		_selection_ring.visible = value
+	if is_instance_valid(_targetable_overlay):
+		_targetable_overlay.visible = value and show_range_overlay and attack_range > 0.0
+	if is_instance_valid(_visible_overlay):
+		_visible_overlay.visible = value and show_range_overlay and vision_range > 0.0
+	# Force a rebuild on the next physics tick by flagging the cached
+	# position as "moved infinitely far". Without this, a unit selected
+	# for the first time after sitting in the world for 30 seconds would
+	# have a zero-distance cached move and skip the cast entirely.
+	if value:
+		_overlay_last_pos = Vector3.INF
 
 
 func is_selected() -> bool:
@@ -1614,3 +1957,262 @@ func _create_selection_ring(base_size: Vector3) -> void:
 	ring.visible = false
 	add_child(ring)
 	_selection_ring = ring
+
+
+func _create_targetable_overlay() -> void:
+	if attack_range <= 0.0:
+		if is_instance_valid(_targetable_overlay):
+			_targetable_overlay.queue_free()
+			_targetable_overlay = null
+		_overlay_last_targetable_range = -1.0
+		return
+	var reaches := _compute_terrain_reach(
+		attack_range, _OVERLAY_RAY_SEGMENTS,
+		_is_main_weapon_indirect() or is_flying or is_naval or is_amphibious)
+	if not is_instance_valid(_targetable_overlay):
+		_targetable_overlay = Decal.new()
+		_targetable_overlay.name = "TargetableOverlay"
+		_targetable_overlay.normal_fade = 0.55
+		_targetable_overlay.cull_mask = BattleLayers.TERRAIN | BattleLayers.BUILDINGS
+		_targetable_overlay.top_level = true
+		add_child(_targetable_overlay)
+	var proj_depth: float = maxf(40.0, attack_range * 0.8)
+	_targetable_overlay.size = Vector3(attack_range * 2.0, proj_depth, attack_range * 2.0)
+	_targetable_overlay.global_position = global_position
+	_targetable_overlay.rotation = Vector3.ZERO
+	_targetable_overlay.texture_albedo = _generate_range_overlay_texture(
+		reaches, attack_range, _OVERLAY_WEAPONS_COLOR)
+	_targetable_overlay.albedo_mix = 1.0
+	_targetable_overlay.visible = _is_selected and show_range_overlay
+	_overlay_last_targetable_range = attack_range
+
+
+# Sensor coverage disc. Distinct from the targetable overlay because "I can
+# see this" and "my weapons can hit this" are not the same radius and a
+# player who can read the gap is a player who plans better.
+func _create_visible_overlay() -> void:
+	if vision_range <= 0.0:
+		if is_instance_valid(_visible_overlay):
+			_visible_overlay.queue_free()
+			_visible_overlay = null
+		_overlay_last_visible_range = -1.0
+		return
+	var reaches := _compute_terrain_reach(
+		vision_range, _OVERLAY_RAY_SEGMENTS,
+		is_flying or is_naval or is_amphibious)
+	if not is_instance_valid(_visible_overlay):
+		_visible_overlay = Decal.new()
+		_visible_overlay.name = "VisibleOverlay"
+		_visible_overlay.normal_fade = 0.55
+		_visible_overlay.cull_mask = BattleLayers.TERRAIN | BattleLayers.BUILDINGS
+		_visible_overlay.top_level = true
+		add_child(_visible_overlay)
+	var proj_depth: float = maxf(40.0, vision_range * 0.8)
+	_visible_overlay.size = Vector3(vision_range * 2.0, proj_depth, vision_range * 2.0)
+	_visible_overlay.global_position = global_position
+	_visible_overlay.rotation = Vector3.ZERO
+	_visible_overlay.texture_albedo = _generate_range_overlay_texture(
+		reaches, vision_range, _OVERLAY_VISION_COLOR)
+	_visible_overlay.albedo_mix = 1.0
+	_visible_overlay.visible = _is_selected and show_range_overlay
+	_overlay_last_visible_range = vision_range
+
+
+# True when the unit's main weapon is indirect-fire (artillery, mortar, etc.)
+# and therefore ignores line-of-sight for the overlay purposes.
+func _is_main_weapon_indirect() -> bool:
+	if not is_instance_valid(hull_node):
+		return false
+	var main_data: Dictionary = AssemblyScript.compute_main_weapon(hull_node)
+	var main_type: String = str(main_data.get("type_id", ""))
+	if main_type.is_empty():
+		return false
+	return ModuleCatalog.is_indirect_fire(main_type)
+
+
+# Accurate 2.5D radial terrain shadowcasting.
+#
+# Marches outward along radial rays, querying the terrain heightmap to determine
+# true line-of-sight clearance. If an intervening ridge or hill blocks sightlines
+# to lower terrain behind it, the reach boundary correctly snaps to the occluding crest.
+func _compute_terrain_reach(max_range: float, segments: int,
+		ignore_terrain: bool) -> Array:
+	var reaches: Array = []
+	if max_range <= 0.0 or segments <= 0:
+		reaches.resize(maxi(1, segments))
+		return reaches
+	if ignore_terrain:
+		reaches.resize(segments)
+		for i in range(segments):
+			reaches[i] = max_range
+		return reaches
+
+	var origin: Vector3 = global_position + Vector3(0, _OVERLAY_RAY_HEIGHT, 0)
+	var has_world_height: bool = _controller != null and _controller.has_method("terrain_height_at")
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state if is_inside_tree() else null
+
+	reaches.resize(segments)
+	var step_size: float = maxf(1.0, max_range / 40.0)
+	var num_steps: int = maxi(2, int(ceil(max_range / step_size)))
+
+	# Building query to check static structure occluders
+	var building_query: PhysicsRayQueryParameters3D = null
+	if space != null:
+		building_query = PhysicsRayQueryParameters3D.new()
+		building_query.collision_mask = BattleLayers.BUILDINGS
+		building_query.collide_with_areas = false
+		var excludes: Array = []
+		_collect_colliders(self, excludes)
+		building_query.exclude = excludes
+
+	for i in range(segments):
+		var angle: float = (float(i) / float(segments)) * TAU
+		var world_dir := Vector3(cos(angle), 0.0, sin(angle))
+		var max_clear_dist: float = max_range
+		var max_occ_slope: float = -9999.0
+
+		if has_world_height:
+			# 2.5D heightmap shadowcast along this radial angle
+			for step_idx in range(1, num_steps + 1):
+				var r: float = minf(float(step_idx) * step_size, max_range)
+				var probe_world: Vector3 = global_position + world_dir * r
+				var probe_y: float = _controller.terrain_height_at(probe_world)
+
+				# Target visibility point at probe location (~1.2m above ground)
+				var target_y: float = probe_y + 1.2
+				var target_slope: float = (target_y - origin.y) / r
+
+				# If target slope falls below max occluder slope, this ground point is in shadow
+				if target_slope < max_occ_slope - 0.02:
+					max_clear_dist = maxf(0.0, r - step_size * 0.5)
+					break
+
+				# Terrain occluder slope (the ground surface itself at this distance)
+				var occ_slope: float = (probe_y - origin.y) / r
+				if occ_slope > max_occ_slope:
+					max_occ_slope = occ_slope
+		else:
+			# Fallback physics raycast if no heightmap service
+			if space != null:
+				var query := PhysicsRayQueryParameters3D.create(origin, origin + world_dir * max_range)
+				query.collision_mask = BattleLayers.TERRAIN | BattleLayers.BUILDINGS
+				var excludes: Array = []
+				_collect_colliders(self, excludes)
+				query.exclude = excludes
+				var hit: Dictionary = space.intersect_ray(query)
+				if not hit.is_empty():
+					max_clear_dist = origin.distance_to(hit.get("position", origin + world_dir * max_range))
+
+		# Also check building occlusion along the cleared distance
+		if space != null and building_query != null and max_clear_dist > 1.0:
+			building_query.from = origin
+			building_query.to = origin + world_dir * max_clear_dist
+			var b_hit: Dictionary = space.intersect_ray(building_query)
+			if not b_hit.is_empty():
+				var b_dist: float = origin.distance_to(b_hit.get("position", building_query.to))
+				max_clear_dist = minf(max_clear_dist, b_dist)
+
+		reaches[i] = max_clear_dist
+
+	return reaches
+
+
+# Generates a subtle, high-precision tactical contour texture for the Decal.
+#
+# The center is completely clear (0 alpha) so units and ground textures are unobstructed.
+# The boundary is rendered as a crisp, anti-aliased luminous contour line with subtle
+# inner falloff and military reticle accents.
+func _generate_range_overlay_texture(reaches: Array, max_range: float, border_color: Color) -> ImageTexture:
+	var dim: int = _OVERLAY_TEX_SIZE
+	var half_dim: float = float(dim) * 0.5
+	var img := Image.create(dim, dim, false, Image.FORMAT_RGBA8)
+	var n_reaches: int = reaches.size()
+	if n_reaches == 0 or max_range <= 0.0:
+		return ImageTexture.create_from_image(img)
+
+	var inv_max_range: float = 1.0 / max_range
+
+	for y in range(dim):
+		var ny: float = (float(y) + 0.5 - half_dim) / half_dim
+		for x in range(dim):
+			var nx: float = (float(x) + 0.5 - half_dim) / half_dim
+			var dist_sq: float = nx * nx + ny * ny
+			if dist_sq > 1.06:
+				continue
+			var dist_norm: float = sqrt(dist_sq)
+			var angle: float = atan2(ny, nx)
+			if angle < 0.0:
+				angle += TAU
+
+			# Sample reach at this angle
+			var idx_f: float = (angle / TAU) * float(n_reaches)
+			var i0: int = int(floor(idx_f)) % n_reaches
+			var i1: int = (i0 + 1) % n_reaches
+			var frac: float = idx_f - floor(idx_f)
+			var reach_m: float = lerpf(float(reaches[i0]), float(reaches[i1]), frac)
+			var reach_norm: float = clampf(reach_m * inv_max_range, 0.01, 1.0)
+
+			var t: float = dist_norm / reach_norm
+			var alpha: float = 0.0
+
+			if t > 1.0:
+				# Outer anti-aliasing feathering
+				var over: float = (t - 1.0) * reach_norm * half_dim
+				if over < 2.0:
+					alpha = (1.0 - over * 0.5) * 0.65
+			elif t >= 0.92:
+				# Sharp, luminous tactical boundary contour
+				var edge_frac: float = (t - 0.92) / 0.08
+				alpha = lerpf(0.18, 0.75, edge_frac)
+			elif t >= 0.76:
+				# Faint, subtle inner gradient
+				var inner_frac: float = (t - 0.76) / 0.16
+				alpha = inner_frac * 0.18
+			else:
+				# Clean center - 0 alpha so unit and terrain are clear
+				alpha = 0.0
+
+			if alpha > 0.005:
+				# Subtle tick accents every 30 degrees
+				var tick_angle: float = wrapf(angle + PI / 12.0, 0.0, TAU / 6.0) - TAU / 12.0
+				if absf(tick_angle) < 0.035 and t > 0.82 and t <= 1.0:
+					alpha = minf(1.0, alpha + 0.20)
+
+				var col := Color(border_color.r, border_color.g, border_color.b, alpha * border_color.a)
+				img.set_pixel(x, y, col)
+
+	return ImageTexture.create_from_image(img)
+
+
+# Re-compute and refresh the overlays when the selected unit moves or ranges change.
+func _refresh_overlays_if_stale() -> void:
+	if not _is_selected or not show_range_overlay:
+		return
+	if not is_inside_tree():
+		return
+
+	# Keep decal positions anchored at current unit position
+	if is_instance_valid(_targetable_overlay) and _targetable_overlay.top_level:
+		_targetable_overlay.global_position = global_position
+	if is_instance_valid(_visible_overlay) and _visible_overlay.top_level:
+		_visible_overlay.global_position = global_position
+
+	var moved: float = global_position.distance_to(_overlay_last_pos)
+	var range_changed: bool = attack_range != _overlay_last_targetable_range \
+			or vision_range != _overlay_last_visible_range
+	if moved < _OVERLAY_REBUILD_MOVE_THRESHOLD and not range_changed:
+		return
+	_overlay_last_pos = global_position
+	if attack_range > 0.0:
+		_create_targetable_overlay()
+	if vision_range > 0.0:
+		_create_visible_overlay()
+
+
+# Toggle the overlay on/off.
+func set_range_overlay_visible(value: bool) -> void:
+	show_range_overlay = value
+	if is_instance_valid(_targetable_overlay):
+		_targetable_overlay.visible = _is_selected and value
+	if is_instance_valid(_visible_overlay):
+		_visible_overlay.visible = _is_selected and value

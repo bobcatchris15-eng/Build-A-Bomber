@@ -28,6 +28,7 @@ extends RefCounted
 const C = preload("res://scripts/battle/ai/considerations.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const ThreatAnalyzer = preload("res://scripts/battle/ai/threat_analyzer.gd")
 
 # SKIRMISH_PERF_TROUBLESHOOTING.md §14. Cap the rate at which the AI
 # issues the same structure type. The 20:49:15 capture showed 14
@@ -56,9 +57,11 @@ const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # one purpose-built surface-to-air weapon in the game was not recognised as an
 # answer to air - an AI holding a SAM turret design would keep scoring "build
 # anti-air" and pick something else.
-const ANTI_AIR_WEAPONS := ["ciws", "flak_cannon", "pd_laser", "sam_launcher"]
+const ANTI_AIR_WEAPONS := ["ciws", "flak_cannon", "pd_laser", "sam_launcher", "aa_autocannon"]
 const ANTI_ARMOR_WEAPONS := ["gauss_railgun", "artillery", "ion_cannon", "tesla_coil",
-	"coil_gun", "recoilless_rifle", "ballista", "anti_materiel_rifle"]
+	"coil_gun", "recoilless_rifle", "ballista", "anti_materiel_rifle", "particle_lance"]
+const POINT_DEFENSE_WEAPONS := ["ciws", "pd_laser", "flak_cannon", "aps_interceptor", "laser_dazzler", "chaff_dispenser", "jammer_mast"]
+const INDIRECT_WEAPONS := ["artillery", "mortar_array", "spigot_mortar", "rocket_artillery", "cluster_dispenser", "plasma_lobber", "mk19_grenade_launcher", "napalm_mortar"]
 
 enum Action {
 	EXPAND_ECONOMY,   # another harvester
@@ -71,6 +74,12 @@ enum Action {
 	DEFEND,           # pull squads home
 	BUILD_DEFENSE,    # a turret, which holds ground a squad would have to stand on
 	PUSH,             # commit to an attack
+	# --- AI overhaul: damage-type-aware actions ---
+	# These fire when the AI detects specific armor/weapon patterns in the
+	# observed enemy force and has designs in its roster that counter them.
+	BUILD_COUNTER_ARMOR,  # enemy wears a specific material → build the damage class that cracks it
+	BUILD_POINT_DEFENSE,  # enemy spams guided missiles → build PD-equipped units
+	BUILD_INDIRECT,       # enemy turtles with static defenses → build artillery
 }
 
 # How long a decision stands before it is re-scored. Not a cooldown on acting -
@@ -85,6 +94,12 @@ const MIN_PUSH_SQUAD := 4
 
 # Personality. These are the numbers to move to make an AI greedy, turtly or
 # aggressive; nothing else about it needs to change.
+#
+# AI OVERHAUL: now the DEFAULT weights, overridden per-doctrine. The doctrine
+# system gives three distinct AI flavors with readable, exploitable biases.
+# The player discovers the doctrine through observed behavior, not through a
+# label on the setup screen — an opponent that telegraphs its strategy before
+# the game starts is not an opponent worth reading.
 const WEIGHTS := {
 	Action.EXPAND_ECONOMY: 1.0,
 	Action.ADD_REFINERY: 0.9,
@@ -96,10 +111,78 @@ const WEIGHTS := {
 	Action.DEFEND: 1.6,
 	Action.BUILD_DEFENSE: 1.0,
 	Action.PUSH: 0.7,
+	# New damage-type-aware actions — same default weight as the role-based
+	# equivalents. The consideration math gates them on actual observations.
+	Action.BUILD_COUNTER_ARMOR: 1.1,
+	Action.BUILD_POINT_DEFENSE: 1.0,
+	Action.BUILD_INDIRECT: 0.9,
+}
+
+# --- Doctrine system -----------------------------------------------------------
+#
+# Three AI personalities. Each overrides a subset of WEIGHTS and tweaks
+# tactical constants. The player learns the doctrine from observed behavior:
+#   - Blitz attacks early, raids often, under-invests in economy
+#   - Attrition is balanced, counter-picks carefully, trades efficiently
+#   - Fortress turtles with defenses, builds heavy economy, rarely pushes
+#
+# EXPLOITABLE BY DESIGN:
+#   Blitz    → kill its harvesters and it collapses (fragile economy)
+#   Attrition → rush before it adapts (slow to push, needs time to read you)
+#   Fortress → out-tech and overwhelm (never pressures you, lets you scale)
+const DOCTRINES := {
+	"blitz": {
+		"weight_overrides": {
+			Action.PUSH: 1.2,
+			Action.EXPAND_ECONOMY: 0.7,
+			Action.BUILD_DEFENSE: 0.4,
+			Action.ADD_PRODUCTION: 1.0,
+			Action.BUILD_COUNTER_ARMOR: 0.8,
+		},
+		"min_push_squad": 3,
+		"defence_target": 2,
+		"retreat_health_fraction": 0.3,
+		"raider_priority": 1.4,
+	},
+	"attrition": {
+		"weight_overrides": {
+			Action.BUILD_COUNTER_ARMOR: 1.3,
+			Action.BUILD_ANTI_AIR: 1.3,
+			Action.BUILD_ANTI_ARMOR: 1.3,
+		},
+		"min_push_squad": 5,
+		"defence_target": 3,
+		"retreat_health_fraction": 0.4,
+		"raider_priority": 1.0,
+	},
+	"fortress": {
+		"weight_overrides": {
+			Action.BUILD_DEFENSE: 1.8,
+			Action.ADD_REFINERY: 1.2,
+			Action.PUSH: 0.4,
+			Action.DEFEND: 2.0,
+			Action.BUILD_INDIRECT: 0.5,
+		},
+		"min_push_squad": 7,
+		"defence_target": 6,
+		"retreat_health_fraction": 0.5,
+		"raider_priority": 0.5,
+	},
+}
+
+# Default difficulty → doctrine mapping. Easy gets fortress (passive, lets the
+# player breathe); normal gets attrition (balanced, learns); hard gets blitz
+# (aggressive, punishing). In Operations, the AI cycles doctrines between
+# rounds so the player faces varied challenges.
+const DIFFICULTY_DOCTRINE := {
+	"easy": "fortress",
+	"normal": "attrition",
+	"hard": "blitz",
 }
 
 # Turrets the AI will put up before it stops seeing the point. A base ringed with
 # static defence is a base that has spent its economy on ground it already holds.
+# Overridden by the doctrine's defence_target.
 const DEFENCE_TARGET := 3
 
 # Target harvester count, PER REFINERY.
@@ -146,6 +229,13 @@ var team: int = 1
 var _last_build_at_ms: Dictionary = {}
 var difficulty: String = "normal"
 
+# AI OVERHAUL: the active doctrine, resolved from difficulty at setup.
+# Determines weight overrides, tactical constants, and exploitable bias.
+var doctrine: String = "attrition"
+# AI OVERHAUL: the dominant enemy armor material observed through fog.
+# Updated by read_state() every decision tick. Used by ammo adaptation.
+var observed_enemy_armor: String = ""
+
 var _world = null
 var _timer: float = 0.0
 var _last_action: int = -1
@@ -162,6 +252,29 @@ func setup(world, ai_team: int, ai_difficulty: String = "normal") -> void:
 	_world = world
 	team = ai_team
 	difficulty = ai_difficulty
+	# Resolve doctrine from difficulty, with fallback to attrition
+	doctrine = DIFFICULTY_DOCTRINE.get(difficulty, "attrition")
+
+
+# The effective weight for an action, with doctrine overrides applied.
+# Base WEIGHTS are the floor; the doctrine can raise or lower individual
+# actions to express its personality. Actions not mentioned in the doctrine's
+# overrides use the base weight unchanged.
+func _get_weight(action: int) -> float:
+	var base: float = WEIGHTS.get(action, 0.0)
+	var doc: Dictionary = DOCTRINES.get(doctrine, {})
+	var overrides: Dictionary = doc.get("weight_overrides", {})
+	return overrides.get(action, base)
+
+# The effective min push squad size, overridden by doctrine.
+func _min_push_squad() -> int:
+	var doc: Dictionary = DOCTRINES.get(doctrine, {})
+	return int(doc.get("min_push_squad", MIN_PUSH_SQUAD))
+
+# The effective defence target, overridden by doctrine.
+func _defence_target() -> int:
+	var doc: Dictionary = DOCTRINES.get(doctrine, {})
+	return int(doc.get("defence_target", DEFENCE_TARGET))
 
 
 # Mark the world state as needing a re-decide. Cheap; the match_director
@@ -259,6 +372,11 @@ func read_state() -> Dictionary:
 	var enemy_air := 0
 	var enemy_armour := 0
 	var enemy_seen := 0
+	# AI OVERHAUL: damage-type intelligence. Tally what the enemy is wearing
+	# and shooting so the new counter-pick actions can fire.
+	var enemy_armor_counts: Dictionary = {}  # material -> count
+	var enemy_missile_count := 0
+	var enemy_defence_count := 0
 	for enemy_team in [0]:
 		for u in _world.get_team_units(enemy_team):
 			if not is_instance_valid(u) or u.is_dead:
@@ -271,6 +389,39 @@ func read_state() -> Dictionary:
 			if is_instance_valid(u.hull_node) and u.hull_node.has_meta("armor_thickness") \
 					and u.hull_node.get_meta("armor_thickness") >= 2.0:
 				enemy_armour += 1
+			# AI OVERHAUL: read armor material from the unit's metadata
+			var mat: String = ""
+			if is_instance_valid(u.hull_node) and u.hull_node.has_meta("armor_material"):
+				mat = str(u.hull_node.get_meta("armor_material"))
+			elif "armor_material" in u:
+				mat = str(u.armor_material)
+			if not mat.is_empty():
+				enemy_armor_counts[mat] = int(enemy_armor_counts.get(mat, 0)) + 1
+			# Count guided-projectile units (missile spam detection)
+			if "blueprint" in u and u.blueprint is Dictionary:
+				var guided_share: float = ThreatAnalyzer._guided_dps_share(u.blueprint)
+				if guided_share >= 0.4:
+					enemy_missile_count += 1
+		# Count enemy static defenses
+		if _world.has_method("get_team_structures"):
+			for s in _world.get_team_structures(enemy_team):
+				if not is_instance_valid(s):
+					continue
+				if _world.has_method("is_visible_to_team") \
+						and not _world.is_visible_to_team(s, team):
+					continue
+				if s.kind == "defense":
+					enemy_defence_count += 1
+
+	# AI OVERHAUL: resolve the dominant enemy armor material for counter-picks
+	var dominant_enemy_armor := ""
+	var dominant_armor_count := 0
+	for mat in enemy_armor_counts:
+		if int(enemy_armor_counts[mat]) > dominant_armor_count:
+			dominant_armor_count = int(enemy_armor_counts[mat])
+			dominant_enemy_armor = mat
+	# Cache for ammo adaptation (used by _execute via match_director)
+	observed_enemy_armor = dominant_enemy_armor
 
 	return {
 		"credits": economy.credits(team),
@@ -292,6 +443,10 @@ func read_state() -> Dictionary:
 		"can_build_harvester": _world.ai_can_build_role(team, "harvester"),
 		"defences": _count_kind(own_structures, "defense"),
 		"combat": combat,
+		# AI OVERHAUL: damage-type intelligence
+		"dominant_enemy_armor": dominant_enemy_armor,
+		"enemy_missile_share": C.share(enemy_missile_count, enemy_seen),
+		"enemy_defence_count": enemy_defence_count,
 	}
 
 
@@ -375,7 +530,7 @@ func score_all(state: Dictionary) -> Dictionary:
 
 
 func _score(action: int, state: Dictionary) -> float:
-	var w: float = WEIGHTS[action]
+	var w: float = _get_weight(action)
 	match action:
 		Action.EXPAND_ECONOMY:
 			# Wants harvesters early and stops caring once the refinery is
@@ -463,20 +618,54 @@ func _score(action: int, state: Dictionary) -> float:
 		Action.BUILD_DEFENSE:
 			# Wanted once the AI has SEEN something, and more so while its base is
 			# being hit - a turret holds ground that would otherwise cost a squad
-			# standing on it. Saturates at DEFENCE_TARGET so it does not turtle its
-			# whole economy into concrete.
+			# standing on it. Saturates at _defence_target() so it does not turtle
+			# its whole economy into concrete (unless the doctrine IS turtling).
 			return C.score(w, [
-				C.falloff(state["defences"], 0.0, float(DEFENCE_TARGET)),
+				C.falloff(state["defences"], 0.0, float(_defence_target())),
 				C.ramp(state["budget"], 200.0, 500.0),
 				maxf(C.share(state["enemy_seen"], 4.0), 1.0 if state["base_threatened"] else 0.0),
 			])
 		Action.PUSH:
-			# Needs a real army AND something worth walking to. The MIN_PUSH_SQUAD
-			# floor is what stops the old trickle-attack behaviour.
+			# Needs a real army AND something worth walking to. The _min_push_squad()
+			# floor is what stops the old trickle-attack behaviour. Doctrines
+			# lower this floor to push earlier (blitz) or raise it to be patient
+			# (fortress).
+			var push_min: int = _min_push_squad()
 			return C.score(w, [
-				1.0 if state["combat_units"] >= MIN_PUSH_SQUAD else 0.0,
-				C.ramp(state["combat_units"], float(MIN_PUSH_SQUAD), 10.0),
+				1.0 if state["combat_units"] >= push_min else 0.0,
+				C.ramp(state["combat_units"], float(push_min), 10.0),
 				0.0 if state["base_threatened"] else 1.0,
+			])
+		# --- AI OVERHAUL: damage-type-aware actions ---
+		Action.BUILD_COUNTER_ARMOR:
+			# Fires when the AI has seen enough enemy units wearing a specific
+			# armor material to identify a pattern worth countering. The dominant
+			# enemy armor's weakness becomes the target damage class.
+			# Curved like BUILD_ANTI_AIR — one scout in bad armor is noise,
+			# a whole army in energy shields is a signal.
+			var has_armor_intel: float = 1.0 if not state["dominant_enemy_armor"].is_empty() else 0.0
+			return C.score(w, [
+				has_armor_intel,
+				C.ramp(state["budget"], 150.0, 400.0),
+				1.0 if state["manufactories"] > 0 else 0.0,
+				C.ramp(float(state["enemy_seen"]), 2.0, 6.0),
+			])
+		Action.BUILD_POINT_DEFENSE:
+			# Fires when the enemy is running a lot of guided-projectile weapons
+			# (missile spam). PD intercepts those projectiles.
+			return C.score(w, [
+				C.curve(state["enemy_missile_share"], 1.6),
+				C.ramp(state["budget"], 150.0, 400.0),
+				1.0 if state["manufactories"] > 0 else 0.0,
+			])
+		Action.BUILD_INDIRECT:
+			# Fires when the enemy is turtling behind static defenses. Artillery
+			# outranges turrets and breaks the turtle. Also useful when the enemy
+			# has a lot of visible units (massed formation → splash value).
+			return C.score(w, [
+				C.ramp(float(state["enemy_defence_count"]), 1.0, 4.0),
+				C.ramp(state["budget"], 200.0, 500.0),
+				1.0 if state["manufactories"] > 0 else 0.0,
 			])
 	return 0.0
 
@@ -523,6 +712,16 @@ func _execute(action: int, state: Dictionary) -> void:
 			_world.ai_build_defence(team)
 		Action.PUSH:
 			_world.ai_push(team, state["combat"])
+		# --- AI OVERHAUL: damage-type-aware execution ---
+		Action.BUILD_COUNTER_ARMOR:
+			# Routes through the same ai_build_unit pipeline, but the role
+			# "counter_armor" is resolved by design_fills_role using the
+			# dominant enemy armor's weakness from ThreatAnalyzer.
+			_world.ai_build_unit(team, "counter_armor")
+		Action.BUILD_POINT_DEFENSE:
+			_world.ai_build_unit(team, "point_defense")
+		Action.BUILD_INDIRECT:
+			_world.ai_build_unit(team, "indirect")
 
 
 # SKIRMISH_PERF_TROUBLESHOOTING.md §14. Per-type build rate cap. The
@@ -541,21 +740,37 @@ func _build_rate_ok(type: String) -> bool:
 # Does this design answer `role`? The blueprint's own module list is the source
 # of truth, so a design the PLAYER built counts as anti-air if it mounts a CIWS -
 # the AI does not need a curated list of its own units.
-static func design_fills_role(blueprint: Dictionary, role: String) -> bool:
+static func design_fills_role(blueprint: Dictionary, role: String, target_armor: String = "") -> bool:
 	if role == "harvester":
 		for m in blueprint.get("modules", []):
 			if m.get("type_id", "") == "resource_harvester":
 				return true
 		return false
 	if role == "general":
-		# "General" is the fallback COMBAT role, and a harvester is not a combat
-		# unit. It used to return true for literally anything, which was harmless
-		# only because the bundled roster happened to list the ore trucker eighth -
-		# the moment anything reordered that pool, BUILD_GENERAL started producing
-		# harvesters and the AI built an economy it had no army to protect.
-		# Found by the counter-draft promoting harvesters to the front for a
-		# completely different (and correct) reason.
 		return not design_fills_role(blueprint, "harvester")
+	if role == "point_defense":
+		for m in blueprint.get("modules", []):
+			if m.get("type_id", "") in POINT_DEFENSE_WEAPONS:
+				return true
+		return false
+	if role == "indirect":
+		for m in blueprint.get("modules", []):
+			if m.get("type_id", "") in INDIRECT_WEAPONS:
+				return true
+		return false
+	if role == "counter_armor":
+		# If target_armor specified, find if this design deals the damage class that cracks it
+		if not target_armor.is_empty():
+			var weakness: String = ThreatAnalyzer.weakest_class_against(target_armor)
+			var p: Dictionary = ThreatAnalyzer.profile(blueprint)
+			if p.get("dominant_damage", "") == weakness:
+				return true
+		# Fallback: anti-armor weapons count as cracking heavy armor
+		for m in blueprint.get("modules", []):
+			if m.get("type_id", "") in ANTI_ARMOR_WEAPONS:
+				return true
+		return false
+
 	var wanted: Array = ANTI_AIR_WEAPONS if role == "anti_air" else ANTI_ARMOR_WEAPONS
 	for m in blueprint.get("modules", []):
 		if m.get("type_id", "") in wanted:

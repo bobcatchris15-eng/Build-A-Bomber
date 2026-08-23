@@ -358,6 +358,22 @@ const TWEAK_SPECS = {
 		{"name": "mast_height", "label": "Radar Mast Height", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "dish_aperture", "label": "Radar Dish Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
+	"directional_radar": [
+		{"name": "scan_arc", "label": "Sector Scan Arc (°)", "min": 40.0, "max": 120.0, "step": 5.0, "default": 60.0},
+		{"name": "mast_height", "label": "Array Mast Height", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"topographic_radar": [
+		{"name": "survey_radius", "label": "Survey Radius Scale", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "pylon_height", "label": "Survey Pylon Mast", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"seismic_sensor": [
+		{"name": "ground_coupling", "label": "Probe Spike Penetration", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "housing_girth", "label": "Acoustic Damper Girth", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"thermal_imager": [
+		{"name": "optic_aperture", "label": "FLIR Sensor Aperture", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "mast_height", "label": "Telescoping Mast Height", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
 	"energy_barrier_projector": [
 		{"name": "projector_diameter", "label": "Array Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "coil_count", "label": "Capacitor Coil Count", "min": 2.0, "max": 6.0, "step": 1.0, "default": 4.0}

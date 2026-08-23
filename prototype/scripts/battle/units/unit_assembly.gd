@@ -390,7 +390,7 @@ static func compute_main_weapon(hull_node: Node3D) -> Dictionary:
 	# has no fire_range. The catalog is the safe source for all
 	# module types; non-weapons default to 0.0 which we treat as
 	# "not a weapon" downstream.
-		var fire_range: float = float(ModuleCatalog.get_module_data(type_id).get("fire_range", 0.0))
+		var fire_range: float = float(child.fire_range) if ("fire_range" in child and float(child.fire_range) > 0.0) else float(ModuleCatalog.get_module_data(type_id).get("fire_range", 0.0))
 		if not by_type.has(type_id):
 			by_type[type_id] = {"type_id": type_id, "count": 0, "dps_per": dps, "range": fire_range}
 		by_type[type_id]["count"] += 1
@@ -401,7 +401,8 @@ static func compute_main_weapon(hull_node: Node3D) -> Dictionary:
 	for type_id in by_type:
 		var entry: Dictionary = by_type[type_id]
 		var total_dps: float = float(entry["dps_per"]) * int(entry["count"])
-		if best.is_empty() or total_dps > float(best.get("total_dps", 0.0)):
+		var best_dps: float = float(best.get("total_dps", -1.0))
+		if best.is_empty() or total_dps > best_dps or (is_equal_approx(total_dps, best_dps) and float(entry["range"]) < float(best.get("range", 0.0))):
 			best = {"type_id": type_id, "total_dps": total_dps, "range": float(entry["range"]), "count": int(entry["count"])}
 	return best
 

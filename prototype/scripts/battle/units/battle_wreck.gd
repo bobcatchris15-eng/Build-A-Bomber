@@ -71,6 +71,11 @@ func _setup_carcass_and_turret(hull: Node3D, scene_root: Node, spawn_pos: Vector
 	add_child(hull_copy)
 	hull_copy.position = hull.position
 	hull_copy.rotation = hull.rotation
+	# Damage-overlay subtrees do not survive into wreckage: the carcass gets
+	# its own fire and plume below, and _apply_charred_material would otherwise
+	# flatten each damaged-stencil card into an opaque black quad floating off
+	# the charred hull (see module_damage_fx.gd's FX_CONTAINER).
+	_strip_damage_overlays(hull_copy)
 
 	# Find primary turret/weapon to pop off with physics
 	var turret_to_pop: Node3D = null
@@ -101,6 +106,7 @@ func _pop_turret_physics(turret_node: Node3D, scene_root: Node, spawn_pos: Vecto
 	rigid.mass = 350.0
 
 	var turret_copy := turret_node.duplicate() as Node3D
+	_strip_damage_overlays(turret_copy)
 	_apply_charred_material(turret_copy)
 	rigid.add_child(turret_copy)
 	turret_copy.position = Vector3.ZERO
@@ -160,6 +166,18 @@ func _apply_charred_material(node: Node) -> void:
 		node.material_override = mat
 	for child in node.get_children():
 		_apply_charred_material(child)
+
+
+# Removes module_damage_fx.gd's DamageFX overlay subtrees (smoke leak emitters
+# and damaged-stencil cards) from a duplicated subtree. Detached before freeing
+# so the charred pass below never sees them in the same call.
+static func _strip_damage_overlays(node: Node) -> void:
+	for child in node.get_children():
+		if String(child.name).begins_with("DamageFX"):
+			node.remove_child(child)
+			child.queue_free()
+		else:
+			_strip_damage_overlays(child)
 
 
 func _setup_lifecycle() -> void:
