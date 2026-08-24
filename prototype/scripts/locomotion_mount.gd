@@ -43,11 +43,9 @@ const MountReachScript = preload("res://scripts/mount_reach.gd")
 ## FROM, not the point they sit at.
 const BELT_TYPES := ["tracked_treads", "half_track"]
 
-## How far a belt drops below the hull's lowest point, and stands outboard of its
-## widest, as fractions of hull height and width. Scaled rather than absolute so a
-## scout and a heavy cruiser both get a proportionate track.
-const BELT_BELLY_CLEAR_FRAC: float = 0.18
-const BELT_OUTBOARD_CLEAR_FRAC: float = 0.06
+## How far a belt stands outboard of the hull's widest point as a fraction of
+## hull width so the track clears the flank.
+const BELT_OUTBOARD_CLEAR_FRAC: float = 0.04
 
 
 ## A station this close to the centreline has no flank to seat against - it is a
@@ -100,6 +98,7 @@ static func rebuild(placer: Node3D, type_id: String, settings: Dictionary) -> Ar
 	# The hull may have been rescaled or swapped since the last rebuild, so any
 	# cached triangle surface is stale by definition.
 	MountReachScript.clear_cache()
+	MountReachScript.cache_hull(hull)
 
 	var catalog_data: Dictionary = ModuleCatalog.get_module_data(type_id)
 	var hull_size := _hull_box(hull)
@@ -156,7 +155,7 @@ static func rebuild(placer: Node3D, type_id: String, settings: Dictionary) -> Ar
 				_write_frame_geo(geo, frame, bool(station["mirror"]))
 				seated = true
 				if type_id in BELT_TYPES:
-					local_pos = _offset_belt(local_pos, frame, hull_size)
+					local_pos = _offset_belt(local_pos, frame, hull_size, profile)
 
 		# Published for every station, not just seated ones: an airborne type is
 		# exactly the case that needs to solve its own reach DOWN to the hull, and
@@ -209,7 +208,8 @@ static func rebuild(placer: Node3D, type_id: String, settings: Dictionary) -> Ar
 	# Re-checking now, with the group exemption finally in place, clears the false
 	# positive immediately instead of leaving it stuck until the next click.
 	placer.check_all_clipping()
-	placer.get_tree().call_group("stat_ui", "update_stats", hull)
+	if placer.get_tree():
+		placer.get_tree().call_group("stat_ui", "update_stats", hull)
 	return spawned
 
 
@@ -254,13 +254,21 @@ static func clear(placer: Node3D) -> int:
 ## the geometry that is actually there - the gap to `half_width` is the hull's own
 ## bulge above the chine, and `belly_drop` is how much hull hangs below it. Both
 ## are zero on a slab-sided box and both matter on a chamfered or keeled one.
-static func _offset_belt(pos: Vector3, frame: Dictionary, hull_size: Vector3) -> Vector3:
+static func _offset_belt(pos: Vector3, frame: Dictionary, hull_size: Vector3, profile: Dictionary = {}) -> Vector3:
 	var side: float = signf(pos.x)
 	if is_zero_approx(side):
 		side = 1.0
-	var out: float = float(frame["half_width"]) - absf(pos.x) 		+ hull_size.x * BELT_OUTBOARD_CLEAR_FRAC
-	var down: float = float(frame["belly_drop"]) + hull_size.y * BELT_BELLY_CLEAR_FRAC
-	return Vector3(pos.x + side * maxf(0.0, out), pos.y - down, pos.z)
+	var widest_x: float = float(frame.get("half_width", absf(pos.x)))
+	var aabb: AABB = profile.get("aabb", AABB())
+	if aabb.size != Vector3.ZERO:
+		widest_x = maxf(widest_x, aabb.size.x * 0.5)
+	var target_length: float = aabb.size.z if aabb.size != Vector3.ZERO else hull_size.z
+	var belt_scale: float = target_length / 2.0
+	var sprocket_scale: float = (0.46 * belt_scale) / 0.4
+	var sprocket_width: float = 0.3 * sprocket_scale
+	var station_x: float = widest_x + sprocket_width + 0.05
+	var out: float = station_x - absf(pos.x)
+	return Vector3(pos.x + side * maxf(0.0, out), pos.y, pos.z)
 
 
 static func _placer_ready(placer: Node3D) -> bool:
@@ -279,7 +287,7 @@ static func _hull_box(hull: Node3D) -> Vector3:
 
 
 static func _chine_profile(hull: Node3D) -> Dictionary:
-	var mesh_inst := hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	var mesh_inst := MountReachScript._find_mesh_instance(hull)
 	if mesh_inst == null or mesh_inst.mesh == null:
 		return {}
 	return HullChineScript.build(mesh_inst)

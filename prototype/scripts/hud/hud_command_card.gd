@@ -37,6 +37,7 @@ var _rows_box: VBoxContainer = null
 var _order_row: HBoxContainer = null
 var _stance_row: HBoxContainer = null
 var _stance_buttons: Dictionary = {}
+var _range_toggle_btn: Button = null
 var _hint: Label = null
 
 # design_id -> {name, units, hp, max_hp}
@@ -86,6 +87,7 @@ func _build() -> void:
 	_add_order("stop", "Stop (S)", _on_stop)
 	_add_order("hold", "Hold position", _on_hold)
 	_add_order("attack", "Attack-move (A), then right-click a destination", _on_attack_move)
+	_range_toggle_btn = _add_toggle_order("contact", "Toggle Range & Vision Indicators (F12)", _on_toggle_range_overlay)
 
 	_stance_row = HBoxContainer.new()
 	_stance_row.add_theme_constant_override("separation", Style.SP_XS)
@@ -107,6 +109,19 @@ func _add_order(icon: String, tip: String, handler: Callable) -> void:
 	Icons.on_button(b, icon, Style.TEXT)
 	b.pressed.connect(handler)
 	_order_row.add_child(b)
+
+
+func _add_toggle_order(icon: String, tip: String, handler: Callable) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(0, Style.HIT)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.toggle_mode = true
+	b.tooltip_text = tip
+	Style.style_button(b)
+	Icons.on_button(b, icon, Style.TEXT_DIM)
+	b.pressed.connect(handler)
+	_order_row.add_child(b)
+	return b
 
 
 func _add_stance(kind: int, icon: String) -> void:
@@ -160,6 +175,7 @@ func update_selection(units: Array) -> void:
 
 	_rebuild_rows()
 	_refresh_stance_lamps()
+	_refresh_range_lamp()
 
 
 func _rebuild_rows() -> void:
@@ -269,6 +285,24 @@ func _refresh_stance_lamps() -> void:
 			Style.TEAM_FRIENDLY if lit else Style.TEXT_DIM)
 
 
+func _refresh_range_lamp() -> void:
+	if _range_toggle_btn == null:
+		return
+	var sel: Array = _selected()
+	if sel.is_empty():
+		_range_toggle_btn.set_pressed_no_signal(false)
+		_range_toggle_btn.add_theme_color_override("icon_normal_color", Style.TEXT_DIM)
+		return
+	var any_on: bool = false
+	for u in sel:
+		if is_instance_valid(u) and ("show_range_overlay" in u) and u.show_range_overlay:
+			any_on = true
+			break
+	_range_toggle_btn.set_pressed_no_signal(any_on)
+	_range_toggle_btn.add_theme_color_override("icon_normal_color",
+		Style.TEAM_FRIENDLY if any_on else Style.TEXT_DIM)
+
+
 func _set_enabled(on: bool) -> void:
 	for b in _order_row.get_children():
 		b.disabled = not on
@@ -300,6 +334,18 @@ func _on_attack_move() -> void:
 	# right-click in the world.
 	if _director != null and _director.has_method("_set_armed"):
 		_director._set_armed(true)
+
+
+func _on_toggle_range_overlay() -> void:
+	var sel: Array = _selected()
+	if sel.is_empty():
+		return
+	var first = sel[0]
+	var new_value: bool = not (("show_range_overlay" in first) and first.show_range_overlay)
+	for u in sel:
+		if is_instance_valid(u) and "set_range_overlay_visible" in u:
+			u.set_range_overlay_visible(new_value)
+	_refresh_range_lamp()
 
 
 func _on_stance(kind: int) -> void:

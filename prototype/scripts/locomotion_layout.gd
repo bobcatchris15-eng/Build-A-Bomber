@@ -134,7 +134,8 @@ const LAYOUTS := {
 		"hull_length_geo_key": "target_length",
 		"normal_is_side": true,
 		"mirror": true,
-		"scale_mode": ScaleMode.HULL_RELATIVE,
+		"scale_mode": ScaleMode.FIXED,
+		"node_scale": Vector3.ONE,
 	},
 	"heavy_quad_tracks": {
 		"pattern": Pattern.SIDE_PAIRS, "per_side": 2,
@@ -251,15 +252,6 @@ const LAYOUTS := {
 		"mirror": true,
 		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
-	"pontoon_wheels": {
-		"pattern": Pattern.SIDE_PAIRS,
-		"count_key": "axle_count", "count_fallback": "count", "count_default": 4,
-		"count_min": 2, "count_even": true,
-		"geo_keys": {"pontoon_size": 1.0, "paddle_vanes": true},
-		"normal": Vector3.UP,
-		"mirror": true, "override_pos": true,
-		"scale_mode": ScaleMode.HULL_RELATIVE,
-	},
 	"air_cushion_skirt": {
 		# FOOTPRINT, not RING_XZ. A hovercraft's bag is ONE continuous loop
 		# around the hull's bottom edge (Chris), so spawning N instances round
@@ -346,7 +338,6 @@ const GEOMETRY := {
 	# short of the hull (Chris). This linkage hangs from a pivot ON the hull,
 	# not from a beam slung under it.
 	"rocker_bogie":      {"x_from": "running_gear", "y": "underside", "z_span": 0.0},
-	"pontoon_wheels":    {"x_pad": 0.22, "x_pad_scales_with": "pontoon_size", "y": "underside", "z_span": 0.32},
 	# A hovercraft's skirt is a single big cushion, so its fans sit INSIDE the
 	# hull footprint rather than outboard of it like hover_engine's pads.
 	"air_cushion_skirt": {"pad_from_catalog": false, "y": "underside"},
@@ -436,7 +427,7 @@ const MAX_WIDTH_FACTOR := {
 	# it. Measured tracked/wheeled types already land at ~1.1-1.25x, so this is
 	# a ceiling the well-behaved types never touch.
 	"wheels": 1.5, "tracked_treads": 1.62, "half_track": 1.5,
-	"rocker_bogie": 1.6, "pontoon_wheels": 1.6, "screw_drive": 1.9,
+	"rocker_bogie": 1.6, "screw_drive": 1.9,
 	# A walker legitimately stands wider than its body - that IS the stance -
 	# but 2.69x read as a spider rather than a vehicle.
 	"legs": 1.9,

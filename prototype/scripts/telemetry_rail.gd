@@ -80,6 +80,16 @@ var _verdict_panel
 var _verdict_headline
 var _verdict_detail
 
+var _profile_panel: PanelContainer
+var _profile_role_label: Label
+var _profile_stars_label: Label
+var _profile_desc_label: Label
+
+var _armor_summary_label: Label
+var _diag_toggle_btn: Button
+var _diag_container: VBoxContainer
+var _diag_open: bool = true
+
 var _lifetime_panel
 var _lifetime_headline
 var _lifetime_detail
@@ -113,6 +123,101 @@ var _power_storage_label
 var _base_stats: Dictionary = {}
 var _previewing: bool = false
 var _cached_hull: Node3D = null
+
+func _build_combat_profile_header() -> void:
+	if _profile_panel != null and is_instance_valid(_profile_panel):
+		return
+	if not _rail_vbox:
+		return
+
+	_profile_panel = PanelContainer.new()
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.10, 0.11, 0.13, 0.95)
+	style.border_color = Tokens.BASE_500
+	style.border_width_left = 3
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = Tokens.SPACE_SM
+	style.content_margin_right = Tokens.SPACE_SM
+	style.content_margin_top = Tokens.SPACE_XS
+	style.content_margin_bottom = Tokens.SPACE_XS
+	_profile_panel.add_theme_stylebox_override("panel", style)
+	_rail_vbox.add_child(_profile_panel)
+	_rail_vbox.move_child(_profile_panel, 0)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 2)
+	_profile_panel.add_child(vbox)
+
+	var top_row = HBoxContainer.new()
+	vbox.add_child(top_row)
+
+	_profile_role_label = Label.new()
+	_profile_role_label.theme_type_variation = "HeadingLabel"
+	_profile_role_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.7, 1.0))
+	_profile_role_label.text = "COMBAT VEHICLE"
+	_profile_role_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_row.add_child(_profile_role_label)
+
+	_profile_stars_label = Label.new()
+	_profile_stars_label.theme_type_variation = "StatLabel"
+	_profile_stars_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.2, 1.0))
+	_profile_stars_label.text = "★★★☆☆"
+	top_row.add_child(_profile_stars_label)
+
+	_profile_desc_label = Label.new()
+	_profile_desc_label.theme_type_variation = "StatLabel"
+	_profile_desc_label.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
+	_profile_desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_profile_desc_label.text = "All-round combatant."
+	vbox.add_child(_profile_desc_label)
+
+func _update_combat_profile(stats: Dictionary) -> void:
+	if _profile_panel == null:
+		_build_combat_profile_header()
+	if _profile_panel == null or not is_instance_valid(_profile_panel):
+		return
+
+	if stats.is_empty():
+		_profile_panel.visible = false
+		return
+	_profile_panel.visible = true
+
+	var arch: Dictionary = DesignVerdictScript.get_combat_archetype(stats)
+	_profile_role_label.text = str(arch.get("role", "COMBAT VEHICLE"))
+	var stars_count: int = int(arch.get("stars", 3))
+	var star_str := ""
+	for i in range(5):
+		star_str += "★" if i < stars_count else "☆"
+	_profile_stars_label.text = star_str
+	_profile_desc_label.text = str(arch.get("desc", ""))
+
+func _ensure_diagnostics_section() -> void:
+	if _diag_container != null and is_instance_valid(_diag_container):
+		return
+	if not _rail_vbox:
+		return
+
+	_diag_toggle_btn = Button.new()
+	_diag_toggle_btn.text = "▲ ADVANCED TELEMETRY"
+	_diag_toggle_btn.theme_type_variation = "Button"
+	_diag_toggle_btn.custom_minimum_size = Vector2(0, 26)
+	_rail_vbox.add_child(_diag_toggle_btn)
+
+	_diag_container = VBoxContainer.new()
+	_diag_container.add_theme_constant_override("separation", 2)
+	_diag_container.visible = true
+	_rail_vbox.add_child(_diag_container)
+
+	_diag_toggle_btn.pressed.connect(func():
+		_diag_open = not _diag_container.visible
+		_diag_container.visible = _diag_open
+		_diag_toggle_btn.text = ("▲ HIDE TELEMETRY" if _diag_open else "▼ ADVANCED TELEMETRY"))
 
 func update_stats(hull: Node3D):
 	_cached_hull = hull
@@ -203,6 +308,7 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 	# locals below are kept as locals so the label code further down reads
 	# unchanged.
 	var hull = _cached_hull
+	_update_combat_profile(stats)
 	_update_verdict(stats)
 	if lab.has_method("update_stats_display"):
 		lab.update_stats_display(stats, hull)
@@ -211,23 +317,7 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 	var total_cost_metal = stats["cost_metal"]
 	var total_cost_crystal = stats["cost_crystal"]
 	var total_dps = stats["dps"]
-	# Weight, load capacity, thrust and top speed all come from
-	# Drivetrain.analyze() - the SAME call unit.gd makes when it spawns
-	# the unit for real, so every number this sidebar shows is a number combat
-	# will actually run. DesignStats.analyze() made that call above and hands the
-	# result back, so it happens once per recompute rather than twice.
-	#
-	# This replaces a local re-derivation that carried its own comment saying
-	# it only needed to be "close enough to warn". It was not: it knew about
-	# wheels, treads, rotors and legs, and nothing about hover pads, Electron
-	# Megavoltage, turbine compression, or any of the eleven expansion
-	# locomotors - so on most of the roster the capacity figure could not move
-	# when the player dragged the very tweaks that change it. See the header
-	# comment in drivetrain.gd for why the two copies are now one.
 	var dt: Dictionary = stats["drivetrain"]
-	# No total_weight_capacity local: it was assigned and never read (already dead
-	# at HEAD, not made dead by this refactor). _update_drivetrain_readout() takes
-	# the whole dt and reads capacity from it directly.
 
 	var armor_material = "hardened_steel"
 	var armor_thickness = 1.0
@@ -241,123 +331,77 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 		if hull.has_meta("faction"):
 			faction = hull.get_meta("faction")
 
-	# FABLE_REVIEW.md 2.6 fix: this sidebar used to show numbers combat never
-	# used - "Total HP" was the MODULE hp sum scaled by material/thickness
-	# (an empty hull showed 0.0 but fielded at 400), and "Total Weight"
-	# applied material multipliers the combat weight sum didn't. Both now
-	# come from the same shared ModuleCatalog.compute_hull_* functions
-	# unit.gd/building.gd/blueprint_cost() read, so what you see in
-	# the Design Lab is what the simulation runs.
-	#
-	# Hull HP, the module pool and the weight all arrive from
-	# DesignStats.analyze(), which makes exactly those shared calls. The hull cost
-	# it computes is already folded into cost_metal/cost_crystal above, so there
-	# is no separate hull_cost addition here any more.
 	var module_hp_pool = stats["module_hp_pool"]
 	var total_hp = stats["hull_hp"]
 	var total_weight = stats["weight"]
 
-	# Read straight from DamageResolver.ARMOR_TABLE (single source of truth,
-	# same as combat) instead of a second hardcoded k_base/t_base/e_base
-	# table - the two had drifted: "E:" here used to be a copy-paste of the
-	# EXPLOSIVE threshold mislabeled as Energy (damage_resolver.gd had no
-	# real "energy" row at all until this pass). Found while scoping the
-	# energy-weapon damage_class reclassification work.
 	var k_thresh = DamageResolverScript.get_material_threshold(armor_material, "kinetic", armor_thickness).x
 	var t_thresh = DamageResolverScript.get_material_threshold(armor_material, "thermal", armor_thickness).x
 	var e_thresh = DamageResolverScript.get_material_threshold(armor_material, "energy", armor_thickness).x
 
-	# Stat rounding: total_hp/total_weight/total_dps are sums of
-	# module_data.gd getters that already round to the nearest 0.5 at the
-	# point they're computed (GlobalConfig.round_to_half), so what's shown
-	# here is exactly what combat uses - this %.1f is just consistent
-	# formatting (a sum of clean .5-stepped numbers is itself clean), not a
-	# second, independent rounding pass. Previously these 4 labels were the
-	# one place in this file using bare str() on a float, which is why they
-	# alone showed raw float precision (e.g. "14.723891...") while every
-	# other label here was already %.1f/%.2f/%d formatted.
 	var hp_delta = _format_delta(total_hp, base_stats.get("hull_hp", total_hp))
 	var mpool_delta = _format_delta(module_hp_pool, base_stats.get("module_hp_pool", module_hp_pool))
-	hp_label.text = "Hull HP: %.1f%s (modules +%.1f%s)" % [total_hp, hp_delta, module_hp_pool, mpool_delta]
+	hp_label.text = "Hull HP: %.0f%s (modules +%.0f%s)" % [total_hp, hp_delta, module_hp_pool, mpool_delta]
 	hp_label.tooltip_text = "Hull HP is the unit's real health pool in combat.\nModule HP is each mounted part's own pool - parts get shot off (subsystem stripping) without draining hull HP."
 	var cost_diff = _format_delta(total_cost_metal + total_cost_crystal, base_stats.get("cost_metal", total_cost_metal) + base_stats.get("cost_crystal", total_cost_crystal), true, true)
 	cost_label.text = "Cost: %d credits%s" % [ResourceCatalogScript.credits_from_materials(Vector2i(total_cost_metal, total_cost_crystal)), cost_diff]
 	var dps_delta = _format_delta(total_dps, base_stats.get("dps", total_dps))
-	dps_label.text = "Total DPS: %.1f%s" % [total_dps, dps_delta]
+
+	var wa: Dictionary = stats.get("alpha", {})
+	var alpha_per_shot: float = float(wa.get("per_shot", 0.0))
+	if alpha_per_shot > 0.0 and total_dps > 0.0:
+		dps_label.text = "DPS: %.1f%s  (Alpha: %.0f / shot)" % [total_dps, dps_delta, alpha_per_shot]
+	else:
+		dps_label.text = "Total DPS: %.1f%s" % [total_dps, dps_delta]
 
 	var weight_delta = _format_delta(total_weight, base_stats.get("weight", total_weight), true)
 	weight_label.text = "Total Weight: %.1f kg%s" % [total_weight, weight_delta]
 
-	# Publish the figures for anything that reads this design's stats rather
-	# than the labels. fleet_comparison_panel.gd has always tried to
-	# (`stat_calc.total_weight if "total_weight" in stat_calc`), but these were
-	# LOCALS of this function, so that guard never passed and the WIP column of
-	# the comparison panel silently showed 0 HP / 0 kg / 0 DPS against a real
-	# saved design. Assigning them here is what makes the guard true.
-	# Assigned through `self` deliberately: the locals above shadow these
-	# members, so a bare `total_weight = total_weight` would be a self-
-	# assignment of the local and publish nothing.
 	self.total_hp = total_hp
 	self.total_weight = total_weight
 	self.total_dps = total_dps
 	self.drivetrain = dt
-	# Already analysed inside DesignStats.analyze() above; taken from there rather
-	# than walking every module's range tweaks a second time per recompute.
 	var wr: Dictionary = stats["weapon_range"]
 	self.weapon_range = wr
 
-	# The manufactory-tier note stays tooltip-only. Manufactory tier is
-	# determined entirely by the hull TYPE (see ModuleCatalog.
-	# get_hull_size_tier(), the same function skirmish.gd's
-	# _queue_player_unit() uses) - a player could previously only discover
-	# which manufactory they'd need via a failed build attempt mid-match.
 	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "brenntal_medium_a")) if hull and hull.has_meta("type_id") else ""
 	var tooltip_parts: Array = []
 	if tier != "":
 		tooltip_parts.append("Needs a %s Manufactory to build this design." % tier.capitalize())
 	weight_label.tooltip_text = "\n".join(tooltip_parts)
-	# The overweight state is no longer said by tinting this label. It has its
-	# own bar, its own speed readout and its own warning panel below - a label
-	# turning orange was the entire previous treatment, and it neither said
-	# what the limit was nor what exceeding it cost.
 	weight_label.modulate = Color(1, 1, 1)
+
+	_ensure_diagnostics_section()
 
 	_update_drivetrain_readout(dt)
 	_update_range_readout(wr)
 	_update_power_readout(stats.get("power", {}))
 
+	var k_desc = "Heavy" if k_thresh >= 20.0 else ("Mod" if k_thresh >= 10.0 else "Light")
+	var t_desc = "Heavy" if t_thresh >= 20.0 else ("Mod" if t_thresh >= 10.0 else "Light")
+	var e_desc = "Heavy" if e_thresh >= 20.0 else ("Mod" if e_thresh >= 10.0 else "Light")
+
+	if not _armor_summary_label:
+		_armor_summary_label = Label.new()
+		_armor_summary_label.theme_type_variation = "StatLabel"
+		_armor_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_rail_vbox.add_child(_armor_summary_label)
+		if hp_label and hp_label.get_parent() == _rail_vbox:
+			_rail_vbox.move_child(_armor_summary_label, hp_label.get_index() + 1)
+	_armor_summary_label.text = "Plating: %s [K:%s T:%s E:%s]" % [armor_material.replace("_", " ").capitalize(), k_desc, t_desc, e_desc]
+	_armor_summary_label.tooltip_text = "Armor Material: %s (Thickness: %.1fx)\nKinetic threshold: %.1f (%s)\nThermal threshold: %.1f (%s)\nEnergy threshold: %.1f (%s)" % [
+		armor_material.capitalize(), armor_thickness, k_thresh, k_desc, t_thresh, t_desc, e_thresh, e_desc]
+
 	if not armor_threshold_label:
 		armor_threshold_label = Label.new()
-		# Found by the new headless UI-overflow audit: this label's natural
-		# single-line width (305px, "Armor Thresholds: K: 15.0, T: 5.0,
-		# E: 10.0") exceeds the sidebar's fixed 210px width - it was
-		# silently clipping/spilling past the panel edge (visible in
-		# several of today's own verification screenshots as a stray
-		# trailing character, never flagged as a bug until now). Word-wrap
-		# instead of a hardcoded width, since threshold values can grow to
-		# more digits than today's baseline numbers.
 		armor_threshold_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_rail_vbox.add_child(armor_threshold_label)
-		# Place it after the DPS row - the other readouts use the same
-		# "directly after the row it explains" move_child pattern
-		# (_build_drivetrain_readout / _build_range_readout / _build_power_readout
-		# all do this). Without it, the label lands at the end of the
-		# VBox, below the action buttons - which is what made it
-		# invisible for so long (test_sim_and_stats.gd reads the text and
-		# the value is correct, but no player ever sees it).
-		if dps_label and dps_label.get_parent() == _rail_vbox:
-			_rail_vbox.move_child(armor_threshold_label, dps_label.get_index() + 1)
+		_diag_container.add_child(armor_threshold_label)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
 
 	if not tech_req_label:
 		tech_req_label = Label.new()
 		tech_req_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_rail_vbox.add_child(tech_req_label)
-		# Same "directly after the row it explains" pattern - tech
-		# requirements belong with the armor block they describe, not
-		# below the action buttons.
-		if armor_threshold_label and armor_threshold_label.get_parent() == _rail_vbox:
-			_rail_vbox.move_child(tech_req_label, armor_threshold_label.get_index() + 1)
+		_diag_container.add_child(tech_req_label)
 
 	var req_buildings: Array[String] = []
 	if hull:
@@ -376,14 +420,6 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 			names.append(str(r).replace("_", " ").capitalize())
 		tech_req_label.text = "Required Buildings: %s" % ", ".join(names)
 
-	# LAST, and that is the whole reason it is down here rather than up with the
-	# other three _update_*_readout() calls. This block anchors itself at
-	# dps_label.get_index() + 1, and so does armor_threshold_label above - so
-	# whichever runs last ends up adjacent to the DPS row. Alpha is the row that
-	# QUALIFIES the DPS figure ("this is what one hit of that is worth"), and it
-	# has to sit against it to read as a correction rather than as a separate
-	# topic; the armour thresholds are about what this design's own plate stops,
-	# which is the next subject, not the same one.
 	_update_alpha_readout(stats.get("alpha", {}))
 
 
@@ -972,51 +1008,25 @@ func _alpha_regime_color(regime: String) -> Variant:
 
 
 func _build_alpha_readout() -> void:
+	var target_parent = _diag_container if (_diag_container and is_instance_valid(_diag_container)) else _rail_vbox
+
 	_alpha_label = Label.new()
 	_alpha_label.theme_type_variation = "StatLabel"
-	# Insurance only - the format below is sized to fit the 320px dock on one
-	# line. A hand-edited blueprint with an absurd alpha is the case this
-	# catches, and a wrapped row is a much better outcome than one that spills
-	# past the panel edge (which is exactly what armor_threshold_label used to
-	# do before the headless overflow audit found it).
 	_alpha_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_rail_vbox.add_child(_alpha_label)
+	target_parent.add_child(_alpha_label)
 
 	_alpha_head = Label.new()
 	_alpha_head.theme_type_variation = "StatLabel"
-	# FONT_MICRO is the token's documented "dense tabular readouts" step, and
-	# the five rows below it are exactly that. StatLabel is the theme's MONO
-	# face, so the space-padded columns actually line up as columns.
 	_alpha_head.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
-	_rail_vbox.add_child(_alpha_head)
+	target_parent.add_child(_alpha_head)
 
-	# One row per material IN THE TABLE, not four hardcoded rows. Same reasoning
-	# as WeaponAlpha.short_label()'s id-derived fallback: a material added to
-	# ARMOR_TABLE renders on the day it lands rather than silently going
-	# missing from the only readout that compares them.
 	_alpha_rows.clear()
 	for _i in range(DamageResolverScript.ARMOR_TABLE.size()):
 		var row := Label.new()
 		row.theme_type_variation = "StatLabel"
 		row.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
-		_rail_vbox.add_child(row)
+		target_parent.add_child(row)
 		_alpha_rows.append(row)
-
-	# Directly under the DPS row it qualifies, via the same move_child idiom the
-	# drivetrain, range and power blocks use - lazily-added children otherwise
-	# land at the end of the VBox, below the save/test buttons, which is what
-	# kept armor_threshold_label invisible for so long. This one is inserted
-	# LAST of all the rail's readouts (see the call at the foot of
-	# update_stats()), so it ends up immediately after DPS and pushes the armour
-	# threshold rows down one - deliberate ordering: "what this design deals"
-	# belongs with the DPS row, and "what this design's own plate stops" reads
-	# as the next topic rather than as part of it.
-	if dps_label and dps_label.get_parent() == _rail_vbox:
-		var at = dps_label.get_index()
-		_rail_vbox.move_child(_alpha_label, at + 1)
-		_rail_vbox.move_child(_alpha_head, at + 2)
-		for i in range(_alpha_rows.size()):
-			_rail_vbox.move_child(_alpha_rows[i], at + 3 + i)
 
 
 func _update_alpha_readout(wa: Dictionary) -> void:

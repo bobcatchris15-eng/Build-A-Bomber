@@ -672,7 +672,7 @@ Size: %.1f x %.1f x %.1f" % [
 			data.get("metal", 0), data.get("crystal", 0),
 			size.x, size.y, size.z]
 	else:
-		btn.tooltip_text = _stat_tooltip(data)
+		btn.tooltip_text = _stat_tooltip(data, type_id)
 
 	btn.set_meta("search_key", ("%s %s" % [data.get("name", ""), type_id]).to_lower())
 	return btn
@@ -1048,14 +1048,34 @@ func collapse_all_drawers() -> void:
 # NOTE: line 0 is the part NAME, and that is load-bearing - part_button.gd's
 # _make_custom_tooltip() renders the first line as the card's bold gold title
 # row and every line after it as a smaller stat row.
-func _stat_tooltip(data: Dictionary) -> String:
+func _stat_tooltip(data: Dictionary, type_id: String = "") -> String:
 	var lines = [data.get("name", "Unknown Part")]
-	lines.append("HP: %.0f | Weight: %.0f" % [data.get("hp", 0.0), data.get("weight", 0.0)])
+	if type_id.is_empty():
+		type_id = data.get("type_id", "")
+	lines.append("HP: %.0f | Weight: %.0f kg" % [data.get("hp", 0.0), data.get("weight", 0.0)])
 	lines.append("Cost: %d Metal, %d Crystal" % [data.get("metal", 0), data.get("crystal", 0)])
-	var dps = data.get("dps", 0.0)
+
+	var dps = float(data.get("dps", 0.0))
 	if dps > 0.0:
-		lines.append("DPS: %.0f" % dps)
-	var heal_rate = data.get("heal_rate", 0.0)
+		var fp = ModuleCatalog.get_fire_profile(type_id)
+		var reach = float(fp.get("fire_range", 0.0))
+		var tier = ModuleCatalog.get_range_tier_label(reach)
+		lines.append("DPS: %.0f | Range: %.0fm (%s)" % [dps, reach, tier])
+
+	var heal_rate = float(data.get("heal_rate", 0.0))
 	if heal_rate > 0.0:
 		lines.append("Heal Rate: %.1f/s" % heal_rate)
+
+	var gen = float(data.get("energy_regen", 0.0))
+	if gen > 0.0:
+		lines.append("Power Gen: +%.1f kW" % gen)
+
+	var cap = float(data.get("energy_capacity", 0.0))
+	if cap > 0.0:
+		lines.append("Power Storage: %.0f kJ" % cap)
+
+	var p_draw = float(data.get("power_draw", 0.0))
+	if p_draw > 0.0:
+		lines.append("Power Draw: -%.1f kW" % p_draw)
+
 	return "\n".join(lines)

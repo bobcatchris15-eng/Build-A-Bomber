@@ -100,6 +100,11 @@ var _model_container: Node3D = null
 # silently; an explicit queue_free is the safe path).
 var _current_unit: Node3D = null
 
+# The SubViewport the stage renders into. Kept so set_active() can stop its
+# render target entirely once the loading screen swaps this preview out for
+# the DEPLOY panel.
+var _viewport: SubViewport = null
+
 # The blueprint manager. One per preview instance - the main menu
 # also uses a fresh instance per build, and that is the
 # BlueprintManagerScript's own intended usage.
@@ -177,6 +182,7 @@ func _build_stage() -> void:
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	vp.msaa_3d = Viewport.MSAA_4X
 	vp_container.add_child(vp)
+	_viewport = vp
 
 	# Studio lighting. Key + rim is the same pair the main menu
 	# uses; the menu's environmental fill (the WorldEnvironment
@@ -262,6 +268,21 @@ func set_roster(roster: Array) -> void:
 	# before (which was either the entire-library default or a
 	# prior match's leftover).
 	_build_current()
+
+
+func set_active(active: bool) -> void:
+	# Full stop, not just visible = false. UPDATE_ALWAYS renders the 3D stage
+	# into its texture every frame regardless of whether anything draws the
+	# texture, so hiding the Control alone would keep burning GPU on a model
+	# nobody can see. Called by the loading screen when it swaps this preview
+	# out for the DEPLOY panel at world_ready.
+	if active and _roster.is_empty():
+		return
+	set_process(active)
+	visible = active
+	if _viewport != null and is_instance_valid(_viewport):
+		_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE \
+			if active else SubViewport.UPDATE_DISABLED
 
 
 func _build_current() -> void:

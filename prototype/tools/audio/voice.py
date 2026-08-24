@@ -402,8 +402,14 @@ def utter(spec: VoiceSpec, seed: str) -> np.ndarray:
 def cannon(variant: int = 0) -> np.ndarray:
     """Low chest-voice "ka-POW". The heaviest thing in the set."""
     g = d.rng(f"cannon:{variant}")
-    stretch = 1.0 + g.uniform(-0.08, 0.08)
-    base = 78.0 * (1.0 + g.uniform(-0.06, 0.06))
+    # Variant spread is deliberately wide here and in every generator below:
+    # these banks fire dozens of times a minute, and the whole point of seven
+    # variants is that no two shots in a burst are the same event. The first
+    # pass varied pitch by +/-6%, which measured as barely-distinguishable
+    # clones; +/-11% keeps the weapon identity while making repetition a non-
+    # event.
+    stretch = 1.0 + g.uniform(-0.13, 0.13)
+    base = 78.0 * (1.0 + g.uniform(-0.11, 0.11))
 
     spec = VoiceSpec(
         segs=[
@@ -429,7 +435,12 @@ def cannon(variant: int = 0) -> np.ndarray:
         # for the prosody to carry.
         f0=[(0.0, base * 1.15), (0.20, base * 1.55), (0.42, base * 1.05),
             (1.0, base * 0.48)],
-        breath=0.045, jitter=0.012, shimmer=0.06, effort=1.25, burst_db=13.0,
+        # Effort and burst level vary per variant as well as pitch - two
+        # shots that differ only in f0 still share one spectral envelope, and
+        # the pair measured near-identical on a cosine distance of averaged
+        # spectra.
+        breath=0.045, jitter=0.012, shimmer=0.06,
+        effort=g.uniform(1.05, 1.45), burst_db=g.uniform(11.5, 14.5),
     )
     return utter(spec, f"cannon:{variant}")
 
@@ -437,12 +448,13 @@ def cannon(variant: int = 0) -> np.ndarray:
 def machine_gun(variant: int = 0) -> np.ndarray:
     """One clipped "pyew". Fired in bursts, these self-assemble into "pewpewpew"."""
     g = d.rng(f"mg:{variant}")
-    base = 240.0 * (1.0 + g.uniform(-0.10, 0.10))
+    base = 240.0 * (1.0 + g.uniform(-0.17, 0.17))
+    pace = g.uniform(0.88, 1.14)
     spec = VoiceSpec(
         segs=[
-            Seg("p", 0.010, "p", 0.9),
-            Seg("v", 0.032, "iy", 1.0),
-            Seg("v", 0.058, "iy>uw", 1.0),
+            Seg("p", 0.010 * pace, "p", 0.9),
+            Seg("v", 0.032 * pace, "iy", 1.0),
+            Seg("v", 0.058 * pace, "iy>uw", 1.0),
         ],
         f0=[(0.0, base * 1.40), (0.28, base * 1.05), (1.0, base * 0.42)],
         breath=0.06, jitter=0.016, shimmer=0.05, effort=0.9, burst_db=14.0,
@@ -453,16 +465,21 @@ def machine_gun(variant: int = 0) -> np.ndarray:
 def laser(variant: int = 0) -> np.ndarray:
     """High "pyoo" with a whine tail. Energy weapons read as bright and thin."""
     g = d.rng(f"laser:{variant}")
-    base = 400.0 * (1.0 + g.uniform(-0.08, 0.08))
+    base = 400.0 * (1.0 + g.uniform(-0.14, 0.14))
+    # The trailing "oo" is where the weapon's character lives; its length and
+    # the vocal effort behind it vary per variant, which the first pass never
+    # touched (distance 0.002 - clones).
+    tail = 0.045 * g.uniform(0.8, 1.3)
     spec = VoiceSpec(
         segs=[
             Seg("p", 0.009, "p", 0.85),
             Seg("v", 0.035, "iy", 1.0),
             Seg("v", 0.135, "iy>uw", 1.0),
-            Seg("v", 0.045, "uw", 0.30),
+            Seg("v", tail, "uw", 0.30),
         ],
         f0=[(0.0, base * 1.10), (0.10, base * 1.32), (1.0, base * 0.26)],
-        breath=0.04, jitter=0.008, shimmer=0.03, effort=0.85, burst_db=11.0,
+        breath=0.04, jitter=0.008, shimmer=0.03,
+        effort=g.uniform(0.72, 0.98), burst_db=11.0,
     )
     return utter(spec, f"laser:{variant}")
 
@@ -470,25 +487,29 @@ def laser(variant: int = 0) -> np.ndarray:
 def missile(variant: int = 0) -> np.ndarray:
     """Breathy "fwooosh". Mostly fricative - a launch is air, not a bang."""
     g = d.rng(f"missile:{variant}")
-    base = 150.0 * (1.0 + g.uniform(-0.07, 0.07))
+    base = 150.0 * (1.0 + g.uniform(-0.10, 0.10))
     spec = VoiceSpec(
         segs=[
             Seg("f", 0.055, "f", 0.9),
             Seg("v", 0.075, "uw", 0.55),
             Seg("v", 0.130, "uw>uh", 0.7),
-            Seg("f", 0.190, "sh", 0.95),
+            Seg("f", 0.230, "sh", 1.0),     # the burn, swelling then dying
         ],
-        f0=[(0.0, base * 0.9), (0.35, base * 1.15), (1.0, base * 0.75)],
-        breath=0.34, jitter=0.014, shimmer=0.07, effort=0.8, burst_db=6.0,
+        f0=[(0.0, base * 0.9), (0.35, base * 1.28), (1.0, base * 0.72)],
+        breath=0.42, jitter=0.014, shimmer=0.07, effort=0.8, burst_db=6.0,
     )
     return utter(spec, f"missile:{variant}")
 
 
 def explosion(variant: int = 0) -> np.ndarray:
-    """Full "kaBOOOM" with a growl and a hummed nasal tail."""
+    """Full "kaBOOOM" with a growl and a hummed nasal tail.
+
+    The growl is raised jitter and shimmer DURING the boom - an irregular,
+    rough glottal pulse is what "growl" is, physically - not a distortion stage.
+    """
     g = d.rng(f"boom:{variant}")
-    stretch = 1.0 + g.uniform(-0.09, 0.09)
-    base = 88.0 * (1.0 + g.uniform(-0.07, 0.07))
+    stretch = 1.0 + g.uniform(-0.12, 0.12)
+    base = 88.0 * (1.0 + g.uniform(-0.10, 0.10))
     spec = VoiceSpec(
         segs=[
             Seg("p", 0.013, "k", 0.7),
@@ -497,11 +518,13 @@ def explosion(variant: int = 0) -> np.ndarray:
             Seg("p", 0.016, "b", 1.0),
             Seg("v", 0.115 * stretch, "uw", 1.0),
             Seg("v", 0.240 * stretch, "uw>aa", 0.95),
-            Seg("n", 0.230 * stretch, "m", 0.55),       # the hummed tail
+            Seg("n", 0.260 * stretch, "m", 0.55),       # the hummed tail
         ],
         f0=[(0.0, base * 1.25), (0.14, base * 1.60), (0.38, base * 1.00),
             (0.70, base * 0.66), (1.0, base * 0.40)],
-        breath=0.07, jitter=0.022, shimmer=0.09, effort=1.35, burst_db=12.0,
+        breath=0.08, jitter=0.042,
+        shimmer=g.uniform(0.10, 0.17),
+        effort=g.uniform(1.15, 1.55), burst_db=g.uniform(10.5, 13.5),
     )
     return utter(spec, f"boom:{variant}")
 
@@ -509,16 +532,19 @@ def explosion(variant: int = 0) -> np.ndarray:
 def hit(variant: int = 0) -> np.ndarray:
     """Short "donk" - a mouth pop for a round landing on armour."""
     g = d.rng(f"hit:{variant}")
-    base = 165.0 * (1.0 + g.uniform(-0.12, 0.12))
+    base = 165.0 * (1.0 + g.uniform(-0.13, 0.13))
     spec = VoiceSpec(
         segs=[
             Seg("p", 0.011, "d", 0.95),
             Seg("v", 0.030, "ao", 1.0),
-            Seg("n", 0.055, "n", 0.6),
+            Seg("n", 0.055, "n", 0.55),
             Seg("p", 0.010, "k", 0.5),
         ],
         f0=[(0.0, base * 1.1), (1.0, base * 0.7)],
-        breath=0.05, jitter=0.018, shimmer=0.06, effort=1.0, burst_db=17.0,
+        breath=0.05, jitter=0.018, shimmer=0.06, effort=1.0,
+        # Was 17 dB, and the d-burst arrived as a bare click in front of the
+        # voice; the "d" attack should sit ON the donk, not before it.
+        burst_db=13.5,
     )
     return utter(spec, f"hit:{variant}")
 
@@ -526,7 +552,7 @@ def hit(variant: int = 0) -> np.ndarray:
 def harvest(variant: int = 0) -> np.ndarray:
     """A slurp. The harvester and repair array both route here."""
     g = d.rng(f"harvest:{variant}")
-    base = 120.0 * (1.0 + g.uniform(-0.08, 0.08))
+    base = 120.0 * (1.0 + g.uniform(-0.13, 0.13))
     spec = VoiceSpec(
         segs=[
             Seg("f", 0.045, "sh", 0.5),
@@ -534,7 +560,8 @@ def harvest(variant: int = 0) -> np.ndarray:
             Seg("f", 0.070, "s", 0.45),
         ],
         f0=[(0.0, base * 0.75), (1.0, base * 1.45)],   # rises - it's filling up
-        breath=0.22, jitter=0.020, shimmer=0.08, effort=0.7, burst_db=5.0,
+        breath=g.uniform(0.15, 0.30), jitter=0.020, shimmer=0.08,
+        effort=0.7, burst_db=5.0,
     )
     return utter(spec, f"harvest:{variant}")
 
@@ -598,6 +625,17 @@ def comms(phrase: str, variant: int = 0, tone: str = "calm") -> np.ndarray:
     without ever making it dramatic - even the alert reads are clipped, because
     a panicking radio operator would put the sincere channel on the wrong side
     of the split.
+
+    STILL NOT WORDS, AND DELIBERATELY SO (confirmed with Chris 2026-08): these
+    are speech-shaped murmurs, not transcribed callouts. But "not words" is not
+    the same as "shapeless". What makes a murmur read as A PERSON TALKING rather
+    than as vowel soup is everything around the vowels, so this pass upgrades
+    exactly those: each phrase has its own melodic contour (the informative
+    channel - you learn what kind of report it is before parsing anything),
+    syllables are separated by a mixed consonant inventory instead of four
+    plosives in rotation, the last syllable is lengthened the way every real
+    utterance's final syllable is, an intake of breath precedes the speech, and
+    the whole transmission drifts on the carrier the way a real receiver does.
     """
     g = d.rng(f"comms:{phrase}:{variant}")
 
@@ -611,33 +649,84 @@ def comms(phrase: str, variant: int = 0, tone: str = "calm") -> np.ndarray:
         "ready": ["eh", "ih"],
         "unit_lost": ["uh", "ih", "ao"],
     }
+    # Each phrase's own melody, as (fraction, f0 multiplier) pairs. Two beats
+    # falling reads as an acknowledgement; a stepped rise reads as a report
+    # being begun; a hard early drop with a low tail reads as bad news. This is
+    # the part a player parses without ever transcribing a syllable.
+    contours = {
+        "ack": [(0.0, 1.05), (0.50, 1.00), (1.0, 0.80)],
+        "affirm": [(0.0, 0.98), (0.35, 1.10), (0.75, 1.02), (1.0, 0.86)],
+        "negative": [(0.0, 1.12), (0.30, 0.94), (1.0, 0.82)],
+        "engaging": [(0.0, 0.96), (0.40, 1.06), (0.70, 1.12), (1.0, 0.88)],
+        "structure_lost": [(0.0, 1.18), (0.35, 1.06), (0.70, 0.92), (1.0, 0.76)],
+        "low_power": [(0.0, 1.02), (0.50, 0.92), (1.0, 0.85)],
+        "ready": [(0.0, 0.96), (0.40, 1.12), (1.0, 0.94)],
+        "unit_lost": [(0.0, 1.06), (0.40, 0.98), (1.0, 0.72)],
+    }
     vowels = patterns.get(phrase, ["ax", "ax"])
+    contour = contours.get(phrase, [(0.0, 1.05), (0.5, 1.0), (1.0, 0.86)])
 
     # Professional radio prosody: flat, slightly falling, no terminal rise. The
     # alert tones sit a little higher and tighter, not louder.
     base = {"calm": 112.0, "alert": 132.0, "grim": 96.0}.get(tone, 112.0)
     base *= 1.0 + g.uniform(-0.04, 0.04)
     pace = {"calm": 1.0, "alert": 0.82, "grim": 1.12}.get(tone, 1.0)
+    # Per-variant tempo and contour tilt: the same phrase from the same unit
+    # should not play identically every time. Tilt pivots on the middle of the
+    # phrase so the terminal direction is preserved.
+    pace *= g.uniform(0.90, 1.12)
+    tilt = g.uniform(-0.05, 0.05)
+
+    def _tilted(f: float, m: float) -> float:
+        return m * (1.0 + tilt * (2.0 * f - 1.0))
 
     segs = []
+    n_syl = len(vowels)
     for i, v in enumerate(vowels):
         if i:
             # A consonant between syllables so it reads as speech, not a chant.
-            segs.append(Seg("p", 0.012, g.choice(["t", "d", "k", "g"]), 0.5))
-        segs.append(Seg("v", g.uniform(0.075, 0.115) * pace, v,
+            # Real inter-syllabic consonants are mostly nasals and fricatives;
+            # the first pass drew from plosives only, which gave every phrase
+            # the same staccato attack.
+            medial = g.choice(["t", "d", "k", "g", "m", "n", "s", "m", "n"])
+            if medial in ("m", "n"):
+                segs.append(Seg("n", 0.026 * pace, "", 0.5))
+            elif medial == "s":
+                segs.append(Seg("f", 0.034 * pace, "s", 0.35))
+            else:
+                segs.append(Seg("p", 0.012 * pace, medial, 0.5))
+        dur = g.uniform(0.075, 0.105) * pace
+        if i == 0:
+            dur *= 0.85          # clipped first beat: radio shorthand
+        if i == n_syl - 1:
+            dur *= 1.30          # phrase-final lengthening - universal in speech
+        segs.append(Seg("v", dur, v,
                         1.0 if i == 0 else g.uniform(0.72, 0.95)))
     segs.append(Seg("f", 0.045, "s", 0.30))
 
     spec = VoiceSpec(
         segs=segs,
-        f0=[(0.0, base * 1.06), (0.55, base), (1.0, base * 0.86)],
+        f0=[(f, base * _tilted(f, m)) for f, m in contour],
         breath=0.05, jitter=0.011, shimmer=0.04, effort=0.75,
     )
-    speech = _radio_band(utter(spec, f"comms:{phrase}:{variant}"), f"comms:{phrase}")
+    speech = utter(spec, f"comms:{phrase}:{variant}")
+
+    # Carrier drift: a slow ramp of resampling delay, up to about a quarter
+    # percent. Every real receiver's oscillator wanders; its absence is one of
+    # the tells that a voice is synthetic.
+    drift = g.uniform(-1.0, 1.0) * SR * 0.0013
+    speech = d._fractional_delay(speech, np.linspace(0.0, drift, len(speech)))
+
+    # Intake of breath as the carrier keys up, under the squelch tail.
+    inhale = d.filt(g.uniform(-1.0, 1.0, d.n_samples(0.07)), "bp", 1400.0, 0.7)
+    inhale *= d.breakpoints(0.07, [(0.0, 0.0), (0.6, 1.0), (1.0, 0.0)]) * 0.05
+
+    speech = _radio_band(speech, f"comms:{phrase}")
 
     total = 0.035 + len(speech) / SR + 0.09
     out = d.silence(total)
     d.place(out, _squelch(True, f"sq:{phrase}:{variant}:o"), 0.0)
+    d.place(out, inhale * 0.8, 0.010)
     d.place(out, speech * 0.9, 0.030)
     d.place(out, _squelch(False, f"sq:{phrase}:{variant}:c"), 0.035 + len(speech) / SR)
     return d.normalize(d.fade(out, 0.0006, 0.012), 0.9)

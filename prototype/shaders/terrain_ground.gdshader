@@ -69,6 +69,20 @@ uniform float blend_contrast : hint_range(0.5, 8.0) = 2.2;
 uniform float terrain_desaturate : hint_range(0.0, 1.0) = 0.0;
 uniform float terrain_exposure_lift : hint_range(0.0, 0.5) = 0.0;
 
+// VISUAL polish 2026-08-23: parallax offset (close-range depth illusion).
+// Off by default; the GDScript / Python material setup leaves parallax_scale
+// at 0 and the per-fragment `if` is a uniform branch (no divergence cost).
+// When set > 0, a single-iteration height offset is applied using slot 0's
+// height (the G channel of its roughness) - 1 extra texture sample per
+// fragment, multiplied into all subsequent texture reads. close_fade
+// ramps out the effect past parallax_max_distance so distant ground doesn't
+// swim and so the extra sample + offset is skipped at long view (the
+// close_fade is computed against a uniform, so the GPU can short-circuit
+// the offset math entirely at long range via the if branch).
+uniform float parallax_scale = 0.0;
+uniform float parallax_min_distance = 40.0;
+uniform float parallax_max_distance = 80.0;
+
 varying vec3 v_world_pos;
 varying vec3 v_world_normal;
 
@@ -188,6 +202,20 @@ void fragment() {
 	float n_detail = value_noise(uv * detail_scale + vec2(37.2, 11.7));
 	float m = clamp((n_macro * 0.75 + n_detail * 0.25 - 0.5) * blend_contrast + 0.5, 0.0, 1.0);
 
+	// VISUAL polish 2026-08-23: parallax offset. The blend mask `m` above
+	// uses the un-parallaxed `uv` (so neighbouring variants stay blended in
+	// their original positions, not in the parallaxed-shadowed positions),
+	// while the texture samples below use `parallaxed_uv` (so the visible
+	// surface appears to shift with the camera as a depth illusion).
+	vec2 parallaxed_uv = uv;
+	if (parallax_scale > 0.0) {
+		vec3 view_to_frag = normalize(v_world_pos - CAMERA_POSITION_WORLD);
+		float dist = length(v_world_pos - CAMERA_POSITION_WORLD);
+		float close_fade = 1.0 - smoothstep(parallax_min_distance, parallax_max_distance, dist);
+		float h = texture(rough_0, uv).g;
+		parallaxed_uv = uv + view_to_frag.xz * h * parallax_scale * close_fade;
+	}
+
 	vec3 alb;
 	vec3 nrm;
 	float rgh;
@@ -195,12 +223,12 @@ void fragment() {
 
 	int active_count = clamp(variant_count, 1, 8);
 	if (active_count == 1) {
-		_sample_slot(0, uv, alb, nrm, rgh, hgt);
+		_sample_slot(0, parallaxed_uv, alb, nrm, rgh, hgt);
 	} else if (active_count == 2) {
 		vec3 a0, a1, n0, n1;
 		float r0, r1, h0, h1;
-		_sample_slot(0, uv, a0, n0, r0, h0);
-		_sample_slot(1, uv, a1, n1, r1, h1);
+		_sample_slot(0, parallaxed_uv, a0, n0, r0, h0);
+		_sample_slot(1, parallaxed_uv, a1, n1, r1, h1);
 		// Height-aware blending
 		float h_weight = clamp(((1.0 - m) * (h0 + 0.1) - m * (h1 + 0.1)) * 3.0 + 0.5, 0.0, 1.0);
 		alb = mix(a1, a0, h_weight);
@@ -215,8 +243,8 @@ void fragment() {
 
 		vec3 a0, a1, n0, n1;
 		float r0, r1, h0, h1;
-		_sample_slot(slot0, uv, a0, n0, r0, h0);
-		_sample_slot(slot1, uv, a1, n1, r1, h1);
+		_sample_slot(slot0, parallaxed_uv, a0, n0, r0, h0);
+		_sample_slot(slot1, parallaxed_uv, a1, n1, r1, h1);
 
 		float h_weight = clamp(((1.0 - frac_m) * (h0 + 0.1) - frac_m * (h1 + 0.1)) * 3.0 + 0.5, 0.0, 1.0);
 		alb = mix(a1, a0, h_weight);
@@ -254,7 +282,7 @@ void fragment() {
 	}
 
 	// Micro detail normal layer
-	vec3 detail_n = texture(detail_normal_tex, uv * detail_normal_scale).rgb;
+	vec3 detail_n = texture(detail_normal_tex, parallaxed_uv * detail_normal_scale).rgb;
 	if (length(detail_n) > 0.1) {
 		nrm = normalize(mix(nrm, detail_n, 0.25));
 	}

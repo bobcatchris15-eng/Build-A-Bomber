@@ -45,6 +45,34 @@ const MAX_DISTANCE: float = 100.0
 ## frame. Keyed on the Mesh resource's id, which is stable for as long as the hull
 ## keeps that mesh and changes the moment it does not.
 static var _surface_cache: Dictionary = {}
+static var _active_surface: Dictionary = {}
+
+
+static func _find_mesh_instance(node: Node) -> MeshInstance3D:
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		return node as MeshInstance3D
+	for child in node.get_children():
+		var mi := _find_mesh_instance(child)
+		if mi != null:
+			return mi
+	return null
+
+
+## Explicitly caches the surface of a hull being rebuilt.
+static func cache_hull(hull: Node3D) -> void:
+	if hull == null or not is_instance_valid(hull):
+		return
+	var mesh_inst := _find_mesh_instance(hull)
+	if mesh_inst == null or mesh_inst.mesh == null:
+		return
+	var key := mesh_inst.mesh.get_instance_id()
+	if _surface_cache.has(key):
+		_active_surface = _surface_cache[key]
+		return
+	var surface: Dictionary = HullProjectionScript.build_surface(mesh_inst)
+	if (surface.get("tris", PackedVector3Array()) as PackedVector3Array).size() >= 3:
+		_surface_cache[key] = surface
+		_active_surface = surface
 
 
 ## Drops every cached surface. Called by locomotion_mount.gd at the start of a
@@ -52,6 +80,7 @@ static var _surface_cache: Dictionary = {}
 ## triangles it used to have.
 static func clear_cache() -> void:
 	_surface_cache.clear()
+	_active_surface.clear()
 
 
 ## Length, in the module's own local units, that a member starting at
@@ -82,15 +111,21 @@ static func solve(module: Node3D, station: Vector3, from_local: Vector3,
 	if surface.is_empty():
 		return fallback
 
+	var side_sign := signf(station.x)
+	if is_zero_approx(side_sign):
+		side_sign = 1.0
+	var eff_from := Vector3(from_local.x * side_sign, from_local.y, from_local.z)
+	var eff_dir := Vector3(dir_local.x * side_sign, dir_local.y, dir_local.z)
+
 	# One unit along dir_local in module space is |v| units in hull space. That
 	# factor is what converts the measured distance back into the units the
 	# builder is authoring in.
-	var v := dir_local * node_scale
+	var v := eff_dir * node_scale
 	var v_len := v.length()
 	if v_len < 1e-9:
 		return fallback
 
-	var from_hull := station + from_local * node_scale
+	var from_hull := station + eff_from * node_scale
 	var hit: Dictionary = HullProjectionScript.raycast(surface, from_hull, v / v_len)
 	if not hit.get("hit", false):
 		return fallback
@@ -101,27 +136,19 @@ static func solve(module: Node3D, station: Vector3, from_local: Vector3,
 ## The hull's triangle surface, in hull-local space, for the hull `module` hangs
 ## off. Empty when the module is not parented to a hull with a mesh yet.
 static func surface_for(module: Node3D) -> Dictionary:
-	if module == null or not is_instance_valid(module):
-		return {}
-	var hull := module.get_parent() as Node3D
-	if hull == null:
-		return {}
-	var mesh_inst := hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if mesh_inst == null or mesh_inst.mesh == null:
-		return {}
-
-	var key := mesh_inst.mesh.get_instance_id()
-	if _surface_cache.has(key):
-		return _surface_cache[key]
-	# Gathered from the MeshInstance3D rather than the hull node so the result is
-	# in the same space the station positions are, and so HullProjection's own
-	# filters keep already-placed modules from being measured as hull skin - a
-	# wheel must not solve its shaft length against the tread next to it.
-	var surface: Dictionary = HullProjectionScript.build_surface(mesh_inst)
-	if (surface.get("tris", PackedVector3Array()) as PackedVector3Array).size() < 3:
-		return {}
-	_surface_cache[key] = surface
-	return surface
+	if module != null and is_instance_valid(module):
+		var hull := module.get_parent() as Node3D
+		if hull != null:
+			var mesh_inst := _find_mesh_instance(hull)
+			if mesh_inst != null and mesh_inst.mesh != null:
+				var key := mesh_inst.mesh.get_instance_id()
+				if _surface_cache.has(key):
+					return _surface_cache[key]
+				var surface: Dictionary = HullProjectionScript.build_surface(mesh_inst)
+				if (surface.get("tris", PackedVector3Array()) as PackedVector3Array).size() >= 3:
+					_surface_cache[key] = surface
+					return surface
+	return _active_surface
 
 
 ## Reads the station position a builder was handed. locomotion_mount.gd publishes

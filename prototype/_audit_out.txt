@@ -1,0 +1,70 @@
+﻿file                                          R range     G range  notes
+----------------------------------------------------------------------------------------------------
+blue_water_roughness.png                    58-84 ( 70.8) 108-155(127.1)  ok
+blue_water_v1_roughness.png                 19-31 ( 25.0)  43-220(129.8)  ok
+blue_water_v2_roughness.png                 16-34 ( 24.9)  42-227(122.9)  ok
+blue_water_v3_roughness.png                 20-30 ( 25.0)  35-222(126.1)  ok
+cobble_roughness.png                       192-215(203.7)  38-212(128.3)  ok
+cobble_v1_roughness.png                    192-215(203.7)  38-212(128.3)  ok
+cobble_v2_roughness.png                    185-222(203.4)  46-220(127.7)  ok
+cobble_v3_roughness.png                    194-213(203.5)  37-219(130.2)  ok
+dirt_roughness.png                         225-243(234.1)  35-215(122.1)  ok
+dirt_v1_roughness.png                      225-243(234.1)  35-215(122.1)  ok
+dirt_v2_roughness.png                      221-247(234.0)  42-216(125.8)  ok
+dirt_v3_roughness.png                      226-241(234.2)  33-219(125.1)  ok
+dry_grass_roughness.png                    222-236(229.0)  27-218(123.7)  ok
+dry_grass_v1_roughness.png                 222-236(229.0)  27-218(123.7)  ok
+dry_grass_v2_roughness.png                 218-239(229.1)  32-221(126.2)  ok
+dry_grass_v3_roughness.png                 223-234(229.0)  33-227(126.4)  ok
+forest_roughness.png                       221-247(234.0)  76-140(112.5)  ok
+forest_v1_roughness.png                    184-249(211.0) 184-249(211.0)  ok
+forest_v2_roughness.png                    184-249(209.1) 184-249(209.1)  ok
+forest_v3_roughness.png                    184-249(210.7) 184-249(210.7)  ok
+grassland_roughness.png                    229-249(241.5) 106-147(129.4)  ok
+grassland_v1_roughness.png                 184-249(211.0) 184-249(211.0)  ok
+grassland_v2_roughness.png                 184-249(209.1) 184-249(209.1)  ok
+grassland_v3_roughness.png                 184-249(210.7) 184-249(210.7)  ok
+gravel_roughness.png                       191-216(203.4)  86-137(123.6)  ok
+gravel_v1_roughness.png                    195-249(225.8) 195-249(225.8)  ok
+gravel_v2_roughness.png                    190-249(225.8) 190-249(225.8)  ok
+gravel_v3_roughness.png                    195-249(225.8) 195-249(225.8)  ok
+ice_roughness.png                           25-50 ( 37.7)  92-136(125.4)  ok
+ice_v1_roughness.png                        46-81 ( 63.5)  37-215(130.5)  ok
+ice_v2_roughness.png                        36-91 ( 63.6)  39-209(127.1)  ok
+ice_v3_roughness.png                        48-78 ( 63.1)  36-210(124.3)  ok
+marsh_roughness.png                         17-249(209.8)  61-141(119.0)  ok
+marsh_v1_roughness.png                     188-249(233.6) 188-249(233.6)  ok
+marsh_v2_roughness.png                     188-249(232.8) 188-249(232.8)  ok
+marsh_v3_roughness.png                     188-249(233.3) 188-249(233.3)  ok
+mud_roughness.png                           49-77 ( 63.5)  50-212(125.0)  ok
+mud_v1_roughness.png                        49-77 ( 63.5)  50-212(125.0)  ok
+mud_v2_roughness.png                        43-85 ( 63.2)  37-218(128.6)  ok
+mud_v3_roughness.png                        52-74 ( 63.4)  31-216(130.9)  ok
+rocky_roughness.png                        229-249(244.3)  15-150( 94.9)  ok
+rocky_v1_roughness.png                     191-249(225.7) 191-249(225.7)  ok
+rocky_v2_roughness.png                     195-249(225.7) 195-249(225.7)  ok
+rocky_v3_roughness.png                     195-249(225.8) 195-249(225.8)  ok
+sand_roughness.png                         224-249(236.6)  96-156(128.5)  ok
+sand_v1_roughness.png                      192-209(197.2) 192-209(197.2)  ok
+sand_v2_roughness.png                      192-208(197.2) 192-208(197.2)  ok
+sand_v3_roughness.png                      192-208(197.2) 192-208(197.2)  ok
+scree_roughness.png                        234-245(239.2)  35-214(130.0)  ok
+scree_v1_roughness.png                     234-245(239.2)  35-214(130.0)  ok
+scree_v2_roughness.png                     230-248(239.0)  23-213(129.4)  ok
+scree_v3_roughness.png                     235-244(239.1)  35-227(122.9)  ok
+shallow_water_roughness.png                 63-89 ( 75.9) 111-143(126.6)  ok
+shallow_water_v1_roughness.png              29-47 ( 37.7)  39-229(125.9)  ok
+shallow_water_v2_roughness.png              24-52 ( 37.7)  35-227(127.4)  ok
+shallow_water_v3_roughness.png              30-45 ( 37.5)  26-211(126.1)  ok
+snow_mud_roughness.png                      33-247(212.9)  57-133(119.8)  ok
+snow_mud_v1_roughness.png                  188-249(233.6) 188-249(233.6)  ok
+snow_mud_v2_roughness.png                  188-249(232.8) 188-249(232.8)  ok
+snow_mud_v3_roughness.png                  188-249(233.3) 188-249(233.3)  ok
+steppe_grass_roughness.png                 215-233(223.8)  37-228(118.3)  ok
+steppe_grass_v1_roughness.png              215-233(223.8)  37-228(118.3)  ok
+steppe_grass_v2_roughness.png              210-238(223.9)  35-217(123.6)  ok
+steppe_grass_v3_roughness.png              216-231(223.9)  35-221(127.0)  ok
+volcanic_roughness.png                     214-233(223.8)  47-213(121.6)  ok
+volcanic_v1_roughness.png                  214-233(223.8)  47-213(121.6)  ok
+volcanic_v2_roughness.png                  210-238(224.0)  31-217(127.4)  ok
+volcanic_v3_roughness.png                  217-231(223.8)  40-225(132.9)  ok

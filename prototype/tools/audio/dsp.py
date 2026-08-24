@@ -565,6 +565,28 @@ def normalize(x: np.ndarray, peak: float = 0.95) -> np.ndarray:
     return x if m < 1e-12 else x * (peak / m)
 
 
+def match_loudness(x: np.ndarray, target_rms_db: float,
+                   peak: float = 0.95) -> np.ndarray:
+    """Gain so the buffer's RMS lands on `target_rms_db` dBFS.
+
+    WHY NOT JUST normalize(). Peak normalisation says nothing about how loud a
+    sound IS - measured across this library, a peak-normalised square-wave buzz
+    came out at -7 dB RMS while an equally peak-normalised ping sat at -29, a
+    22 dB loudness gap between two interface sounds. Perceived level tracks
+    energy, so banks that must sit together in a mix are gain-set by RMS here.
+    The peak ceiling is still enforced (a hard scale-down, not a limiter -
+    render._prepare owns limiting); a sound whose crest factor would push it
+    over at the target RMS simply ends up a little quieter than requested,
+    which is the correct trade.
+    """
+    rms = float(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2)))
+    if rms < 1e-12:
+        return np.zeros_like(x)
+    out = x * (db(target_rms_db) / rms)
+    m = float(np.max(np.abs(out)))
+    return out * (peak / m) if m > peak else out
+
+
 def fade(x: np.ndarray, in_time: float = 0.002, out_time: float = 0.01) -> np.ndarray:
     """Click guard. Any buffer that starts or ends mid-waveform needs this."""
     out = np.array(x, dtype=np.float64)

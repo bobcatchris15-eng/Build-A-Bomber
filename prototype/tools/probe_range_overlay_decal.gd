@@ -95,6 +95,44 @@ func _init():
 	if reaches.max() <= 0.0:
 		failures.append("reaches max <= 0.0")
 
+	# 5. Test HUD Command Card range toggle button
+	var hud = battle.hud if "hud" in battle else null
+	if hud != null and "command_card" in hud and hud.command_card != null:
+		var card = hud.command_card
+		if card._range_toggle_btn == null:
+			failures.append("HUDCommandCard _range_toggle_btn is null")
+		else:
+			print("  HUDCommandCard range button present: disabled=%s, pressed=%s" % [
+				card._range_toggle_btn.disabled, card._range_toggle_btn.button_pressed
+			])
+			# Select unit through director selection
+			battle.selection.set_selection([unit])
+			for _i in range(2):
+				await process_frame
+			print("  HUDCommandCard after selection: disabled=%s, pressed=%s" % [
+				card._range_toggle_btn.disabled, card._range_toggle_btn.button_pressed
+			])
+			if card._range_toggle_btn.disabled:
+				failures.append("HUDCommandCard range toggle button is disabled while unit is selected")
+			if not card._range_toggle_btn.button_pressed:
+				failures.append("HUDCommandCard range toggle button is not pressed while unit overlay is on")
+
+			# Press toggle button on command card
+			card._range_toggle_btn.emit_signal("pressed")
+			for _i in range(2):
+				await process_frame
+			if unit.show_range_overlay:
+				failures.append("unit.show_range_overlay did not toggle off after command card button pressed")
+			if card._range_toggle_btn.button_pressed:
+				failures.append("HUDCommandCard range button remained pressed after toggle off")
+
+			# Toggle back on
+			card._range_toggle_btn.emit_signal("pressed")
+			for _i in range(2):
+				await process_frame
+			if not unit.show_range_overlay:
+				failures.append("unit.show_range_overlay did not toggle on after second button press")
+
 	_finish(battle, failures)
 
 

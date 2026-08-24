@@ -40,6 +40,17 @@ const ThreatAnalyzer = preload("res://scripts/battle/ai/threat_analyzer.gd")
 # build itself was rate-limited - it keeps choosing the best
 # action; the cap drops the actual placement call.
 const BUILD_RATE_CAP_SECONDS := 2.0
+# ESCALATION (2026-08-24). The 02:31 skirmish log shows what a fixed cap does
+# when the reason for building never clears: is_low_power stayed true for eight
+# straight minutes (past ~150 structures the upkeep-per-structure draw outruns
+# what another plant returns), so ADD_POWER landed one plant every 2.0 s all
+# match - and every placement forces a navmesh sync that measured multi-second
+# frames. A repeat that fails to satisfy its own trigger now stretches that
+# type's cooldown; a satisfied check resets it. This bounds navmesh churn from
+# ANY runaway build loop without touching the balance numbers themselves.
+const BUILD_RATE_ESCALATION := 1.75
+const BUILD_RATE_MAX_SECONDS := 24.0
+var _build_rate_escalation: Dictionary = {}
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 # SKIRMISH_PERF_TROUBLESHOOTING.md §5 Track B / §6 item 1.
 # Profiler sections are added INSIDE this class so the per-step
@@ -694,7 +705,7 @@ func _execute(action: int, state: Dictionary) -> void:
 			if _build_rate_ok("refinery"):
 				_world.ai_build_structure(team, "refinery")
 		Action.ADD_POWER:
-			if _build_rate_ok("power_plant"):
+			if _build_rate_ok("power_plant", func() -> bool: return not bool(state.get("low_power", false))):
 				_world.ai_build_structure(team, "power_plant")
 		Action.ADD_PRODUCTION:
 			# The director picks WHICH manufactory - it knows about hull tiers and
@@ -728,12 +739,20 @@ func _execute(action: int, state: Dictionary) -> void:
 # first placement of a type (last_ms == 0) always passes; subsequent
 # placements need BUILD_RATE_CAP_SECONDS since the last one. Returns
 # true and records the timestamp on pass, returns false on block.
-func _build_rate_ok(type: String) -> bool:
+func _build_rate_ok(type: String, satisfied_check: Callable = Callable()) -> bool:
 	var now_ms: int = Time.get_ticks_msec()
 	var last_ms: int = int(_last_build_at_ms.get(type, 0))
-	if now_ms - last_ms < int(BUILD_RATE_CAP_SECONDS * 1000.0):
+	var wait_s: float = BUILD_RATE_CAP_SECONDS * float(_build_rate_escalation.get(type, 1.0))
+	if now_ms - last_ms < int(wait_s * 1000.0):
 		return false
 	_last_build_at_ms[type] = now_ms
+	if satisfied_check.is_valid():
+		if satisfied_check.call():
+			_build_rate_escalation[type] = 1.0
+		else:
+			_build_rate_escalation[type] = minf(
+				float(_build_rate_escalation.get(type, 1.0)) * BUILD_RATE_ESCALATION,
+				BUILD_RATE_MAX_SECONDS)
 	return true
 
 

@@ -4,31 +4,11 @@ extends SceneTree
 # specific files I edited in this turn still parse.
 
 const FILES := [
-	"res://scripts/module_catalog.gd",
-	"res://scripts/battle/battle_logger.gd",
-	"res://scripts/battle/battle_profiler.gd",
-	"res://scripts/battle/match_director.gd",
-	"res://scripts/auto_weapon.gd",
-	"res://scripts/core/input_service.gd",
-	"res://scripts/perf_hud.gd",
-	"res://scripts/drone_unit.gd",
-	"res://scripts/battle/buildings/building_mesh.gd",
-	"res://scripts/ambient_scatter.gd",
+	"res://scripts/battle/vision/vision_service.gd",
 	"res://scripts/battle/units/unit.gd",
+	"res://scripts/battle/match_director.gd",
 	"res://scripts/battle/ai/commander.gd",
-	"res://scripts/match_rule_set.gd",
-	"res://scripts/deploy_gate.gd",
-	"res://scripts/terrain_builder.gd",
-	"res://scripts/battle/buildings/structure.gd",
-	"res://scripts/battle/perf_toast.gd",
-	"res://scripts/battle/buildings/placement_service.gd",
-	"res://scripts/incoming_missile.gd",
-	"res://scripts/weapon_missile.gd",
-	"res://scripts/proximity_mine.gd",
-	"res://scripts/decoy_contact.gd",
-	"res://scripts/deployed_sentry.gd",
-	"res://scripts/resource_node.gd",
-	"res://scripts/battle/economy/resource_field.gd",
+	"res://scripts/battle/movement/flow_field_service.gd",
 ]
 
 func _init():

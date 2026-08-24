@@ -41,14 +41,23 @@ def ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
-def _prepare(samples: np.ndarray, peak: float) -> np.ndarray:
+def _prepare(samples: np.ndarray, peak: float = 0.95) -> np.ndarray:
     """Shape, limit and DC-correct a buffer on its way to disk.
 
     THE LIMITER IS NOT OPTIONAL. Several layers here (drive, fold, reverb tails
     summing) can exceed unity on a loud transient, and 16-bit PCM wraps rather
     than clips on overflow - a wrap is a full-scale discontinuity, which is a
-    loud crack, not a soft distortion. tanh above the ceiling turns what would
-    be a crack into the saturation the material wants anyway.
+    loud crack, not a soft distortion.
+
+    BUT IT MUST ONLY ENGAGE NEAR THE CEILING. The first version ran every buffer
+    through `tanh` unconditionally, which saturated even material peaking at
+    -10 dBFS: measured, a 0.5 input came out 0.45 and a full-scale peak landed
+    at 0.716 (-2.9 dBFS), so the whole tree shipped with one always-on
+    odd-harmonic stage colouring it - mud on complex beds, harshness on pure
+    tones. What is wanted is wrap PROTECTION, not saturation, so this is now a
+    soft-knee limiter: identity below the knee (0.7 * peak), tanh continuation
+    above it. The curve joins with matched slope at the knee and tops out
+    exactly at `peak`, so overflow still turns into gentle rounding.
     """
     x = np.asarray(samples, dtype=np.float64)
     if x.ndim == 1:
@@ -58,10 +67,16 @@ def _prepare(samples: np.ndarray, peak: float) -> np.ndarray:
     # offset, and DC eats headroom while being completely inaudible on its own.
     x = x - np.mean(x, axis=0, keepdims=True)
 
-    m = float(np.max(np.abs(x)))
-    if m > 1e-12:
-        x = x * (peak / m) if m > peak else x
-    return np.tanh(x / max(peak, 1e-6) * 0.98) * peak
+    ceil = max(float(peak), 1e-6)
+    knee = 0.7 * ceil
+    mag = np.abs(x)
+    over = mag - knee
+    limited = np.sign(x) * np.where(
+        over > 0.0,
+        knee + (ceil - knee) * np.tanh(over / (ceil - knee)),
+        mag,
+    )
+    return limited
 
 
 def _record(path: Path) -> None:

@@ -246,11 +246,15 @@ func _add_multimesh_batch(mesh: Mesh, material: Material, transforms: Array[Tran
 	return mmi
 
 
-func _add_gltf_variant_batches(model_template_path: String, pool_size: int, variant_xforms: Dictionary, variant_colors: Dictionary, fallback_mesh: Mesh, fallback_mat: Material, batch_prefix: String, vis_begin: float = 0.0, vis_end: float = 0.0) -> void:
+# `ticker`/`gate` thread scatter_all's frame budget in here: the per-part
+# compose loops below are GDScript and, at grass counts, a single batch call
+# was its own multi-hundred-ms block. Null ticker = the old synchronous call.
+func _add_gltf_variant_batches(model_template_path: String, pool_size: int, variant_xforms: Dictionary, variant_colors: Dictionary, fallback_mesh: Mesh, fallback_mat: Material, batch_prefix: String, vis_begin: float = 0.0, vis_end: float = 0.0, ticker: Node = null, gate: Dictionary = {}) -> void:
 	for var_idx in variant_xforms.keys():
 		var xf_list: Array = variant_xforms[var_idx]
 		if xf_list.is_empty():
 			continue
+		await _scatter_slice(ticker, gate)
 		var col_list: Array = variant_colors.get(var_idx, [])
 		var glb_path = model_template_path % var_idx
 		var parts = _load_gltf_parts(glb_path)
@@ -267,6 +271,7 @@ func _add_gltf_variant_batches(model_template_path: String, pool_size: int, vari
 				_add_multimesh_batch(fallback_mesh, fallback_mat, casted_xforms, casted_cols, "%s_Fallback_%d" % [batch_prefix, var_idx], vis_begin, vis_end)
 			continue
 		for p_idx in range(parts.size()):
+			await _scatter_slice(ticker, gate)
 			var part = parts[p_idx]
 			var mesh: Mesh = part["mesh"]
 			var local_xform: Transform3D = part["xform"]
@@ -278,6 +283,8 @@ func _add_gltf_variant_batches(model_template_path: String, pool_size: int, vari
 					composed_cols.append(col_list[i])
 				else:
 					composed_cols.append(Color.WHITE)
+				# The compose loop is O(instances) GDScript - slice it too.
+				await _scatter_slice(ticker, gate)
 			_add_multimesh_batch(mesh, null, composed_xforms, composed_cols, "%s_%d_%d" % [batch_prefix, var_idx, p_idx], vis_begin, vis_end)
 
 
@@ -285,10 +292,30 @@ func _add_gltf_variant_batches(model_template_path: String, pool_size: int, vari
 # Main Scatter Pipeline
 # ------------------------------------------------------------------------------
 
-func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
+# One frame-budget slice for scatter_all's loops. `gate` is a {"t": usec}
+# Dictionary because the deadline has to survive between call sites - a plain
+# local would be captured per-call and never advance.
+func _scatter_slice(ticker: Node, gate: Dictionary) -> void:
+	if ticker == null or Time.get_ticks_usec() < int(gate["t"]):
+		return
+	await get_tree().process_frame
+	gate["t"] = Time.get_ticks_usec() + int(TerrainBuilderScript.BUILD_FRAME_BUDGET_MS * 1000.0)
+
+
+func scatter_all(map_def: Dictionary, prop_scale: float = 1.0, ticker: Node = null) -> void:
 	if bool(map_def.get("disable_ambient_scatter", false)):
 		return
-	
+
+	# FRAME-CHUNKING (2026-08-23). This pass measured 60 s wall-clock on a
+	# 960-half map - by far the largest single continuous freeze in the world
+	# build, long enough that the loading screen read as dead. Pass a ticker
+	# (any Node in the tree) and every loop below yields process_frame
+	# whenever the frame has spent TerrainBuilderScript.BUILD_FRAME_BUDGET_MS;
+	# without one the whole function is the old single-frame call. The gates
+	# are pure scheduling: RNG draws, iteration order and every placement
+	# decision are unchanged, so output is identical either way.
+	var gate := {"t": Time.get_ticks_usec() + int(TerrainBuilderScript.BUILD_FRAME_BUDGET_MS * 1000.0)}
+
 	var half: float = map_def.get("map_half_extents", 100.0)
 	var map_name: String = map_def.get("name", "battlefield")
 	var area: float = (half * 2.0) * (half * 2.0)
@@ -373,12 +400,17 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 	var items_per_cluster = int(grass_count / num_grass_clusters)
 	
 	for c_idx in range(num_grass_clusters):
+		await _scatter_slice(ticker, gate)
 		var cluster_cx = grass_rng.randf_range(-half * 0.94, half * 0.94)
 		var cluster_cz = grass_rng.randf_range(-half * 0.94, half * 0.94)
 		var cluster_radius = grass_rng.randf_range(16.0, 38.0) * prop_scale
 		var is_flower_cluster = grass_rng.randf() < 0.18
 		
 		for i in range(items_per_cluster):
+			# Per-item gate: one cluster on a large map can spend hundreds of
+			# ms in terrain sampling alone, so cluster granularity alone
+			# still leaves visible hitches.
+			await _scatter_slice(ticker, gate)
 			var r_jitter = (grass_rng.randf_range(-1.0, 1.0) + grass_rng.randf_range(-1.0, 1.0)) * 0.5 * cluster_radius
 			var theta = grass_rng.randf_range(0, TAU)
 			var gx = cluster_cx + cos(theta) * r_jitter
@@ -422,10 +454,13 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		
 	var fallback_grass_mesh = _build_grass_mesh(prop_scale)
 	var fallback_grass_mat = _get_material(base_green.lightened(0.12), 0.8)
-	_add_gltf_variant_batches(GRASS_TUFT_MODEL_DIR, GRASS_TUFT_POOL_SIZE, grass_xforms_by_variant, grass_colors_by_variant,
-		fallback_grass_mesh, fallback_grass_mat, "Batch_GrassTuft", 0.0, 220.0)
-	_add_gltf_variant_batches(WILDFLOWER_MODEL_DIR, WILDFLOWER_POOL_SIZE, flower_xforms_by_variant, flower_colors_by_variant,
-		fallback_grass_mesh, fallback_grass_mat, "Batch_Wildflower", 0.0, 220.0)
+	# The batch builders compose every instance transform in GDScript - at
+	# grass counts that is its own multi-hundred-ms block, so slice first.
+	await _scatter_slice(ticker, gate)
+	await _add_gltf_variant_batches(GRASS_TUFT_MODEL_DIR, GRASS_TUFT_POOL_SIZE, grass_xforms_by_variant, grass_colors_by_variant,
+		fallback_grass_mesh, fallback_grass_mat, "Batch_GrassTuft", 0.0, 220.0, ticker, gate)
+	await _add_gltf_variant_batches(WILDFLOWER_MODEL_DIR, WILDFLOWER_POOL_SIZE, flower_xforms_by_variant, flower_colors_by_variant,
+		fallback_grass_mesh, fallback_grass_mat, "Batch_Wildflower", 0.0, 220.0, ticker, gate)
 	
 	# --------------------------------------------------------------------------
 	# 2. AUTHORED SHRUBS & BUSHES (Clustered + Scale-aware)
@@ -444,11 +479,13 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 	var shrubs_per_cluster = int(shrub_count / num_shrub_clusters)
 	
 	for c_idx in range(num_shrub_clusters):
+		await _scatter_slice(ticker, gate)
 		var cluster_cx = shrub_rng.randf_range(-half * 0.93, half * 0.93)
 		var cluster_cz = shrub_rng.randf_range(-half * 0.93, half * 0.93)
 		var cluster_radius = shrub_rng.randf_range(14.0, 32.0) * prop_scale
 		
 		for i in range(shrubs_per_cluster):
+			await _scatter_slice(ticker, gate)
 			var r_jitter = (shrub_rng.randf_range(-1.0, 1.0) + shrub_rng.randf_range(-1.0, 1.0)) * 0.5 * cluster_radius
 			var theta = shrub_rng.randf_range(0, TAU)
 			var sx = cluster_cx + cos(theta) * r_jitter
@@ -487,8 +524,9 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		
 	var fallback_shrub_mesh = _build_shrub_mesh(prop_scale)
 	var fallback_shrub_mat = _get_material(base_green.darkened(0.08), 0.85)
-	_add_gltf_variant_batches(SHRUB_MODEL_DIR, SHRUB_POOL_SIZE, shrub_xforms_by_variant, shrub_colors_by_variant,
-		fallback_shrub_mesh, fallback_shrub_mat, "Batch_Shrub", 0.0, 320.0)
+	await _scatter_slice(ticker, gate)
+	await _add_gltf_variant_batches(SHRUB_MODEL_DIR, SHRUB_POOL_SIZE, shrub_xforms_by_variant, shrub_colors_by_variant,
+		fallback_shrub_mesh, fallback_shrub_mat, "Batch_Shrub", 0.0, 320.0, ticker, gate)
 	
 	# --------------------------------------------------------------------------
 	# 3. AUTHORED VISUAL TREES (Scale-aware)
@@ -504,6 +542,7 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		tree_colors_by_variant[sp_idx] = []
 		
 	for i in range(tree_count):
+		await _scatter_slice(ticker, gate)
 		var tx = tree_rng.randf_range(-half * 0.92, half * 0.92)
 		var tz = tree_rng.randf_range(-half * 0.92, half * 0.92)
 		var pos = Vector3(tx, 0.0, tz)
@@ -536,8 +575,9 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		tree_xforms_by_variant[sp_choice].append(t)
 		tree_colors_by_variant[sp_choice].append(tint)
 		
-	_add_gltf_variant_batches(AMBIENT_TREE_MODEL_DIR, AMBIENT_TREE_POOL_SIZE, tree_xforms_by_variant, tree_colors_by_variant,
-		null, null, "Batch_VisualTree", 0.0, 550.0)
+	await _scatter_slice(ticker, gate)
+	await _add_gltf_variant_batches(AMBIENT_TREE_MODEL_DIR, AMBIENT_TREE_POOL_SIZE, tree_xforms_by_variant, tree_colors_by_variant,
+		null, null, "Batch_VisualTree", 0.0, 550.0, ticker, gate)
 	
 	# --------------------------------------------------------------------------
 	# 4. AUTHORED SLOPE SCREE, TALUS & PEBBLES (Normal-aligned + Clustered)
@@ -553,6 +593,7 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		pebble_colors_by_variant[v] = []
 	
 	for i in range(scree_count):
+		await _scatter_slice(ticker, gate)
 		var rx = scree_rng.randf_range(-half * 0.98, half * 0.98)
 		var rz = scree_rng.randf_range(-half * 0.98, half * 0.98)
 		var pos = Vector3(rx, 0.0, rz)
@@ -583,8 +624,9 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		
 	var fallback_pebble_mesh = _build_pebble_mesh(prop_scale)
 	var fallback_pebble_mat = _get_material(Color(0.38, 0.36, 0.33), 0.95)
-	_add_gltf_variant_batches(PEBBLE_MODEL_DIR, PEBBLE_POOL_SIZE, pebble_xforms_by_variant, pebble_colors_by_variant,
-		fallback_pebble_mesh, fallback_pebble_mat, "Batch_PebbleCluster", 0.0, 220.0)
+	await _scatter_slice(ticker, gate)
+	await _add_gltf_variant_batches(PEBBLE_MODEL_DIR, PEBBLE_POOL_SIZE, pebble_xforms_by_variant, pebble_colors_by_variant,
+		fallback_pebble_mesh, fallback_pebble_mat, "Batch_PebbleCluster", 0.0, 220.0, ticker, gate)
 	
 	# --------------------------------------------------------------------------
 	# 5. AUTHORED ROCK SPIRES & MONOLITHS (Scale-aware)
@@ -600,6 +642,7 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		spire_colors_by_variant[v] = []
 		
 	for i in range(spire_count):
+		await _scatter_slice(ticker, gate)
 		var rx = spire_rng.randf_range(-half * 0.94, half * 0.94)
 		var rz = spire_rng.randf_range(-half * 0.94, half * 0.94)
 		var pos = Vector3(rx, 0.0, rz)
@@ -632,8 +675,9 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		spire_xforms_by_variant[sp_var].append(t)
 		spire_colors_by_variant[sp_var].append(tint)
 		
-	_add_gltf_variant_batches(ROCK_SPIRE_MODEL_DIR, ROCK_SPIRE_POOL_SIZE, spire_xforms_by_variant, spire_colors_by_variant,
-		fallback_pebble_mesh, fallback_pebble_mat, "Batch_RockSpire", 0.0, 650.0)
+	await _scatter_slice(ticker, gate)
+	await _add_gltf_variant_batches(ROCK_SPIRE_MODEL_DIR, ROCK_SPIRE_POOL_SIZE, spire_xforms_by_variant, spire_colors_by_variant,
+		fallback_pebble_mesh, fallback_pebble_mat, "Batch_RockSpire", 0.0, 650.0, ticker, gate)
 	
 	# --------------------------------------------------------------------------
 	# 6. AUTHORED CLIFF FACADES & CORNERS ON STEEP ESCARPMENTS
@@ -655,6 +699,7 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		cliff_corner_colors[v] = []
 		
 	for i in range(cliff_count):
+		await _scatter_slice(ticker, gate)
 		var cx = cliff_rng.randf_range(-half * 0.94, half * 0.94)
 		var cz = cliff_rng.randf_range(-half * 0.94, half * 0.94)
 		var pos = Vector3(cx, 0.0, cz)
@@ -698,10 +743,11 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 			cliff_xforms_by_variant[c_var].append(t)
 			cliff_colors_by_variant[c_var].append(tint)
 		
-	_add_gltf_variant_batches(CLIFF_FACE_MODEL_DIR, CLIFF_FACE_POOL_SIZE, cliff_xforms_by_variant, cliff_colors_by_variant,
-		null, null, "Batch_CliffFace", 0.0, 650.0)
-	_add_gltf_variant_batches(CLIFF_CORNER_MODEL_DIR, CLIFF_CORNER_POOL_SIZE, cliff_corner_xforms, cliff_corner_colors,
-		null, null, "Batch_CliffCorner", 0.0, 650.0)
+	await _scatter_slice(ticker, gate)
+	await _add_gltf_variant_batches(CLIFF_FACE_MODEL_DIR, CLIFF_FACE_POOL_SIZE, cliff_xforms_by_variant, cliff_colors_by_variant,
+		null, null, "Batch_CliffFace", 0.0, 650.0, ticker, gate)
+	await _add_gltf_variant_batches(CLIFF_CORNER_MODEL_DIR, CLIFF_CORNER_POOL_SIZE, cliff_corner_xforms, cliff_corner_colors,
+		null, null, "Batch_CliffCorner", 0.0, 650.0, ticker, gate)
 	
 	# --------------------------------------------------------------------------
 	# 7. AUTHORED WETLAND REEDS (Near water edges & marsh zones)
@@ -717,6 +763,7 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		reed_rng.seed = hash(map_name + "_wetland_reeds")
 		
 		for water in water_areas:
+			await _scatter_slice(ticker, gate)
 			var c = water.get("center", Vector3.ZERO)
 			var he = water.get("half_extents", Vector2(10, 10))
 			var perimeter_points = int(he.x + he.y) * 4
@@ -755,8 +802,9 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 				
 		var fallback_reed_mesh = _build_reed_mesh(prop_scale)
 		var fallback_reed_mat = _get_material(Color(0.28, 0.36, 0.18), 0.75)
-		_add_gltf_variant_batches(REEDS_MODEL_DIR, REEDS_POOL_SIZE, reed_xforms_by_variant, reed_colors_by_variant,
-			fallback_reed_mesh, fallback_reed_mat, "Batch_WetlandReeds", 0.0, 250.0)
+		await _scatter_slice(ticker, gate)
+		await _add_gltf_variant_batches(REEDS_MODEL_DIR, REEDS_POOL_SIZE, reed_xforms_by_variant, reed_colors_by_variant,
+			fallback_reed_mesh, fallback_reed_mat, "Batch_WetlandReeds", 0.0, 250.0, ticker, gate)
 
 static func _is_in_water(pos: Vector3, water_areas: Array, bridges: Array) -> bool:
 	for b in bridges:

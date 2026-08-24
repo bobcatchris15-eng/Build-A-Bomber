@@ -72,16 +72,26 @@ func _apply_pitch():
 # Called ONLY on zoom events — never in _process(). Far blur only: near blur
 # on a panning RTS camera produces a double-blur artifact that reads as a
 # lens scratch rather than depth.
+#
+# VISUAL polish 2026-08-23: tilt-shift lightened a lot. The previous
+# (height + 30.0) / lerp(10..50) values put the focus band right at the
+# playable area and made the soft falloff quite wide, which read as
+# "everything past the front units is mush" at tactical zoom. Pushed
+# the band well past the visible map (height + 150) and narrowed the
+# transition (lerp 3..12) so the effect is a subtle hint of falloff at
+# the far horizon rather than a band across the play area. If even this
+# is too much, set dof_blur_far_enabled = false on the CameraAttributes
+# in Battle.tscn and the camera's writes here become no-ops.
 func _apply_dof_distances():
 	if _cam_attributes == null:
 		return
 	# Ground level is always near world origin in Kitbash Command.
 	# Focus on the ground plane; the far blur fades everything above it.
-	_cam_attributes.dof_blur_far_distance = height + 30.0
+	_cam_attributes.dof_blur_far_distance = height + 150.0
 	# Transition width: wider at max zoom so the band is legible at distance,
 	# narrower when close so the units at mid-height stay sharp.
 	var t = (height - min_height) / (max_height - min_height)
-	_cam_attributes.dof_blur_far_transition = lerp(10.0, 50.0, t)
+	_cam_attributes.dof_blur_far_transition = lerp(3.0, 12.0, t)
 
 
 # Pure function (no Input/viewport reads) so it's directly testable headless -

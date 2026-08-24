@@ -9,16 +9,16 @@ All future code changes and feature additions must adhere strictly to the rules 
 ## 1. Engine & Environment Configuration
 - **Godot Version**: `4.7.1-stable` (Win64 binaries are bundled in the `prototype/` directory).
 - **Primary Directories**:
-  - `res://scripts/`: Production game logic and controllers.
+  - `res://scripts/`: Production game logic and controllers (`scripts/battle/` holds everything match-side).
   - `res://scenes/`: Game scenes (`.tscn`).
-  - `res://tests/`: Headless automated test suites (extend `suite_base.gd`).
-  - `res://tools/`: Development, baking, and validation utility scripts.
-  - `res://assets/blueprints/default_roster/`: Read-only pre-made player and enemy design files.
+  - `res://tools/`: Development, baking, and validation utility scripts — including the headless `probe_*.gd` scripts, which are the de-facto regression harness since the automated test suite was deleted on 2026-08-10.
+  - `res://assets/blueprints/default_roster/`: Read-only pre-made player design files.
+  - `res://data/loadout/`, `res://data/enemy/`: Build-palette / tutorial / enemy AI blueprints.
 
 ---
 
 ## 2. GDScript Style Guide & Conventions
-Follow Godotâ€™s official GDScript guidelines with the following additions:
+Follow Godot's official GDScript guidelines with the following additions:
 
 ### 2.1 Formatting & Indentation
 - **Indentation**: Use **tabs** for indentation (Godot editor default). Do not use spaces.
@@ -62,9 +62,9 @@ Organize script contents in this order:
 ## 3. High-Level Systems & Architectural Rules
 
 ### 3.1 Asynchronous Scene Transitions (`SceneRouter`)
-- **GDScript Compilation Delay**: Loading large scenes (`Skirmish.tscn`, `MainLab.tscn`) stalls the main thread due to recursive script compilation of `preload()` graphs.
+- **GDScript Compilation Delay**: Loading large scenes (`Battle.tscn`, `MainLab.tscn`) stalls the main thread due to recursive script compilation of `preload()` graphs.
 - **Rule**: Never load heavy scenes synchronously using `get_tree().change_scene_to_file()`.
-- **Instruction**: Use the `SceneRouter` autoload: `SceneRouter.change_scene_async(target_scene_path)`. The router parses script preloads and compiles them progressively frame-by-frame, keeping the throbber responsive.
+- **Instruction**: Use the `SceneRouter` autoload: `SceneRouter.goto(path)` or `SceneRouter.change_scene_async(target_scene_path)`. The router parses script preloads and compiles them progressively frame-by-frame, keeping the throbber responsive.
 
 ### 3.2 Blueprint Serialization & Pathing
 - **Roster vs. Scratch splits**:
@@ -74,7 +74,7 @@ Organize script contents in this order:
 - **Rule**: `blueprint_manager.gd` is the single source of truth for loading, serialization, and reconstruction of designs. Always use its helper functions.
 
 ### 3.3 Combat, Damage, & Custom Mounts
-- **Threshold Model**: Resolves in `damage_resolver.gd`. Hits below an armor threshold deal chip damage (15% of reduced damage). Hits $\ge 4\times$ threshold bypass armor reduction.
+- **Threshold Model**: Resolves in `damage_resolver.gd`. Hits below an armor threshold deal chip damage (15% of reduced damage). Hits at 4x threshold or more start blending the armor reduction toward zero (see `BRUTE_FORCE_RATIO`).
 - **Subsystem Stripping**: 35% of damage impacts module attachments directly, potentially stripping weapons or disabling locomotion.
 - **Sponsons (Vertical Mounting)**: Sponsons align direct-fire weapons outboard on near-vertical walls via `Basis.looking_at(outboard, Vector3.UP)`.
   - Sponson-capable weapons use a low-profile faceted housing blister (`sponson_blister.glb`).
@@ -83,12 +83,10 @@ Organize script contents in this order:
 
 ### 3.4 Procedural Structural Modules
 - **Scale Isolation**: Girders, wedges, blocks, and plates must not be scaled using standard `Node3D.scale` properties, as this stretches textures and hardware details (screws, collars).
-- **Rule**: Send structural scales to the `struct_scale` metadata/property, keep `Node3D.scale` at `(1.0, 1.0, 1.0)`, and trigger a mesh re-bake. The body re-tessellates procedurally, and structural details are instanced at a $1:1$ ratio.
+- **Rule**: Send structural scales to the `struct_scale` metadata/property, keep `Node3D.scale` at `(1.0, 1.0, 1.0)`, and trigger a mesh re-bake. The body re-tessellates procedurally, and structural details are instanced at a 1:1 ratio.
 
-
-
-### 3.6 Hull Data Flow (catalog size vs. fitted AABB)
-- **The catalog size field is REFERENCE metadata, not placement geometry.** It is used by weight tiers (get_hull_size_tier), the locomotion module-reference (catalog_size in layout ctx), REFERENCE_HULL_SIZE for legacy fallbacks, and a few stat-anchor roles. It is NOT used for the hull's collider, the ase_hull_size meta, or the visual mesh placement.
+### 3.5 Hull Data Flow (catalog size vs. fitted AABB)
+- **The catalog size field is REFERENCE metadata, not placement geometry.** It is used by weight tiers (get_hull_size_tier), the locomotion module-reference (catalog_size in layout ctx), REFERENCE_HULL_SIZE for legacy fallbacks, and a few stat-anchor roles. It is NOT used for the hull's collider, the base_hull_size meta, or the visual mesh placement.
 - **The fitted AABB is the source of truth for placement.** Compute it via ModuleCatalog.get_hull_fitted_aabb(hull_type_id, mesh) (or get_fitted_aabb_from_fit(mesh, fit_dict) when the fit dict is already on hand). This is the AABB the visible mesh occupies in hull-local space, after get_hull_mesh_fit()'s orientation correction and per-axis scaling.
 - **Where the fitted AABB must flow:**
   - BoxShape3D.size on the hull's CollisionShape3D
@@ -97,38 +95,34 @@ Organize script contents in this order:
 - **Where the catalog size is still the right value:**
   - Vector3(ModuleCatalog.REFERENCE_HULL_SIZE) for the "no hull loaded" safety-net default (was hard-coded Vector3(4, 1, 6))
   - get_running_gear_size(hull_size) reads base_hull_size, not catalog
-  - Any new code that needs a hull dimension should ask hull.get_meta("base_hull_size") first; fall back to the catalog only if the meta is missing (which means the hull was constructed without going through _place_hull_from_ui or econstruct_vehicle)
-- **When refitting a hull (armor change, scale, hull swap), every consumer has to refit together.** The collider's BoxShape3D.size, the ase_hull_size meta, hull.position.y, and the HullSurface trimesh MUST be updated in the same call. update_hull_appearance() is the one place that handles visual + collider + meta together; the gizmo's _apply_scale_to_node is the one place that handles scale + trimesh-rebuild together. New code paths that change the hull's visual must go through one of these or follow the same pattern.
-
- & Practices
-
-### 4.1 Running Tests
-- **Wrapper Scripts**: Always run tests using `./run_tests.ps1` (Windows) or `./run_tests.sh` (Linux/Mac/Git Bash).
-- **Why**: Running raw `run_tests.gd` headless bypasses the resource import phase. A stale `.godot` cache causes confusing script compilation errors when script autoloads or class names change.
-- **Compile Verification**: After editing, run compile validation:
-  ```bash
-  ./Godot_v4.7.1-stable_win64_console.exe --headless --script tools/compile_check_all.gd
-  ```
-
-### 4.2 Test Order & Manifest
-- **Execution Order Flakes**: Several navigation mesh and Recast-bake suites flake due to shared-process memory leak or nondeterminism.
-- **Rule**: Pinned execution order is required. Do not sort or randomize the `SUITE_ORDER` list in `run_tests.gd`.
-- **Adding a Test**: Add your suite function to the correct category in `prototype/tests/` (e.g., `test_weapons_and_damage.gd`), then register the file category and function name under `SUITE_ORDER` in `run_tests.gd`.
-- **Quarantine Retries**: The test driver allows up to 2 attempts per suite to shield against navmesh flakes. Treat only consecutive failures as real breaks.
-
-### 4.3 Golden Locomotion Layouts
-- **Layout Parity**: Metrics for locomotion mount coordinates across three hull sizes are frozen under `GOLDEN_LOCOMOTION_LAYOUT` in `res://tests/suite_base.gd`.
-- **Rule**: Refactoring module placement must not alter the layout layout coordinates. Any intentional coordinate change must update the golden fixture in its own commit, with a clear explanation of the visual improvement.
+  - Any new code that needs a hull dimension should ask hull.get_meta("base_hull_size") first; fall back to the catalog only if the meta is missing (which means the hull was constructed without going through _place_hull_from_ui or reconstruct_vehicle)
+- **When refitting a hull (armor change, scale, hull swap), every consumer has to refit together.** The collider's BoxShape3D.size, the base_hull_size meta, hull.position.y, and the HullSurface trimesh MUST be updated in the same call. update_hull_appearance() is the one place that handles visual + collider + meta together; the gizmo's _apply_scale_to_node is the one place that handles scale + trimesh-rebuild together. New code paths that change the hull's visual must go through one of these or follow the same pattern.
 
 ---
 
+## 4. Tooling & Practices
+
+### 4.1 Verification (no automated test suite)
+- The headless suite (`run_tests.{ps1,sh,gd}`, `res://tests/`, `suite_base.gd` golden fixtures) was **deleted on 2026-08-10** during the battle-system unification. Do not reference it; do not try to revive it without asking.
+- **Compile verification after edits**: run the targeted parse check first — put your touched scripts in `tools/compile_check_changed.gd`'s `FILES` list:
+  ```bash
+  ./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script res://tools/compile_check_changed.gd --quit
+  ```
+  Use `tools/compile_check_all.gd` only when something structural changed (autoloads, `class_name`s). It is slow — observed 20+ minutes — and Godot block-buffers stdout when piped, so always pass `--quit`/`--path`.
+- **Behavioral checks**: `tools/probe_*.gd` are one-off SceneTree scripts that boot a slice of the game headlessly and print findings. Run pattern: `--headless --path . --script res://tools/probe_<area>.gd --quit`. Write a new probe rather than a new suite.
+- A stale `.godot` import cache breaks headless runs with a misleading `Identifier "X" not declared`; reimport with `--headless --editor --import` first.
+
+### 4.2 Locomotion Layout Stability
+- `module_placer.gd` computes locomotion station positions as pure functions of hull size. The old golden fixture (`GOLDEN_LOCOMOTION_LAYOUT` in `res://tests/suite_base.gd`) went with the deleted test suite, but the stability policy stands: do not alter placement coordinates casually, and call out any intentional change in the commit message / PROGRESS.md.
+
+---
 ## 5. Deprecated & Superseded Systems (DO NOT USE)
 
 Be aware of superseded files and patterns. Do not use, revive, or replicate them:
 
 1. **`res://scripts/battle_unit.gd` (DELETED, 2026-08-10)**:
    - **Production Status**: Retired in the battle-system unification's Phase 4. New combat work goes in `res://scripts/battle/units/unit.gd` + `damage_model.gd` + `unit_assembly.gd` + `boost_controller.gd`.
-   - **Test Exception**: The damage-model test suites that used `BattleUnitScript` as a full unit fixture were retired in the same pass per Chris's "nuke those tests entirely" call. The replacement coverage is the `tests/battle/` suite (battle_movement, battle_combat, battle_ai, etc.), which exercises the same surface through the new runtime.
+   - **Coverage Note**: The damage-model suites that used `BattleUnitScript` as a full unit fixture were retired in the same pass per Chris's "nuke those tests entirely" call, along with the whole automated suite. The same surface is now exercised by `tools/probe_battle_*.gd` headless probes and manual playtests.
 2. **`res://scripts/player_vehicle.gd` (DELETED, 2026-08-10)**:
    - **Production Status**: Retired with `battle_unit.gd` and the rest of the pre-unification Test Range. The "minimal CharacterBody3D damage target" pattern it served is gone with the suites that used it.
 3. **`res://scripts/target_dummy.gd` and `res://scenes/TargetDummy.tscn` (DELETED, 2026-08-10)**:

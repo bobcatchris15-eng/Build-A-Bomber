@@ -323,11 +323,11 @@ func _generate_locomotion_radial_tweaks(module: Node3D, data: ModuleDataResource
 		)
 		_action_ring.add_tweak_station(ModuleCatalog.LEG_TWEAK_KEY, "Leg Profile", leg_selector, TweakStations.CLOCK_12)
 
-	if type_id == "helicopter_rotors" or type_id == "pontoon_wheels":
+	if type_id == "helicopter_rotors":
 		var duct_check = CheckBox.new()
-		var duct_label := "Duct" if type_id == "helicopter_rotors" else "Paddle Vanes"
+		var duct_label := "Duct"
 		duct_check.text = duct_label
-		duct_check.button_pressed = bool(settings.get("duct" if type_id == "helicopter_rotors" else "paddle_vanes", false))
+		duct_check.button_pressed = bool(settings.get("duct", false))
 		duct_check.toggled.connect(func(pressed: bool):
 			lab.duct_checkbox.button_pressed = pressed
 			_on_duct_toggled(pressed)
@@ -539,10 +539,6 @@ func _apply_tweaks():
 	elif type_id == "anti_grav_plate":
 		settings["field_strength"] = size_slider.value
 		settings["coil_count"] = int(count_slider.value)
-	elif type_id == "pontoon_wheels":
-		settings["pontoon_size"] = size_slider.value
-		settings["paddle_vanes"] = lab.duct_checkbox.button_pressed
-		settings["num_axles"] = int(count_slider.value)
 
 	root.update_locomotion(type_id, settings)
 	lab.update_stats(hull)

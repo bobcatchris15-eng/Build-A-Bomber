@@ -91,7 +91,7 @@ def generate_texture_plate(name, base_color, color_jitter, base_roughness, rough
     h = periodic_fbm(TEX_SIZE, base_period=8, octaves=4, seed=seed)
     detail_h = periodic_fbm(TEX_SIZE, base_period=32, octaves=3, seed=seed + 99)
     combined_h = h * 0.75 + detail_h * 0.25
-    
+
     # Albedo
     r0, g0, b0 = base_color
     albedo = np.zeros((TEX_SIZE, TEX_SIZE, 3), dtype=np.float32)
@@ -99,21 +99,21 @@ def generate_texture_plate(name, base_color, color_jitter, base_roughness, rough
         jitter = (h - 0.5) * color_jitter[c_idx] + (detail_h - 0.5) * (color_jitter[c_idx] * 0.5)
         albedo[:, :, c_idx] = np.clip(val + jitter, 0.0, 1.0)
     albedo_img = (albedo * 255.0).astype(np.uint8)
-    
+
     # Normal
     normal_img = height_to_normal_map(combined_h, strength=height_strength)
-    
+
     # Roughness + packed Height in green channel for height-aware displacement
     rough = np.clip(base_roughness + (detail_h - 0.5) * roughness_jitter, 0.0, 1.0)
     r_chan = (rough * 255.0).astype(np.uint8)
     g_chan = (combined_h * 255.0).astype(np.uint8)  # packed displacement
     b_chan = np.zeros_like(r_chan)
     rough_img = np.stack([r_chan, g_chan, b_chan], axis=-1)
-    
+
     alb_path = os.path.join(TEXTURES_DIR, f"{name}_albedo.png")
     nrm_path = os.path.join(TEXTURES_DIR, f"{name}_normal.png")
     rgh_path = os.path.join(TEXTURES_DIR, f"{name}_roughness.png")
-    
+
     Image.fromarray(albedo_img, "RGB").save(alb_path)
     Image.fromarray(normal_img, "RGB").save(nrm_path)
     Image.fromarray(rough_img, "RGB").save(rgh_path)
@@ -131,7 +131,7 @@ def main():
     ]
     for v_idx, col in enumerate(ice_colors):
         generate_texture_plate(f"ice_v{v_idx+1}", col, (0.08, 0.06, 0.08), 0.25, 0.15, 1.8, seed=100+v_idx)
-    
+
     # 2. Missing variants for blue_water & shallow_water
     water_colors = [
         (0.18, 0.26, 0.32),
@@ -140,7 +140,7 @@ def main():
     ]
     for v_idx, col in enumerate(water_colors):
         generate_texture_plate(f"blue_water_v{v_idx+1}", col, (0.04, 0.05, 0.06), 0.10, 0.05, 1.2, seed=200+v_idx)
-        
+
     shallow_colors = [
         (0.32, 0.42, 0.44),
         (0.28, 0.39, 0.41),
@@ -148,43 +148,43 @@ def main():
     ]
     for v_idx, col in enumerate(shallow_colors):
         generate_texture_plate(f"shallow_water_v{v_idx+1}", col, (0.05, 0.06, 0.06), 0.15, 0.08, 1.0, seed=250+v_idx)
-        
+
     # 3. New surface types
     # Dirt / Ploughed
     dirt_colors = [(0.32, 0.25, 0.18), (0.29, 0.22, 0.15), (0.35, 0.27, 0.20)]
     for v_idx, col in enumerate(dirt_colors):
         generate_texture_plate(f"dirt_v{v_idx+1}", col, (0.08, 0.06, 0.05), 0.92, 0.08, 2.5, seed=300+v_idx)
     generate_texture_plate("dirt", dirt_colors[0], (0.08, 0.06, 0.05), 0.92, 0.08, 2.5, seed=300)
-    
+
     # Steppe grass / Dry grass
     steppe_colors = [(0.42, 0.44, 0.26), (0.45, 0.47, 0.28), (0.39, 0.41, 0.24)]
     for v_idx, col in enumerate(steppe_colors):
         generate_texture_plate(f"steppe_grass_v{v_idx+1}", col, (0.06, 0.06, 0.05), 0.88, 0.08, 2.0, seed=350+v_idx)
     generate_texture_plate("steppe_grass", steppe_colors[0], (0.06, 0.06, 0.05), 0.88, 0.08, 2.0, seed=350)
-    
+
     dry_colors = [(0.52, 0.48, 0.32), (0.55, 0.50, 0.34), (0.48, 0.44, 0.30)]
     for v_idx, col in enumerate(dry_colors):
         generate_texture_plate(f"dry_grass_v{v_idx+1}", col, (0.07, 0.07, 0.05), 0.90, 0.06, 2.0, seed=400+v_idx)
     generate_texture_plate("dry_grass", dry_colors[0], (0.07, 0.07, 0.05), 0.90, 0.06, 2.0, seed=400)
-    
+
     # Mud (Dark, saturated, glossy per §4)
     mud_colors = [(0.18, 0.13, 0.09), (0.16, 0.11, 0.08), (0.20, 0.15, 0.11)]
     for v_idx, col in enumerate(mud_colors):
         generate_texture_plate(f"mud_v{v_idx+1}", col, (0.05, 0.04, 0.04), 0.25, 0.12, 2.2, seed=450+v_idx)
     generate_texture_plate("mud", mud_colors[0], (0.05, 0.04, 0.04), 0.25, 0.12, 2.2, seed=450)
-    
+
     # Cobble / Paved
     cobble_colors = [(0.38, 0.36, 0.34), (0.35, 0.33, 0.31), (0.41, 0.39, 0.37)]
     for v_idx, col in enumerate(cobble_colors):
         generate_texture_plate(f"cobble_v{v_idx+1}", col, (0.06, 0.06, 0.06), 0.80, 0.10, 3.2, seed=500+v_idx)
     generate_texture_plate("cobble", cobble_colors[0], (0.06, 0.06, 0.06), 0.80, 0.10, 3.2, seed=500)
-    
+
     # Scree (High-contrast stone fragments)
     scree_colors = [(0.44, 0.42, 0.38), (0.40, 0.38, 0.35), (0.47, 0.45, 0.41)]
     for v_idx, col in enumerate(scree_colors):
         generate_texture_plate(f"scree_v{v_idx+1}", col, (0.08, 0.08, 0.08), 0.94, 0.05, 3.5, seed=550+v_idx)
     generate_texture_plate("scree", scree_colors[0], (0.08, 0.08, 0.08), 0.94, 0.05, 3.5, seed=550)
-    
+
     # Volcanic (Dark basalt & ash)
     volcanic_colors = [(0.14, 0.14, 0.15), (0.12, 0.12, 0.13), (0.17, 0.16, 0.18)]
     for v_idx, col in enumerate(volcanic_colors):

@@ -124,7 +124,6 @@ const LOCOMOTION_SIZE_KEY := {
 	"hover_engine": "emv_level",
 	"fixed_wing_engine": "turbine_compression",
 	"screw_drive": "drum_diameter",
-	"pontoon_wheels": "pontoon_size",
 	"ornithopter_wing": "wingspan",
 	"half_track": "tread_width",
 	"rocker_bogie": "wheel_size",

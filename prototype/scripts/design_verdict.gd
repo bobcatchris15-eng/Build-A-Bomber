@@ -208,3 +208,74 @@ static func _round(value) -> String:
 		if count % 3 == 0 and i > 0:
 			out = "," + out
 	return ("-" if n < 0 else "") + out
+
+
+# Derives a high-level combat archetype, rating, and description for the unit profile.
+static func get_combat_archetype(stats: Dictionary) -> Dictionary:
+	if stats.is_empty():
+		return {"role": "UNASSIGNED", "stars": 1, "desc": "Chassis incomplete."}
+
+	var is_harv: bool = bool(stats.get("is_harvester", false))
+	if is_harv:
+		return {"role": "RESOURCE HARVESTER", "stars": 3, "desc": "Specialized logistics & economy vehicle."}
+
+	var dt: Dictionary = stats.get("drivetrain", {})
+	var wr: Dictionary = stats.get("weapon_range", {})
+	var dps: float = float(stats.get("dps", 0.0))
+	var top_spd: float = float(dt.get("top_speed", 0.0))
+	var hp: float = float(stats.get("hull_hp", 0.0))
+	var alpha: Dictionary = stats.get("alpha", {})
+	var per_shot: float = float(alpha.get("per_shot", 0.0))
+	var longest_rng: float = float(wr.get("longest", 0.0))
+	var has_wpn: bool = bool(stats.get("has_weapons", false)) or dps > 0.0
+
+	if not bool(dt.get("has_locomotion", false)):
+		if has_wpn:
+			return {"role": "STATIC DEFENSE TURRET", "stars": 3, "desc": "Immobile fortified weapon platform."}
+		return {"role": "STATIC FOUNDATION", "stars": 1, "desc": "Unarmed static structure."}
+
+	if not has_wpn:
+		if top_spd >= 14.0:
+			return {"role": "FAST RECON / SCOUT", "stars": 3, "desc": "High-speed tactical reconnaissance."}
+		return {"role": "UTILITY / TRANSPORT", "stars": 2, "desc": "Support platform without offensive armament."}
+
+	var role_name := "COMBAT VEHICLE"
+	var desc := "All-round combatant."
+	var stars := 3
+
+	if longest_rng >= 90.0:
+		if hp >= 900.0:
+			role_name = "HEAVY SIEGE ARTILLERY"
+			desc = "Massive range bombardment platform."
+			stars = 5 if dps >= 80.0 else 4
+		else:
+			role_name = "MOBILE BVR ARTILLERY"
+			desc = "Long-range fire support; requires spotter."
+			stars = 4
+	elif per_shot >= 250.0:
+		role_name = "PRECISION TANK DESTROYER"
+		desc = "Heavy single-shot armor penetrator."
+		stars = 5 if top_spd >= 10.0 else 4
+	elif top_spd >= 16.0:
+		if dps >= 60.0:
+			role_name = "FAST STRIKE SKIRMISHER"
+			desc = "High-mobility hit-and-run raider."
+			stars = 4
+		else:
+			role_name = "LIGHT FLANKING RAIDER"
+			desc = "Fast harassment unit."
+			stars = 3
+	elif hp >= 1200.0:
+		role_name = "HEAVY FRONTLINE JUGGERNAUT"
+		desc = "Absorbs incoming fire while pushing objectives."
+		stars = 5 if dps >= 70.0 else 4
+	elif dps >= 90.0:
+		role_name = "HIGH-DPS ASSAULT PLATFORM"
+		desc = "Devastating close/medium range firepower."
+		stars = 4
+	else:
+		role_name = "MEDIUM BATTLE UNIT"
+		desc = "Balanced frontline combatant."
+		stars = 3
+
+	return {"role": role_name, "stars": stars, "desc": desc}

@@ -73,7 +73,7 @@ On a first run the menu shows a single card instead: a 15-step guided tutorial t
 - **Fog of war** — vision comes from the hull baseline plus sensor modules; holding high ground pays off in both sight and armor penetration.
 - A default loadout ships in `prototype/data/loadout/` and the enemy AI's roster in `prototype/data/enemy/`, both in the same JSON blueprint format the Design Lab saves to `user://blueprints/`.
 
-> Faction *passives* no longer exist. Ten hand-authored factions each pairing a visual identity with a mechanical bonus were replaced by the player-authored Livery, which is cosmetic only — so two identical designs fight identically whatever colours they wear. Every stat now comes from what you actually built.
+> Faction *passives* were retired from the player loop: Livery (cosmetic paint authoring) replaced the old ten-faction picker, so two identical player designs fight identically whatever colours they wear. The ten-faction catalog itself still exists in `prototype/scripts/faction_catalog.gd` as a visual/material identity library — and its `armor_weight_mult` is still read by `armor_paint.gd`, so enemy roster designs carrying an old faction id do get their armor-paint weight adjusted.
 
 ## Checks
 
@@ -102,7 +102,7 @@ cd prototype
 "/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --python tools/blender/build_meshes.py          # parts, foundations, buildings
 ```
 
-`build_vehicle_hulls.py` (with `hull_forge.py`) writes `assets/models/hulls/*.glb` plus a matching `.json` sidecar per hull and its convex collision decomposition. `build_meshes.py` writes `assets/models/parts/*.glb` (barrels, breeches, drums, domes, missiles, wheels, legs, rings — assembled by `visual_builder.gd` per weapon type, tweak-deformable), the foundation hulls, and buildings. Its old `generate_hulls()` is retired — see [`prototype/docs/HULL_NAMING.md`](prototype/docs/HULL_NAMING.md) for the Blender↔Godot axis chain and the rule that **forward is local −Z**. `visual_builder.gd` falls back to procedural primitives for any part not yet authored.
+`build_vehicle_hulls.py` (with `hull_forge.py`) writes `assets/models/hulls/*.glb` plus a matching `.json` sidecar per hull; the convex collision decomposition (`<id>_collision.res`) is baked separately by `tools/bake_hull_roster.gd`. `build_meshes.py` writes `assets/models/parts/*.glb` (barrels, breeches, drums, domes, missiles, wheels, legs, rings — assembled by `visual_builder.gd` per weapon type, tweak-deformable), the foundation hulls, and buildings. Its old `generate_hulls()` is retired — see [`prototype/docs/HULL_NAMING.md`](prototype/docs/HULL_NAMING.md) for the Blender↔Godot axis chain and the rule that **forward is local −Z**. `visual_builder.gd` falls back to procedural primitives for any part not yet authored.
 
 The shared hull surface texture set (panel seams, rivets, grain, corrosion — pure value, no hue, so livery zone colours multiply over it cleanly) is generated separately:
 

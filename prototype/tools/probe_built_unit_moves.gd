@@ -36,6 +36,15 @@ func _init():
 			factory = s
 			break
 	if factory == null:
+		# The default skirmish boot no longer guarantees a player manufactory
+		# on every map, so place one the same way production completion does.
+		# Without this the probe could not run at all (NO FACTORY bail).
+		print("no player manufactory at boot - placing one via _place_structure")
+		var site: Vector3 = battle.snap_to_navmesh(Vector3(0, 0, 0))
+		factory = battle._place_structure("light_manufactory", 0, site)
+		for _i in range(10):
+			await process_frame
+	if factory == null:
 		print("NO FACTORY")
 		quit(1)
 		return
@@ -54,7 +63,11 @@ func _init():
 	for _i in range(5):
 		await process_frame
 
-	var destination := Vector3(0, 0, 0)
+	# Destination: a navmesh-snapped point ~100 m out from wherever the unit
+	# actually spawned. The old hardcoded (0,0,0) sat 9 m from the factory
+	# exit once maps got world_scale'd, leaving the probe nothing to measure.
+	var destination: Vector3 = battle.snap_to_navmesh(
+		unit.global_position + Vector3(100.0, 0.0, 40.0))
 	if is_instance_valid(unit.nav_agent):
 		var m: RID = unit.nav_agent.get_navigation_map()
 		print("unit nav_map=", m, " ground=", battle.get_ground_nav_map(),
@@ -68,11 +81,17 @@ func _init():
 		print("path on GROUND map: size=", gp.size())
 	battle.orders.move([unit], destination)
 
-	var start_dist: float = unit.global_position.distance_to(destination)
+	# Horizontal distance only. On world_scale'd maps the ground plane sits
+	# tens of metres below y=0, so a 3D distance_to() never converges even for
+	# a unit parked exactly on the destination (the false FAIL this probe used
+	# to report).
+	var flat_dist := func(p: Vector3) -> float:
+		return Vector2(p.x - destination.x, p.z - destination.z).length()
+	var start_dist: float = flat_dist.call(unit.global_position)
 	var best: float = start_dist
 	for tick in range(3000):
 		await process_frame
-		var d: float = unit.global_position.distance_to(destination)
+		var d: float = flat_dist.call(unit.global_position)
 		best = min(best, d)
 		if tick % 500 == 0:
 			var st = -1
@@ -99,6 +118,13 @@ func _ground_blueprint(_battle) -> Dictionary:
 	var dir := DirAccess.open("res://data/loadout")
 	if dir == null:
 		return {}
+	# Preferred: an ore hauler (the original probe subject). The roster has
+	# renamed/re-balanced these more than once, so fall back to ANY ground
+	# wheels design rather than failing the probe on naming drift. NOT a
+	# harvester though - the harvester FSM overrides move orders, which makes
+	# the convergence test meaningless (magpie_ore_hauler taught us that).
+	var fallback := {}
+	var harvester_fallback := {}
 	for file in dir.get_files():
 		if not file.ends_with(".json"):
 			continue
@@ -108,7 +134,21 @@ func _ground_blueprint(_battle) -> Dictionary:
 			continue
 		var loco = parsed.get("locomotion", {})
 		var type_id: String = str(loco.get("type_id", "")) if typeof(loco) == TYPE_DICTIONARY else str(loco)
-		if type_id == "wheels" and file.begins_with("ore_"):
+		if type_id != "wheels":
+			continue
+		var is_harvester := false
+		var modules = parsed.get("modules", [])
+		if modules is Array:
+			for m in modules:
+				if m is Dictionary and str(m.get("type_id", "")) == "resource_harvester":
+					is_harvester = true
+					break
+		if file.begins_with("ore_"):
 			print("using blueprint ", file, " locomotion=", type_id)
 			return parsed
-	return {}
+		if fallback.is_empty() and not is_harvester:
+			fallback = parsed
+			print("fallback blueprint candidate ", file, " locomotion=", type_id)
+		if harvester_fallback.is_empty() and is_harvester:
+			harvester_fallback = parsed
+	return fallback if not fallback.is_empty() else harvester_fallback

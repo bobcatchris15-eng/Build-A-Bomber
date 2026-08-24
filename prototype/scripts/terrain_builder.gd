@@ -159,6 +159,43 @@ const NAV_TILES_PER_AXIS: float = 12.0
 # codebase already accepts for a full four-surface load.
 const NAV_TILE_VOXELS_PER_AXIS: float = 110.0
 
+# Tiled-bake border, in voxels. This is the fix for "units stop at an
+# arbitrary straight line / route off on a tangent along it" (2026-08-23
+# playtest).
+#
+# THE BUG. Chunk 21 split each surface into per-tile regions but baked each
+# tile as a STANDALONE ISLAND: no filter_baking_aabb, no border_size, just
+# the bucket of triangles whose first vertex fell in the tile. Recast then
+# applied agent_radius erosion to the tile's artificial perimeter - every
+# interior seam lost up to one snapped agent radius of walkable surface ON
+# EACH SIDE - and the two edges were quantized independently because each
+# bake anchors its voxel grid at its own bounds. The only thing stitching
+# the tiles back together was map edge_connection_margin at 4x cell_size,
+# a fallback connector for NEARBY parallel edges. Wherever the erosion and
+# quantization produced a gap wider than that margin, the seam simply did
+# not connect: a hard, invisible, perfectly straight wall across open
+# terrain. Where it connected in only a few places, units detoured along
+# the seam to the surviving portal - the "tangent" behaviour.
+#
+# THE FIX is Godot's chunk-baking contract (NavigationMesh.border_size):
+#   * each tile's bake AABB is its nominal rect GROWN by this border, so the
+#     bake sees the neighbouring tiles' geometry;
+#   * border_size discards that same ring from the FINISHED surface, so
+#     agent_radius erosion and contour simplification happen in the
+#     discarded ring instead of at the shared seam;
+#   * the remaining surface ends exactly at the nominal rect on both sides,
+#     so adjacent tiles' edges coincide and the navigation map merges them
+#     directly instead of relying on the margin fallback.
+#
+# 6 cells: must strictly exceed the snapped agent radius (always <= 1 voxel,
+# see NAV_AGENT_RADIUS/_snap_up_to_voxel) with headroom for edge_max_error
+# simplification (1.0) - 6 covers both at every cell_size the project
+# produces. Kept an exact cell multiple so the border clip lands EXACTLY on
+# the nominal rect (border_size is ceiled to whole cells internally; the
+# clip plane is measured from the AABB edge, so (rect - k*cell) + k*cell =
+# rect regardless of where the tile sits on any absolute grid).
+const NAV_TILE_BORDER_CELLS: float = 6.0
+
 static func _nav_tile_size(map_def: Dictionary) -> float:
 	var half: float = map_def.get("map_half_extents", 80.0)
 	return maxf(NAV_TILE_SIZE_BASE, (half * 2.0) / NAV_TILES_PER_AXIS)
@@ -190,12 +227,21 @@ static func _nav_tile_rects(map_def: Dictionary) -> Array:
 		x = x1
 	return rects
 
-# Splits a flat quad-soup (verts is 6 entries per quad - two triangles, see
-# _add_nav_quad) into one PackedVector3Array per tile rect, bucketed by each
-# triangle's first vertex. A quad never straddles a tile boundary - every
-# quad emitter in this file sweeps in GRID_CELL-ish steps far smaller than a
-# tile, so "first vertex" is not an approximation of which tile a quad
-# belongs to, it IS the tile.
+# Splits a flat quad-soup (verts is 3 entries per triangle, see
+# _add_nav_quad) into one PackedVector3Array per tile rect.
+#
+# `pad` (the tiled bake border, NAV_TILE_BORDER_CELLS cells, or 0 for probe
+# callers inspecting the raw layout) widens every tile's bucket: a triangle
+# goes into EVERY tile whose rect-grown-by-pad intersects the triangle's
+# bounds. This is the other half of the seam fix documented at
+# NAV_TILE_BORDER_CELLS - a tile's bake must see the geometry on the FAR
+# side of its seams, or the border discard has nothing to erode into and
+# the seam edge erodes instead. Two consequences of the old first-vertex
+# ownership mattered here: it was already false that "a quad never
+# straddles a tile boundary" (at large map scale tile_size/grid_cell =
+# 12.5, so every second boundary cuts a quad), and selective rebakes keyed
+# on nominal rects missed geometry just over the line. Both are moot once
+# membership is an intersection test.
 #
 # Indexes directly via floor division rather than scanning every rect per
 # triangle (an O(triangles x tiles) first version of this function, back
@@ -204,7 +250,7 @@ static func _nav_tile_rects(map_def: Dictionary) -> Array:
 # the grid _nav_tile_rects() produces - a regular row-major sweep from
 # (-half,-half) in `tile_size` steps - so cols/rows derived from that same
 # tile_size reproduce the exact same indexing without re-deriving rects.
-static func _bucket_verts_by_tile(verts: PackedVector3Array, map_def: Dictionary, rects: Array) -> Array:
+static func _bucket_verts_by_tile(verts: PackedVector3Array, map_def: Dictionary, rects: Array, pad: float = 0.0) -> Array:
 	var buckets: Array = []
 	buckets.resize(rects.size())
 	for i in range(buckets.size()):
@@ -218,14 +264,23 @@ static func _bucket_verts_by_tile(verts: PackedVector3Array, map_def: Dictionary
 	var vcount := verts.size()
 	var i := 0
 	while i + 2 < vcount:
-		var p: Vector3 = verts[i]
-		var col: int = clampi(int(floor((p.x + half) / tile_size)), 0, cols - 1)
-		var row: int = clampi(int(floor((p.z + half) / tile_size)), 0, rows - 1)
-		var idx: int = col * rows + row
-		if idx >= 0 and idx < buckets.size():
-			var bucket: PackedVector3Array = buckets[idx]
-			bucket.append(verts[i]); bucket.append(verts[i + 1]); bucket.append(verts[i + 2])
-			buckets[idx] = bucket
+		var a: Vector3 = verts[i]
+		var b: Vector3 = verts[i + 1]
+		var c: Vector3 = verts[i + 2]
+		var min_x: float = minf(a.x, minf(b.x, c.x)) - pad
+		var max_x: float = maxf(a.x, maxf(b.x, c.x)) + pad
+		var min_z: float = minf(a.z, minf(b.z, c.z)) - pad
+		var max_z: float = maxf(a.z, maxf(b.z, c.z)) + pad
+		var c0: int = clampi(int(floor((min_x + half) / tile_size)), 0, cols - 1)
+		var c1: int = clampi(int(floor((max_x + half) / tile_size)), 0, cols - 1)
+		var r0: int = clampi(int(floor((min_z + half) / tile_size)), 0, rows - 1)
+		var r1: int = clampi(int(floor((max_z + half) / tile_size)), 0, rows - 1)
+		for col in range(c0, c1 + 1):
+			for row in range(r0, r1 + 1):
+				var idx: int = col * rows + row
+				var bucket: PackedVector3Array = buckets[idx]
+				bucket.append(a); bucket.append(b); bucket.append(c)
+				buckets[idx] = bucket
 		i += 3
 	return buckets
 
@@ -1152,17 +1207,35 @@ static func _snap_down_to_voxel(value: float, unit: float) -> float:
 # rebake, and the async tiled load path) and they have already drifted apart
 # once - the comment in _bake_region_async() recording that the same fixes
 # were needed in both places is what this exists to make unnecessary.
-static func _configure_nav_mesh(nav_mesh: NavigationMesh, cell_size: float, agent_radius: float) -> void:
+#
+# `tile_rect` is the seam fix (NAV_TILE_BORDER_CELLS): when non-null the bake
+# is one tile of a tiled surface, and the mesh is configured with Godot's
+# chunk-baking contract - filter_baking_aabb grown by the border, border_size
+# to discard that ring from the finished surface, edge_max_error at the 1.0
+# the docs require for aligned tiled edges. Non-tiled callers (water,
+# deep_water, the legacy whole-map rebakes) pass null and get exactly the
+# pre-tiling configuration.
+static func _configure_nav_mesh(nav_mesh: NavigationMesh, cell_size: float, agent_radius: float, tile_rect: Variant = null) -> void:
 	nav_mesh.cell_size = cell_size
 	nav_mesh.cell_height = NAV_CELL_HEIGHT
 	nav_mesh.agent_max_climb = _snap_down_to_voxel(cell_size * AGENT_MAX_CLIMB_CELLS, NAV_CELL_HEIGHT)
 	nav_mesh.agent_radius = _snap_up_to_voxel(agent_radius, cell_size)
+	if tile_rect != null:
+		var border: float = cell_size * NAV_TILE_BORDER_CELLS
+		# Y span deliberately dwarfs any terrain amplitude the heightfield
+		# can produce - the AABB is an XZ chunk boundary, not a height clip.
+		nav_mesh.filter_baking_aabb = AABB(
+			Vector3(tile_rect.x0 - border, -500.0, tile_rect.z0 - border),
+			Vector3((tile_rect.x1 - tile_rect.x0) + 2.0 * border, 1000.0,
+				(tile_rect.z1 - tile_rect.z0) + 2.0 * border))
+		nav_mesh.border_size = border
+		nav_mesh.edge_max_error = 1.0
 
-static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float) -> NavigationMesh:
+static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float, tile_rect: Variant = null) -> NavigationMesh:
 	var nav_mesh = NavigationMesh.new()
 	if verts.is_empty():
 		return nav_mesh
-	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS)
+	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS, tile_rect)
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
@@ -1216,7 +1289,7 @@ static func rebake_ground_and_amphibious_async(map_def: Dictionary, extra_holes:
 	_bake_region_async(ground_region, ground_verts, cell_size, remaining, on_ready)
 	_bake_region_async(amphibious_region, amphibious_verts, cell_size, remaining, on_ready)
 
-static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size: float, remaining: Dictionary, on_ready: Callable) -> void:
+static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size: float, remaining: Dictionary, on_ready: Callable, tile_rect: Variant = null) -> void:
 	var nav_mesh = NavigationMesh.new()
 	if verts.is_empty():
 		NavigationServer3D.region_set_navigation_mesh(region, nav_mesh)
@@ -1224,7 +1297,7 @@ static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size
 		if remaining["n"] <= 0 and on_ready.is_valid():
 			on_ready.call()
 		return
-	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS)
+	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS, tile_rect)
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data_async(nav_mesh, source, func():
@@ -1323,8 +1396,11 @@ static func _rebuild_thread(map_def: Dictionary, extra_holes: Array,
 	var grid_cell: float = _nav_grid_cell(map_def) * grid_cell_mult
 	var ground_verts = _build_ground_faces(map_def, extra_holes, grid_cell)
 	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes, grid_cell)
-	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects)
-	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects)
+	# Buckets padded by the bake border, so every tile's bake sees the far
+	# side of its own seams (see NAV_TILE_BORDER_CELLS).
+	var pad: float = tile_cell_size * NAV_TILE_BORDER_CELLS
+	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects, pad)
+	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects, pad)
 	# Empty list = "rebuild all" - the path a full-rebake caller (boot,
 	# building-destroyed) takes.
 	var indices: Array = affected_tile_indices
@@ -1335,8 +1411,8 @@ static func _rebuild_thread(map_def: Dictionary, extra_holes: Array,
 	# Each tile dispatches two bakes (ground + amphibious).
 	var remaining = {"n": indices.size() * 2}
 	for i in indices:
-		_bake_region_async(ground_regions[i], ground_buckets[i], tile_cell_size, remaining, on_ready)
-		_bake_region_async(amphibious_regions[i], amphibious_buckets[i], tile_cell_size, remaining, on_ready)
+		_bake_region_async(ground_regions[i], ground_buckets[i], tile_cell_size, remaining, on_ready, tile_rects[i])
+		_bake_region_async(amphibious_regions[i], amphibious_buckets[i], tile_cell_size, remaining, on_ready, tile_rects[i])
 	# PR-C: cleanup is done by the on_ready callback (called on main
 	# when the last Recast bake completes) via _cleanup_finished_threads.
 	# We can't call_deferred from a static method, and the thread
@@ -1388,8 +1464,9 @@ static func rebake_ground_amphibious_tiles_sync(map_def: Dictionary, extra_holes
 	var tile_cell_size = _nav_tile_cell_size(map_def)
 	var ground_verts = _build_ground_faces(map_def, extra_holes)
 	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
-	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects)
-	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects)
+	var pad: float = tile_cell_size * NAV_TILE_BORDER_CELLS
+	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects, pad)
+	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects, pad)
 	# Empty list means "rebuild all tiles" - the path a full-rebake
 	# caller would take, used for the boot path or for the "I
 	# destroyed a building, refresh everything" case.
@@ -1399,9 +1476,9 @@ static func rebake_ground_amphibious_tiles_sync(map_def: Dictionary, extra_holes
 		for i in range(tile_rects.size()):
 			indices.append(i)
 	for i in indices:
-		var g_nav := _bake_nav_mesh(ground_buckets[i], tile_cell_size)
+		var g_nav := _bake_nav_mesh(ground_buckets[i], tile_cell_size, tile_rects[i])
 		NavigationServer3D.region_set_navigation_mesh(ground_regions[i], g_nav)
-		var a_nav := _bake_nav_mesh(amphibious_buckets[i], tile_cell_size)
+		var a_nav := _bake_nav_mesh(amphibious_buckets[i], tile_cell_size, tile_rects[i])
 		NavigationServer3D.region_set_navigation_mesh(amphibious_regions[i], a_nav)
 
 
@@ -1421,10 +1498,17 @@ static func tiles_overlapping_hole(map_def: Dictionary, hole: Dictionary) -> Arr
 	var cz: float = float(hole["center"].z)
 	var hx: float = float(hole["half_extents"].x)
 	var hz: float = float(hole["half_extents"].y)
-	var hole_x0: float = cx - hx
-	var hole_x1: float = cx + hx
-	var hole_z0: float = cz - hz
-	var hole_z1: float = cz + hz
+	# Expand by the bake border plus one source-grid cell: a tile must
+	# rebake whenever changed geometry can fall inside its PADDED bake AABB
+	# (border) or inside a source quad that straddles into that AABB
+	# (grid_cell). Without this, a building placed just over a seam left
+	# the far tile's bake reading stale geometry - the selective-rebake
+	# version of the seam bug NAV_TILE_BORDER_CELLS fixes structurally.
+	var pad: float = _nav_tile_cell_size(map_def) * NAV_TILE_BORDER_CELLS + _nav_grid_cell(map_def)
+	var hole_x0: float = cx - hx - pad
+	var hole_x1: float = cx + hx + pad
+	var hole_z0: float = cz - hz - pad
+	var hole_z1: float = cz + hz + pad
 	var out: Array = []
 	for i in range(tile_rects.size()):
 		var t = tile_rects[i]
@@ -1451,8 +1535,13 @@ static func build_ground_amphibious_tiles(map_def: Dictionary, extra_holes: Arra
 	var tile_cell_size = _nav_tile_cell_size(map_def)
 	var ground_verts = _build_ground_faces(map_def, extra_holes)
 	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
-	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects)
-	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects)
+	# Padded buckets + per-tile bake AABB/border: the seam fix documented at
+	# NAV_TILE_BORDER_CELLS. `rect` rides each pending entry so the deferred
+	# bake paths (bake_pending_entry / _async) can apply the same config the
+	# sync branch applies inline here.
+	var pad: float = tile_cell_size * NAV_TILE_BORDER_CELLS
+	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects, pad)
+	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects, pad)
 
 	var ground_regions: Array = []
 	var amphibious_regions: Array = []
@@ -1465,11 +1554,11 @@ static func build_ground_amphibious_tiles(map_def: Dictionary, extra_holes: Arra
 		NavigationServer3D.region_set_map(a_region, amphibious_map)
 		amphibious_regions.append(a_region)
 		if sync:
-			NavigationServer3D.region_set_navigation_mesh(g_region, _bake_nav_mesh(ground_buckets[i], tile_cell_size))
-			NavigationServer3D.region_set_navigation_mesh(a_region, _bake_nav_mesh(amphibious_buckets[i], tile_cell_size))
+			NavigationServer3D.region_set_navigation_mesh(g_region, _bake_nav_mesh(ground_buckets[i], tile_cell_size, tile_rects[i]))
+			NavigationServer3D.region_set_navigation_mesh(a_region, _bake_nav_mesh(amphibious_buckets[i], tile_cell_size, tile_rects[i]))
 		else:
-			pending.append({"region": g_region, "verts": ground_buckets[i], "label": "Surveying ground", "cell_size": tile_cell_size})
-			pending.append({"region": a_region, "verts": amphibious_buckets[i], "label": "Marking fording points", "cell_size": tile_cell_size})
+			pending.append({"region": g_region, "verts": ground_buckets[i], "label": "Surveying ground", "cell_size": tile_cell_size, "rect": tile_rects[i]})
+			pending.append({"region": a_region, "verts": amphibious_buckets[i], "label": "Marking fording points", "cell_size": tile_cell_size, "rect": tile_rects[i]})
 
 	return {"ground_regions": ground_regions, "amphibious_regions": amphibious_regions,
 		"tile_rects": tile_rects, "pending": pending, "cell_size": tile_cell_size}
@@ -1528,20 +1617,20 @@ static func _create_nav_maps(map_def: Dictionary) -> Dictionary:
 		NavigationServer3D.map_set_cell_size(m, entry[1])
 		NavigationServer3D.map_set_cell_height(m, NAV_CELL_HEIGHT)
 		NavigationServer3D.map_set_active(m, true)
-		# Chunk 21 fallout: NavigationServer3D only auto-connects two regions
-		# on the same map if their edges land within this margin - default
-		# 0.25. Water/deep_water are still one region each, so this changes
-		# nothing for them, but ground/amphibious are now MANY regions (one
-		# per tile), and each tile is voxelized by an INDEPENDENT Recast
-		# bake - even though the source geometry lines up exactly at a tile
-		# boundary, each bake's own quantization can land the resulting
-		# polygon edge a cell_size or so away from its neighbour's. At
-		# cell_size several units wide, that is routinely bigger than 0.25,
-		# so tiles silently failed to connect at all: every resource node
-		# past the first tile came back unreachable (test_map_*_smoke's
-		# "not reachable by ground navmesh from the nearest base" failures).
-		# Set generously above the quantization error it needs to absorb.
-		NavigationServer3D.map_set_edge_connection_margin(m, entry[1] * 4.0)
+		# Chunk 21 fallout, revisited by the 2026-08-23 seam fix. This margin
+		# is the FALLBACK connector for nearby parallel region edges; it was
+		# 4x cell_size because that had to bridge the erosion+quantization
+		# gap left by baking each tile as a standalone island - and wherever
+		# the gap exceeded it, the seam silently did not connect (the
+		# "arbitrary line units won't cross" playtest bug). With
+		# NAV_TILE_BORDER_CELLS the two sides of a seam end on the same
+		# plane, so the margin only has to absorb residual float noise and
+		# any corner-vertex mismatch: 1.5x a cell. That is deliberately too
+		# small to bridge REAL holes (a genuine obstacle carve is many cells
+		# wide plus agent-radius erosion on each side), which the 4x value
+		# could do at large map scales - bridging a lake shore at a tile
+		# boundary is the same class of wrong as not connecting the seam.
+		NavigationServer3D.map_set_edge_connection_margin(m, entry[1] * 1.5)
 		maps[entry[0]] = m
 	return maps
 
@@ -1607,7 +1696,11 @@ static func bake_pending_entry(entry: Dictionary, cell_size: float = 0.0) -> voi
 	# amphibious tiles and water/deep_water need DIFFERENT cell_size values)
 	# only so any external caller passing the old two-arg form still parses.
 	var effective: float = entry.get("cell_size", cell_size)
-	NavigationServer3D.region_set_navigation_mesh(entry["region"], _bake_nav_mesh(entry["verts"], effective))
+	# Ground/amphibious tile entries carry their rect for the border-bake
+	# config (NAV_TILE_BORDER_CELLS); water entries predate that and get the
+	# plain whole-surface configuration.
+	NavigationServer3D.region_set_navigation_mesh(entry["region"],
+		_bake_nav_mesh(entry["verts"], effective, entry.get("rect", null)))
 
 
 # Async twin of bake_pending_entry(). build_navmeshes_deferred() already
@@ -1627,10 +1720,11 @@ static func bake_pending_entry(entry: Dictionary, cell_size: float = 0.0) -> voi
 static func bake_pending_entry_async(entry: Dictionary, cell_size: float, on_done: Callable) -> void:
 	# See bake_pending_entry()'s matching comment - entries now carry their
 	# own cell_size because ground/amphibious tiles and water/deep_water no
-	# longer share one.
+	# longer share one. Tile entries also carry their rect for the
+	# border-bake config (NAV_TILE_BORDER_CELLS).
 	var effective: float = entry.get("cell_size", cell_size)
 	var nav_mesh = NavigationMesh.new()
-	_configure_nav_mesh(nav_mesh, effective, NAV_AGENT_RADIUS)
+	_configure_nav_mesh(nav_mesh, effective, NAV_AGENT_RADIUS, entry.get("rect", null))
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(entry["verts"], Transform3D.IDENTITY)
 	var region: RID = entry["region"]
@@ -1640,7 +1734,28 @@ static func bake_pending_entry_async(entry: Dictionary, cell_size: float, on_don
 
 # --- Visuals ---
 
-static func spawn_visuals(map_def: Dictionary, parent: Node3D):
+static func spawn_visuals(map_def: Dictionary, parent: Node3D, ticker: Node = null):
+	# Pass a `ticker` node (the loading screen passes itself) to spread this
+	# pass over multiple frames: each sub-phase below checks the same
+	# BUILD_FRAME_BUDGET_MS gate build_ground_visual_mesh() uses, and yields
+	# process_frame when the slice is spent. Without a ticker every branch is
+	# dead and this is exactly the old single-frame synchronous call.
+	#
+	# This function was the second-largest continuous freeze in the world build
+	# (after the ground mesh): merged water, authored obstacles/zones/bridges,
+	# grass clutter, two ambient cluster passes and the slope-rock walk all ran
+	# back to back inside one frame, several seconds on a large map - long
+	# enough that the loading screen's lamps visibly stopped.
+	var deadline_state := {"t": Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)}
+	# The deadline lives in a Dictionary because lambdas capture locals by
+	# value - reassigning a plain local here would advance a private copy and
+	# the gate would fire on every call forever. Mutating the dict's contents
+	# propagates back out.
+	var _slice = func() -> void:
+		if ticker != null and Time.get_ticks_usec() >= deadline_state["t"]:
+			await ticker.get_tree().process_frame
+			deadline_state["t"] = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
+
 	# Snapshot children before scatter so we can tag new terrain props with
 	# the "terrain_debris" group. Buildings use this group to find and
 	# displace overlapping props when placed.
@@ -1649,15 +1764,25 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 		_pre_ids[_c.get_instance_id()] = true
 	var prop_scale = WorldScaleScript.for_map(map_def)
 	_spawn_merged_water(map_def, parent, prop_scale)
+	await _slice.call()
 	for o in map_def.get("obstacles", []):
 		_spawn_obstacle(o, parent, map_def)
+	await _slice.call()
 	for s in map_def.get("surface_zones", []):
-		_spawn_surface_zone(s, parent, prop_scale, map_def)
+		# Each zone builds its own conforming mesh (one height sample per
+		# vertex), so zones are chunked individually AND internally - the
+		# zone mesh builder carries the same budget gate. A zone is itself a
+		# coroutine now, so it must be awaited or the next phases would run
+		# detached underneath it.
+		await _spawn_surface_zone(s, parent, prop_scale, map_def, ticker)
+		await _slice.call()
 	for sw in map_def.get("shallow_water_areas", []):
 		_spawn_shallow_water_marker(sw, parent, prop_scale)
 	for b in map_def.get("bridges", []):
 		_spawn_bridge(b, parent)
+	await _slice.call()
 	_spawn_grassland_clutter(map_def, parent, prop_scale)
+	await _slice.call()
 	# Ambient forest + ambient ore (2026-08-10, paired passes).
 	# _spawn_ambient_trees runs first and RETURNS the placed positions,
 	# which _spawn_ambient_ores then uses as an extra avoidance set
@@ -1670,8 +1795,15 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	# stage clean - the player needs to see THEIR unit, not a forest
 	# the ambient code packed into the available space.
 	if not bool(map_def.get("disable_ambient_scatter", false)):
-		var ambient_tree_positions: Array = _spawn_ambient_trees(map_def, parent, prop_scale)
-		_spawn_ambient_ores(map_def, parent, prop_scale, ambient_tree_positions)
+		var ambient_tree_positions: Array = await _spawn_ambient_trees(map_def, parent, prop_scale, ticker)
+		await _slice.call()
+		# Both passes contain awaits when a ticker was supplied, so both MUST
+		# be awaited here. A detached call would keep scattering in the
+		# background while the lines below ran - the batcher would commit
+		# underneath it and every late registration would be silently dropped
+		# (this exact bug shipped briefly: the ore pass lost most of a grove).
+		await _spawn_ambient_ores(map_def, parent, prop_scale, ambient_tree_positions, ticker)
+		await _slice.call()
 	# Both ambient passes register their visuals with a shared MultiMesh
 	# batcher instead of building a glTF subtree each (ambient_scatter.gd).
 	# Nothing is drawn until this commit, and it must come after BOTH passes
@@ -1681,8 +1813,9 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 		scatter.commit()
 	var visual_scatter = TerrainVisualScatterScript.get_or_create(parent)
 	if visual_scatter != null:
-		visual_scatter.scatter_all(map_def, prop_scale)
-	_spawn_slope_rocks(map_def, parent)
+		await visual_scatter.scatter_all(map_def, prop_scale, ticker)
+	await _spawn_slope_rocks(map_def, parent, ticker)
+	await _slice.call()
 	# Tag all new MeshInstance3D children (greebles, grass, slope rocks)
 	# so buildings can displace them on placement.
 	for c in parent.get_children():
@@ -1829,7 +1962,18 @@ const GROUND_BLEND_SHADER = preload("res://shaders/terrain_ground.gdshader")
 
 static func build_ground_material_heightmap(ground_color: Color, map_def: Dictionary = {}) -> Material:
 	var mat: ShaderMaterial = build_blended_surface_material("grassland", ground_color.lightened(0.55), map_def) as ShaderMaterial
-	var rock_tex = _get_terrain_textures("rocky", "base")
+	# VISUAL polish 2026-08-23: rock triplanar overlay switched from
+	# "base" to "_v1". The base rocky_albedo.png is the GDScript-generated
+	# procedural brickwork (32x32 faceted cells with ink-seam cracks)
+	# and reads as a stylized brick wall at tactical zoom once the new
+	# env (auto-exposure + contrast grade) accentuates the contrast
+	# between stone tops and dark cracks. The _v1 variant is the
+	# photo-realistic cracked-earth plate from process_flow_terrain_
+	# textures.gd and reads as actual rock in the same context. The
+	# triplanar pass is gated to slope > 0.65 (terrain_ground.gdshader:45)
+	# so flat maps (test range) are unaffected; the swap only changes
+	# what shows on hilly maps' slopes.
+	var rock_tex = _get_terrain_textures("rocky", "_v1")
 	mat.set_shader_parameter("rock_albedo", rock_tex.albedo)
 	mat.set_shader_parameter("rock_normal", rock_tex.normal)
 	mat.set_shader_parameter("rock_rough", rock_tex.roughness)
@@ -1906,7 +2050,42 @@ const GROUND_MESH_RESOLUTION: float = 3.0
 # ground) against terrain this gently undulating.
 const COLLISION_HEIGHTMAP_STEP: float = 3.0
 
-static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
+# How much main-thread work one frame may spend inside build_ground_visual_mesh()
+# before it hands the frame back to the engine. Only consulted when a `ticker`
+# node is passed (the live loading screen passes itself); null keeps the whole
+# build in one synchronous call, which is what headless probes want.
+#
+# WHY 8ms: at 60 fps a frame is ~16.6 ms, so an 8 ms slice leaves over half the
+# frame for rendering, input and the loading screen's lamps/turntable. Measured
+# against the alternative budgets, 8 ms keeps every visible hitch under about a
+# third of a frame-pair while adding only a few percent wall-clock overhead to
+# the bake from the per-frame bookkeeping.
+const BUILD_FRAME_BUDGET_MS: float = 8.0
+
+# Builds the playable ground mesh + collision heightmap, optionally SPREAD OVER
+# FRAMES.
+#
+# Pass `ticker` (any Node inside the SceneTree) to make this a coroutine that
+# yields `process_frame` whenever the current frame's work exceeds
+# BUILD_FRAME_BUDGET_MS. That is what keeps the loading screen animating through
+# the single most expensive synchronous step of the world build - on large maps
+# this function used to hold the main thread for several uninterrupted seconds,
+# which froze every lamp, tween and SubViewport on screen regardless of any
+# PROCESS_MODE setting, because a blocked main thread renders no frames at all.
+#
+# Callers without a ticker get the old behaviour exactly: no awaits execute, the
+# function is an ordinary synchronous call (this is the contract every probe and
+# headless tool relies on).
+#
+# The SurfaceTool pipeline this replaces (begin/add_vertex/index/generate_
+# normals/commit) could not be paused mid-build, so the same geometry is now
+# accumulated directly into packed-array buffers. Welding is by exact vertex
+# position (the same dedup SurfaceTool.index() performed - UVs here are derived
+# purely from position, so equal positions always carry equal UVs) and smooth
+# normals are accumulated per welded vertex from each touching face, matching
+# generate_normals()'s indexed average. Output geometry is identical up to
+# floating-point noise.
+static func build_ground_visual_mesh(map_def: Dictionary, ticker: Node = null) -> Dictionary:
 	var half: float = map_def.get("map_half_extents", 80.0)
 
 	# Scale resolution dynamically with extent so large maps don't explode into millions of quads
@@ -1921,12 +2100,52 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 		h_cache[key] = v
 		return v
 
-	var st = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Accumulator state. The containers are reference types on purpose: the two
+	# lambdas below mutate their CONTENTS (which propagates out of the capture)
+	# but never reassign them (which would not).
+	var weld: Dictionary = {}      # Vector3 position -> index into verts/uvs/nrm_acc
+	var verts: Array = []
+	var uvs: Array = []
+	var nrm_acc: Array = []        # un-normalized normal sums per welded vertex
+	var indices := PackedInt32Array()
 
-	# 1. Playable ground surface
+	var _vert_id = func(v: Vector3) -> int:
+		if weld.has(v):
+			return weld[v]
+		var id: int = verts.size()
+		weld[v] = id
+		verts.append(v)
+		uvs.append(Vector2(v.x, v.z) / TERRAIN_TILE_WORLD_SIZE)
+		nrm_acc.append(Vector3.ZERO)
+		return id
+
+	var _emit_quad = func(a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+		var ia: int = _vert_id.call(a)
+		var ib: int = _vert_id.call(b)
+		var ic: int = _vert_id.call(c)
+		var idd: int = _vert_id.call(d)
+		indices.append(ia)
+		indices.append(ib)
+		indices.append(ic)
+		indices.append(ia)
+		indices.append(ic)
+		indices.append(idd)
+		var n: Vector3 = (b - a).cross(c - a).normalized()
+		nrm_acc[ia] += n
+		nrm_acc[ib] += n
+		nrm_acc[ic] += n
+		nrm_acc[idd] += n
+
+	# Frame-budget gate. Inlined at each chunk boundary rather than wrapped in a
+	# helper because a helper containing await would itself be a coroutine.
+	var deadline: int = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
+
+	# 1. Playable ground surface - one budget slice per x-row band
 	var x = -half
 	while x < half:
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await ticker.get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 		var x1 = min(x + mesh_step, half)
 		var z = -half
 		while z < half:
@@ -1935,9 +2154,7 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 			var b = Vector3(x1, _h.call(x1, z), z)
 			var c = Vector3(x1, _h.call(x1, z1), z1)
 			var d = Vector3(x, _h.call(x, z1), z1)
-			for v in [a, b, c, a, c, d]:
-				st.set_uv(Vector2(v.x, v.z) / TERRAIN_TILE_WORLD_SIZE)
-				st.add_vertex(v)
+			_emit_quad.call(a, b, c, d)
 			z = z1
 		x = x1
 
@@ -1947,37 +2164,69 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 	var outer_min: float = -half - skirt_dist
 	var outer_max: float = half + skirt_dist
 
-	var _add_skirt_rect = func(sx0: float, sx1: float, sz0: float, sz1: float) -> void:
-		var curr_x = sx0
-		while curr_x < sx1:
-			var next_x = min(curr_x + skirt_step, sx1)
-			var curr_z = sz0
-			while curr_z < sz1:
-				var next_z = min(curr_z + skirt_step, sz1)
+	# North, South, West, East perimeter skirt sections - budget-checked per
+	# row band like the ground pass above (each full rect is cheap, but its
+	# inner loops sample height along the whole perimeter).
+	for rect_bounds in [[outer_min, outer_max, outer_min, -half],
+			[outer_min, outer_max, half, outer_max],
+			[outer_min, -half, -half, half],
+			[half, outer_max, -half, half]]:
+		var curr_x: float = rect_bounds[0]
+		while curr_x < rect_bounds[1]:
+			if ticker != null and Time.get_ticks_usec() >= deadline:
+				await ticker.get_tree().process_frame
+				deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
+			var next_x = min(curr_x + skirt_step, rect_bounds[1])
+			var curr_z: float = rect_bounds[2]
+			while curr_z < rect_bounds[3]:
+				var next_z = min(curr_z + skirt_step, rect_bounds[3])
 				var sa = Vector3(curr_x, _h.call(curr_x, curr_z), curr_z)
 				var sb = Vector3(next_x, _h.call(next_x, curr_z), curr_z)
 				var sc = Vector3(next_x, _h.call(next_x, next_z), next_z)
 				var sd = Vector3(curr_x, _h.call(curr_x, next_z), next_z)
-				for sv in [sa, sb, sc, sa, sc, sd]:
-					st.set_uv(Vector2(sv.x, sv.z) / TERRAIN_TILE_WORLD_SIZE)
-					st.add_vertex(sv)
+				_emit_quad.call(sa, sb, sc, sd)
 				curr_z = next_z
 			curr_x = next_x
 
-	# North, South, West, East perimeter skirt sections
-	_add_skirt_rect.call(outer_min, outer_max, outer_min, -half)
-	_add_skirt_rect.call(outer_min, outer_max, half, outer_max)
-	_add_skirt_rect.call(outer_min, -half, -half, half)
-	_add_skirt_rect.call(half, outer_max, -half, half)
+	# Normalize the accumulated face normals into per-vertex smooth normals -
+	# the same indexed average SurfaceTool.generate_normals() produced. A
+	# degenerate (zero-area) corner normalizes to ZERO, which the shader treats
+	# as up-facing; the old path never produced those on this grid anyway.
+	# Chunked per vertex: on a 960-half map this loop plus the Array->Packed
+	# conversions below touch ~150k vertices of Variant data, which was the
+	# last remaining multi-hundred-ms gap in the phase.
+	var mesh := ArrayMesh.new()
+	if not indices.is_empty():
+		var normals := PackedVector3Array()
+		normals.resize(verts.size())
+		var packed_verts := PackedVector3Array()
+		packed_verts.resize(verts.size())
+		var packed_uvs := PackedVector2Array()
+		packed_uvs.resize(uvs.size())
+		for i in range(verts.size()):
+			normals[i] = (nrm_acc[i] as Vector3).normalized()
+			packed_verts[i] = verts[i]
+			packed_uvs[i] = uvs[i]
+			if ticker != null and Time.get_ticks_usec() >= deadline:
+				await ticker.get_tree().process_frame
+				deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = packed_verts
+		arrays[Mesh.ARRAY_TEX_UV] = packed_uvs
+		arrays[Mesh.ARRAY_NORMAL] = normals
+		arrays[Mesh.ARRAY_INDEX] = indices
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
-	st.index()
-	st.generate_normals()
-	var mesh = st.commit()
-
+	# Collision heightmap - sampled per row so big maps also spread this across
+	# frames instead of spending tens of thousands of height_at() calls in one.
 	var samples = int(half * 2.0 / col_step) + 1
 	var height_data = PackedFloat32Array()
 	height_data.resize(samples * samples)
 	for row in range(samples):
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await ticker.get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 		var wz = -half + row * col_step
 		for col in range(samples):
 			var wx = -half + col * col_step
@@ -2057,6 +2306,60 @@ static func _build_conforming_zone_mesh(map_def: Dictionary, center: Vector3, ha
 	st.generate_normals()
 	return st.commit()
 
+# Frame-chunked twin of _build_conforming_zone_mesh() for the LOAD path only.
+# The sync original above stays single-frame on purpose: build_conforming_
+# overlay_mesh() runs MID-MATCH (fog shroud rebuilds) where there is no load
+# gate to spread work into. Only the loading screen's ticker reaches here.
+# Geometry output is identical; only scheduling differs.
+static func _build_conforming_zone_mesh_stepwise(map_def: Dictionary, center: Vector3, half_extents: Vector2, y_lift: float, tile_scale: float, resolution: float, ticker: Node) -> ArrayMesh:
+	var h_cache: Dictionary = {}
+	var _h = func(hx: float, hz: float) -> float:
+		var key = Vector2(hx, hz)
+		if h_cache.has(key): return h_cache[key]
+		var v = height_at(map_def, hx, hz) + y_lift
+		h_cache[key] = v
+		return v
+
+	var x0: float = center.x - half_extents.x
+	var x_max: float = center.x + half_extents.x
+	var z0: float = center.z - half_extents.y
+	var z_max: float = center.z + half_extents.y
+	var tile: float = TERRAIN_TILE_WORLD_SIZE * tile_scale
+
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var deadline: int = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
+	var x = x0
+	while x < x_max:
+		if Time.get_ticks_usec() >= deadline:
+			# Headless / probe callers (no SceneTree ticker): fall back to a
+			# busy wait rather than a real await. The load path is the one
+			# that calls this with a ticker, and the load path is a real
+			# windowed run - so a headless probe that wanders in here would
+			# otherwise hit the same null.get_tree() the chunked slope-rock
+			# walker fixed (terrain_builder.gd:3176+).
+			if ticker == null:
+				deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
+			else:
+				await ticker.get_tree().process_frame
+				deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
+		var x1 = min(x + resolution, x_max)
+		var z = z0
+		while z < z_max:
+			var z1 = min(z + resolution, z_max)
+			var a = Vector3(x, _h.call(x, z), z)
+			var b = Vector3(x1, _h.call(x1, z), z)
+			var c = Vector3(x1, _h.call(x1, z1), z1)
+			var d = Vector3(x, _h.call(x, z1), z1)
+			for v in [a, b, c, a, c, d]:
+				st.set_uv(Vector2(v.x, v.z) / tile)
+				st.set_color(Color(1, 1, 1, _zone_edge_alpha(v, center, half_extents)))
+				st.add_vertex(v)
+			z = z1
+		x = x1
+	st.generate_normals()
+	return st.commit()
+
 # Fraction of a zone's footprint, measured inward from each edge, over which it
 # fades out. Playtest: "the separate terrain types need to blend better into
 # each other." Each zone is its own opaque quad with a hard rectangular
@@ -2093,7 +2396,7 @@ static func _zone_edge_alpha(v: Vector3, center: Vector3, half_extents: Vector2)
 # offsets from real terrain rather than from absolute zero.
 const ZONE_Y_LIFT: float = 0.03
 
-static func _spawn_surface_zone(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0, map_def: Dictionary = {}):
+static func _spawn_surface_zone(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0, map_def: Dictionary = {}, ticker: Node = null):
 	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
 	var surface_type = zone.get("surface_type", "")
 	var mesh_inst = MeshInstance3D.new()
@@ -2124,8 +2427,8 @@ static func _spawn_surface_zone(zone: Dictionary, parent: Node3D, prop_scale: fl
 		# A transparent surface lying flat on opaque ground it barely clears
 		# would otherwise flicker against it depth-sorted per-frame.
 		mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_OPAQUE_ONLY
-		mesh_inst.mesh = _build_conforming_zone_mesh(
-			map_def, zone.center, zone.half_extents, ZONE_Y_LIFT, prop_scale)
+		mesh_inst.mesh = await _build_conforming_zone_mesh_stepwise(
+			map_def, zone.center, zone.half_extents, ZONE_Y_LIFT, prop_scale, GROUND_MESH_RESOLUTION, ticker)
 		mesh_inst.material_override = mat
 		parent.add_child(mesh_inst)
 
@@ -2663,7 +2966,7 @@ const AMBIENT_ORE_MAX_COUNT: int = 440   # = 20 clusters * 22 items ceiling
 # const AMBIENT_ORE_DENSITY_M2: float = 180.0
 # const AMBIENT_ORE_MAX_COUNT: int = 800
 
-static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0) -> Array:
+static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0, ticker: Node = null) -> Array:
 	var half: float = map_def.get("map_half_extents", 80.0)
 	# SKIRMISH_PERF_TROUBLESHOOTING.md §12. Per-map density multiplier.
 	# Multiplies both the cluster count and the per-cluster item cap,
@@ -2693,6 +2996,9 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(map_def.get("name", "ambient")) + 0xA1B2C3D4
 	var placed = 0
+	# Frame-budget deadline for the per-cluster yield below; only advanced when
+	# a ticker was supplied (see spawn_visuals()).
+	var deadline: int = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 	# Returned for the ambient-ore pass to consume as an avoidance set,
 	# so an ore and a tree never overlap.
 	var placed_positions: Array = []
@@ -2700,6 +3006,9 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 		rng, half, cluster_count, AMBIENT_TREE_CLUSTER_AVOID_RADIUS,
 		avoid_points, bridge_rects, [], map_def)
 	for cluster_center in clusters:
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await ticker.get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 		var items := rng.randi_range(items_min, items_max)
 		var placed_in_cluster := _place_in_cluster(
 			rng, cluster_center, AMBIENT_TREE_CLUSTER_RADIUS, items,
@@ -2736,7 +3045,7 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 #   * Uses its OWN RNG seed (off the map name, +0xB5C6D7E8) so the
 #     same map-name determinism contract holds and the two passes
 #     never draw the same RNG sequence for the same attempt.
-static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0, ambient_tree_positions: Array = []):
+static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0, ambient_tree_positions: Array = [], ticker: Node = null):
 	var half: float = map_def.get("map_half_extents", 80.0)
 	# Same density multiplier as the trees, so a 0.5 map cuts the ore
 	# scatter by the same proportion (see the _spawn_ambient_trees
@@ -2759,10 +3068,14 @@ static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(map_def.get("name", "ambient_ore")) + 0xB5C6D7E8
 	var placed = 0
+	var deadline: int = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 	var clusters := _pick_cluster_centers(
 		rng, half, cluster_count, AMBIENT_ORE_CLUSTER_AVOID_RADIUS,
 		avoid_points, bridge_rects, surface_rects, map_def)
 	for cluster_center in clusters:
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await ticker.get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 		var items := rng.randi_range(items_min, items_max)
 		var placed_in_cluster := _place_in_cluster(
 			rng, cluster_center, AMBIENT_ORE_CLUSTER_RADIUS, items,
@@ -2848,11 +3161,14 @@ static func slope_rock_density(slope: float) -> float:
 		return 0.0
 	return clampf((slope - SLOPE_ROCK_MIN_SLOPE) / (MAX_WALKABLE_SLOPE - SLOPE_ROCK_MIN_SLOPE), 0.0, 1.0)
 
-static func _spawn_slope_rocks(map_def: Dictionary, parent: Node3D) -> int:
+static func _spawn_slope_rocks(map_def: Dictionary, parent: Node3D, ticker: Node = null) -> int:
 	if not ResourceLoader.exists(BOULDER_MODEL_DIR % 0):
 		return 0
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var step: float = (half * 2.0) / float(SLOPE_ROCK_GRID_DIVISIONS)
+	# Frame-budget deadline for the per-grid-row yield in phase 1; only
+	# consulted when a ticker was supplied (see spawn_visuals()).
+	var deadline: int = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 
 	var bridge_rects = _collect_bridges(map_def)
 	var avoid_points: Array = []
@@ -2873,6 +3189,9 @@ static func _spawn_slope_rocks(map_def: Dictionary, parent: Node3D) -> int:
 	var candidates: Array = []
 	var y := -half + step * 0.5
 	while y < half:
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await ticker.get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(BUILD_FRAME_BUDGET_MS * 1000.0)
 		var x := -half + step * 0.5
 		while x < half:
 			var px: float = x + rng.randf_range(-step * 0.4, step * 0.4)

@@ -254,11 +254,6 @@ const TWEAK_RESPONSE := {
 		{"keys": ["bogie_pairs"], "ref": 3.0, "thrust": 0.2, "capacity": 1.0},
 		{"keys": ["wheel_size"], "ref": 1.0, "thrust": 0.5, "capacity": 0.3},
 	],
-	# Bigger floats carry more and drag more - the amphibious tradeoff.
-	# axle_count is a count; omitted.
-	"pontoon_wheels": [
-		{"keys": ["pontoon_size"], "ref": 1.0, "thrust": -0.3, "capacity": 1.0},
-	],
 	"air_cushion_skirt": [
 		{"keys": ["lift_fan_count"], "ref": 3.0, "thrust": 1.0, "capacity": 0.5},
 		{"keys": ["plenum_pressure"], "ref": 1.0, "thrust": 0.0, "capacity": 1.0},
@@ -369,7 +364,7 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	# we add it here so the design's total weight (and therefore speed/load)
 	# reflects painted facets without altering the hull's base weight.
 	var armor_plan_wt: float = 0.0
-	var plan: Dictionary = hull_node.get_meta("armor_plan", {})
+	var plan: Dictionary = hull_node.get_meta("armor_plan", {}) if is_instance_valid(hull_node) else {}
 	if not plan.is_empty() and not bool(plan.get("empty", true)):
 		# Re-use ArmorPaint's weight computation without the
 		# side-coverage / coverage overhead.

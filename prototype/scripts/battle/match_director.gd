@@ -527,7 +527,7 @@ func _ready() -> void:
 	# before NavigationServer3D has resynced, and the unit drives into the lake.
 	_emit_progress(0.02, "Calibrating rule set")
 	await get_tree().process_frame
-	_spawn_resource_nodes()
+	await _spawn_resource_nodes()
 	# 2026-08-13: deploy-gate progress emissions. See the `progress` signal
 	# header at :147-160 for the 0..1 fraction contract. Fractions below
 	# under-weight the early build steps (resource nodes, bases) so the
@@ -596,7 +596,7 @@ func _ready() -> void:
 	# transition is worth the line.
 	_emit_progress(0.74, "Settling structures")
 	await get_tree().process_frame
-	_spawn_starting_units()
+	await _spawn_starting_units()
 	_emit_progress(0.80, "Preparing vehicle systems")
 	await get_tree().process_frame
 	_emit_progress(0.83, "Raising HUD")
@@ -879,13 +879,26 @@ func _scale_lighting_to_world() -> void:
 # log_build_step header). Each step is measured with its own wall clock so a
 # single capture says which one carries the 21 s - and, on a fast run, which one
 # is being skipped.
+# The node handed to TerrainBuilder's frame-chunked build steps as their
+# "ticker" (the node whose process_frame they yield on). Null when headless:
+# a headless probe that add_child()s this scene and immediately reads state
+# must not have the build suspend across frames it does not pump, so there
+# the terrain mesh and scatter stay single-call synchronous - the same
+# posture the navmesh branch below already takes. In a real window `self`
+# is passed, which is what keeps the loading screen animating through the
+# two biggest synchronous freezes of the world build.
+func _build_ticker() -> Node:
+	if DisplayServer.get_name() in ["headless", "dummy"] or "--headless" in OS.get_cmdline_args() or "--headless" in OS.get_cmdline_user_args():
+		return null
+	return self
+
 func _setup_terrain() -> void:
 	# Build visual ground mesh and surrounding terrain skirt first
 	var ground := get_node_or_null("Ground")
 	if ground:
 		ground.position = Vector3.ZERO
 		var _t_mesh := Time.get_ticks_usec()
-		var generated: Dictionary = TerrainBuilder.build_ground_visual_mesh(current_map)
+		var generated: Dictionary = await TerrainBuilder.build_ground_visual_mesh(current_map, _build_ticker())
 		BattleLogger.log_build_step("terrain.ground_visual_mesh",
 			float(Time.get_ticks_usec() - _t_mesh) / 1000.0,
 			{"map_id": str(current_map.get("id", map_id))})
@@ -992,7 +1005,7 @@ func _setup_terrain() -> void:
 	_deep_water_nav_region = nav.deep_water_region
 
 	var _t_vis := Time.get_ticks_usec()
-	TerrainBuilder.spawn_visuals(current_map, self)
+	await TerrainBuilder.spawn_visuals(current_map, self, _build_ticker())
 	# Ambient scatter. PROGRESS.md's 2026-08-10 entry measured ~1650
 	# ResourceNode instances on a 210-half map before the clustering change,
 	# so this is a credible second home for the load time even though the
@@ -1280,9 +1293,15 @@ func _spawn_starting_units() -> void:
 	# director uses.
 	var test_range_mode: bool = _match_rule_set != null and _match_rule_set.mode == MatchRuleSetScript.Mode.TEST_RANGE
 	if test_range_mode:
-		_spawn_test_range_force()
+		await _spawn_test_range_force()
 		return
 
+	# Frame-chunked (2026-08-23): unit assembly (hull collider load, module
+	# volumes, visual bake) is a couple hundred ms per unit, so the Test
+	# Range's five-unit lineup was a full second of frozen loading screen.
+	# Yields between spawns when a ticker exists; headless stays synchronous.
+	var ticker: Node = _build_ticker()
+	var deadline: int = Time.get_ticks_usec() + int(TerrainBuilder.BUILD_FRAME_BUDGET_MS * 1000.0)
 	for team_id in [PLAYER_TEAM, ENEMY_TEAM]:
 		var spawn := MapCatalog.get_spawn(current_map,
 			"player" if team_id == PLAYER_TEAM else "enemy")
@@ -1296,6 +1315,9 @@ func _spawn_starting_units() -> void:
 		# base if it does not, rather than dropping the unit on the HQ itself.
 		var at: Vector3 = spawn.get("harvester", spawn.get("hq", Vector3.ZERO) + Vector3(8, 0, -8))
 		spawn_unit(harvester, team_id, at)
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(TerrainBuilder.BUILD_FRAME_BUDGET_MS * 1000.0)
 
 
 # Test Range places the player unit and the dummies on the map
@@ -1314,9 +1336,16 @@ func _spawn_test_range_force() -> void:
 	# Player unit: use the test_range map's player spawn if it has
 	# one, otherwise the centre of the map's half_extents.
 	var player_spawn: Vector3 = _test_range_spawn("player", Vector3(0, 0, 0))
+	# Frame-budget gate shared by both spawn loops below (see
+	# _spawn_starting_units for why the spawns are chunked).
+	var ticker: Node = _build_ticker()
+	var deadline: int = Time.get_ticks_usec() + int(TerrainBuilder.BUILD_FRAME_BUDGET_MS * 1000.0)
 	var player_design: Dictionary = roster[0] if not roster.is_empty() else {}
 	if not player_design.is_empty():
 		var unit := spawn_unit(player_design, PLAYER_TEAM, player_spawn)
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(TerrainBuilder.BUILD_FRAME_BUDGET_MS * 1000.0)
 		if unit != null:
 			focus_unit = unit
 			# Force-select the player unit from spawn. The selection
@@ -1367,6 +1396,9 @@ func _spawn_test_range_force() -> void:
 		var side_offset: float = float(dummy_index - (enemy_roster.size() - 1) * 0.5) * 6.0
 		var spawn_pos: Vector3 = base_anchor + right * side_offset
 		var dummy = spawn_unit(design, ENEMY_TEAM, spawn_pos)
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(TerrainBuilder.BUILD_FRAME_BUDGET_MS * 1000.0)
 		if dummy != null:
 			# Test range dummies are target dummies: they hold fire until fired upon.
 			dummy.stance = StanceScript.Kind.HOLD_FIRE
@@ -1472,7 +1504,16 @@ func _spawn_resource_nodes() -> void:
 	# wrap, any hitch on this path shows up under
 	# "resource_field_spawn" instead of being lumped into the
 	# "production" bucket.
+	#
+	# Frame-chunked (2026-08-23): each field.setup() scatters its inner
+	# collectibles synchronously, so on field-heavy maps this loop held the
+	# main thread for whole seconds and froze the loading screen. With a
+	# ticker available the loop yields process_frame whenever the frame's
+	# slice of TerrainBuilder.BUILD_FRAME_BUDGET_MS is spent. Headless (no
+	# ticker) it is the same single-pass synchronous loop it always was.
 	var _t := Profiler.start()
+	var ticker: Node = _build_ticker()
+	var deadline: int = Time.get_ticks_usec() + int(TerrainBuilder.BUILD_FRAME_BUDGET_MS * 1000.0)
 	for entry in current_map.get("resource_nodes", []):
 		var field := Node3D.new()
 		field.set_script(ResourceFieldScript)
@@ -1480,6 +1521,9 @@ func _spawn_resource_nodes() -> void:
 		var pos: Vector3 = entry.get("position", Vector3.ZERO)
 		field.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
 		field.setup(entry.get("type", "metal"), entry.get("amount", 1000), self)
+		if ticker != null and Time.get_ticks_usec() >= deadline:
+			await get_tree().process_frame
+			deadline = Time.get_ticks_usec() + int(TerrainBuilder.BUILD_FRAME_BUDGET_MS * 1000.0)
 	Profiler.stop("resource_field_spawn", _t)
 
 
@@ -1675,11 +1719,15 @@ func _place_structure(kind: String, structure_team: int, at: Vector3, under_cons
 	# PR-4 (2026-08-19). A new static occluder changes LOS between
 	# any viewer and any target it sits between. Invalidate the
 	# vision service's LOS cache so the next tick's is_spotted()
-	# queries re-raycast against the new geometry. The clear is a
-	# O(1) dict drop; the next ~250 ms of cache misses are the
-	# cost we pay for the placement's correctness.
+	# queries re-raycast against the new geometry. Since 2026-08-23
+	# the invalidation carries the footprint so only pairs near the
+	# new building and shroud discs within sight of it re-scan - a
+	# 100-structure base used to pay the full-map wipe on EVERY
+	# placement, which is most of why vision ticks hit 394 ms late
+	# game in the 00:33 skirmish log.
 	if vision != null:
-		vision.invalidate_los_cache()
+		var fp: Vector3 = s.footprint if "footprint" in s else Vector3(6, 4, 6)
+		vision.invalidate_los_cache(s.global_position, maxf(fp.x, fp.z))
 	return s
 
 
@@ -1898,6 +1946,25 @@ var _nav_rebake_pending: bool = false
 # can wait together and cost ONE bake instead of one each.
 const NAV_LAZY_REBAKE_DELAY := 3.0
 
+# SYNC THROTTLE (2026-08-24, tools/probe_navmesh_repath_storm.gd). The Recast
+# bake itself is async and cheap; what is NOT cheap is the navigation-server
+# map merge that the first agent query after the bake lands has to pay -
+# measured inside unit.steer_nav at ~2 s per placement in the 02:31 skirmish
+# (the AI planted a power plant every BUILD_RATE_CAP_SECONDS for eight minutes,
+# so that cost recurred all match) and ~30 s headless against a mature base.
+# Placement CADENCE is the only lever on it: within this interval, new
+# placements defer into the lazy accumulator instead of dispatching their own
+# carve, so N buildings in the window cost ONE sync. The next dispatch carves
+# every live structure's holes anyway (_building_holes), so nothing is lost -
+# units bump the new building's collision body until the bake lands, same as
+# they already do for destroyed buildings waiting out the lazy delay.
+const NAV_REBAKE_MIN_INTERVAL := 12.0
+# Starvation bound: if placements keep arriving faster than the interval
+# drains, force a dispatch this long after the first deferral.
+const NAV_REBAKE_MAX_WAIT := 20.0
+var _last_rebake_dispatch_ms: int = -(1 << 30)
+var _nav_throttle_started_ms: int = -(1 << 30)
+
 var _nav_lazy_pending: bool = false
 var _nav_lazy_timer: float = 0.0
 
@@ -2054,6 +2121,19 @@ func _mark_navmesh_dirty(urgent: bool = true) -> void:
 		_nav_lazy_pending = true
 		_nav_lazy_timer = 0.0
 		return
+	# SYNC THROTTLE - see NAV_REBAKE_MIN_INTERVAL above. Deferrals go through
+	# the lazy accumulator WITHOUT resetting its timer (only genuine
+	# quiet-period marks reset it), so sustained building still flushes on a
+	# steady NAV_REBAKE_MIN_INTERVAL cadence, and NAV_REBAKE_MAX_WAIT bounds
+	# the wait if that ever stops being true.
+	var throttle_now := Time.get_ticks_msec()
+	if throttle_now - _last_rebake_dispatch_ms < int(NAV_REBAKE_MIN_INTERVAL * 1000.0):
+		if _nav_throttle_started_ms < 0:
+			_nav_throttle_started_ms = throttle_now
+		if throttle_now - _nav_throttle_started_ms < int(NAV_REBAKE_MAX_WAIT * 1000.0):
+			_nav_lazy_pending = true
+			return
+	_nav_throttle_started_ms = -(1 << 30)
 	if _nav_rebake_pending:
 		return
 	if _ground_nav_regions.is_empty():
@@ -2165,6 +2245,7 @@ func _deferred_navmesh_rebake(affected: Array, new_holes: Array) -> void:
 	if _ground_nav_regions.is_empty():
 		_nav_rebake_pending = false
 		return
+	_last_rebake_dispatch_ms = Time.get_ticks_msec()
 	var t_inv := Profiler.start()
 	_repath_units_near_new_holes(new_holes)
 	Profiler.stop("navmesh_invalidate", t_inv)
@@ -2182,11 +2263,16 @@ func _deferred_navmesh_rebake(affected: Array, new_holes: Array) -> void:
 # Runs the deferred bake once the map has been quiet for NAV_LAZY_REBAKE_DELAY.
 # The timer RESETS on each new death, so a sustained firefight keeps postponing
 # it rather than stalling in the middle of the fight.
+# SYNC THROTTLE: also holds a flush until NAV_REBAKE_MIN_INTERVAL has passed
+# since the last dispatch, so placements deferred by the urgent-path throttle
+# coalesce onto the sync cadence instead of sneaking out on the short timer.
 func _tick_lazy_navmesh(delta: float) -> void:
 	if not _nav_lazy_pending:
 		return
 	_nav_lazy_timer += delta
 	if _nav_lazy_timer < NAV_LAZY_REBAKE_DELAY:
+		return
+	if Time.get_ticks_msec() - _last_rebake_dispatch_ms < int(NAV_REBAKE_MIN_INTERVAL * 1000.0):
 		return
 	_nav_lazy_pending = false
 	_nav_lazy_timer = 0.0
@@ -2194,6 +2280,11 @@ func _tick_lazy_navmesh(delta: float) -> void:
 
 
 func _rebake_navmesh() -> void:
+	# Stamp the throttle clock here as well - the lazy path and the boot bake
+	# dispatch through this function, and the throttle measures SYNC cadence,
+	# not placement cadence.
+	_last_rebake_dispatch_ms = Time.get_ticks_msec()
+	_nav_throttle_started_ms = -(1 << 30)
 	# PR-2 (2026-08-19). The flag now means "an async rebake is in flight"
 	# (was: "a sync rebake is in flight"). Set on dispatch, cleared by
 	# _on_navmesh_rebaked when the workers finish. The old pre-dispatch
@@ -2292,9 +2383,11 @@ func _on_structure_died(structure) -> void:
 	# the same frame the player notices the death, not after the audio
 	# line and not after the rebake debounce.
 	structure_lost.emit(structure.team, structure.kind)
-	# PR-4 (2026-08-19). A removed occluder changes LOS too.
+	# PR-4 (2026-08-19). A removed occluder changes LOS too. Region-scoped:
+	# see the placement-side note above.
 	if vision != null:
-		vision.invalidate_los_cache()
+		var fp: Vector3 = structure.footprint if "footprint" in structure else Vector3(6, 4, 6)
+		vision.invalidate_los_cache(structure.global_position, maxf(fp.x, fp.z))
 	# The navmesh had a hole carved for this building and no longer should, and
 	# every cached flow field was sampled against the old passability.
 	#
@@ -3974,12 +4067,27 @@ func flow_direction_for(order: Order, at: Vector3) -> Vector3:
 
 
 func _group_size(group_id: int) -> int:
+	# PERF (2026-08-24). This runs from flow_direction_for, which every unit
+	# calls every physics tick from _steer_direction. Uncached it walked the
+	# whole units group - allocating the group array each time - N_units x
+	# 30 Hz times, and that scan was a visible slice of the 02:31 skirmish's
+	# elevated steer_nav mean. One scan per frame, shared by all callers.
+	var frame := Engine.get_physics_frames()
+	if frame != _group_size_frame:
+		_group_size_frame = frame
+		_group_size_cache.clear()
+	if _group_size_cache.has(group_id):
+		return int(_group_size_cache[group_id])
 	var n := 0
 	for u in get_tree().get_nodes_in_group("units"):
 		if is_instance_valid(u) and not u.is_dead and u.current_order != null \
 				and u.current_order.group_id == group_id:
 			n += 1
+	_group_size_cache[group_id] = n
 	return n
+
+var _group_size_frame: int = -1
+var _group_size_cache: Dictionary = {}
 
 
 # --- Input ------------------------------------------------------------------
@@ -4123,6 +4231,9 @@ func _handle_key(event: InputEventKey) -> void:
 			for u in sel:
 				if "set_range_overlay_visible" in u:
 					u.set_range_overlay_visible(new_value)
+			if hud != null and "command_card" in hud and hud.command_card != null:
+				if hud.command_card.has_method("_refresh_range_lamp"):
+					hud.command_card._refresh_range_lamp()
 	elif event.is_action_pressed("sys_perf"):
 		_toggle_perf_hud()
 	elif event.is_action_pressed("sys_perf_dump"):

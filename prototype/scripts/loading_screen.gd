@@ -19,8 +19,10 @@ extends Control
 # frosted-glass deploy gate is gone; this is a plain instrument
 # panel with a hangar preview behind it.
 #
-# When world_ready fires, the screen shows a DEPLOY button. The
-# player presses it, the screen fades itself out, and emits
+# When world_ready fires, the screen swaps DEPLOY into the preview slot,
+# turns the panel green, and starts an AUTO_DEPLOY_SECONDS countdown shown
+# on the button legend - press early, or the match launches itself. On
+# either path the screen fades itself out and emits
 # `deploy_requested(battle_instance)`. The router awaits that
 # signal, unpauses the tree, and calls change_scene_to(battle) to
 # make the already-built Battle the current scene.
@@ -48,6 +50,15 @@ const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 # to click in the gate - a 280x52 stamped plate, not a generic button.
 const DEPLOY_BUTTON_MIN_SIZE := Vector2(280, 52)
 
+const DEPLOY_BUTTON_LEGEND := "DEPLOY FORCES"
+
+# When the world is ready the match launches ITSELF after this many seconds
+# if the player has not pressed DEPLOY. The countdown runs on the loading
+# screen's own _process, which ticks through the tree pause (this screen is
+# PROCESS_MODE_ALWAYS); the player can always press early. Set via
+# _auto_deploy_remaining below.
+const AUTO_DEPLOY_SECONDS := 10.0
+
 # How long the loading screen's own fade takes on DEPLOY. Short -
 # the match is ready, the player has clicked, the moment is
 # "go" not "wait". A second-long fade here would read as the
@@ -67,6 +78,23 @@ var _elapsed: float = 0.0
 var _status_label: Label
 var _step_label: Label
 var _deploy_button: StampedButton
+# Seconds left before the match auto-deploys (see AUTO_DEPLOY_SECONDS).
+# -1 = not counting. Counted down in _process, which fires through the
+# tree pause because this screen is PROCESS_MODE_ALWAYS.
+var _auto_deploy_remaining: float = -1.0
+# The whole-second value currently shown on the button legend, so the
+# legend (and its texture-set re-resolve) updates once per second rather
+# than every frame.
+var _auto_deploy_shown: int = -1
+# Latch against double-deploys: a player click landing in the same frame
+# as the countdown expiry, or a second expiry tick after the tween started.
+var _deploy_started: bool = false
+# The column everything stacks in, and the child index the DEPLOY slot takes
+# over at world_ready (the preview's index, or 0 when there is no preview).
+# Stored because attach_battle_scene() and _on_world_ready() run long after
+# the _ready() that built this layout.
+var _col: VBoxContainer = null
+var _deploy_slot_index: int = 0
 # The LoadingPreview Control, so we can hand it the match roster
 # after attach_battle_scene() has run. Stored here because
 # attach_battle_scene() is called by the router in a separate
@@ -125,6 +153,7 @@ func _ready() -> void:
 	var col = VBoxContainer.new()
 	col.add_theme_constant_override("separation", Tokens.SPACE_SM)
 	frame.add_child(col)
+	_col = col
 
 	# The 3D vehicle preview sits in the top slot for the long Battle
 	# build; the short Lab boot keeps the empty filler because the
@@ -153,6 +182,8 @@ func _ready() -> void:
 				# _ready populates the match_director.roster array
 				# before the first await.
 				_preview = preview
+				# The DEPLOY button replaces this child at world_ready.
+				_deploy_slot_index = col.get_child_count() - 1
 			else:
 				var push = Control.new()
 				push.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -207,18 +238,16 @@ func _ready() -> void:
 	_lamps = UILampsScript.new()
 	col.add_child(_lamps)
 
-	# DEPLOY button. NOT a child of the VBox - the user wants it in
-	# the big open space on the LEFT of the 3D preview, not stacked
-	# below the bar. A child of the loading screen itself with
-	# absolute positioning (anchor_left = 0, anchor_top vertically
-	# centered) lands it next to the preview, where the empty
-	# SubViewport clear color leaves room for it.
-	#
-	# Hidden until world_ready fires. Same physical object the
-	# deploy gate used so the click target feels familiar.
-	# UIFeedbackScript.wire() attaches the same hover/press audio
-	# the gate's button had, so the player's existing muscle
-	# memory carries over.
+	# DEPLOY button. NOT placed during _ready - it enters the tree at
+	# world_ready, when _on_world_ready() swaps it into the preview's slot
+	# (see _deploy_slot_index). Until then the preview owns that space; the
+	# swap is the READY announcement: the spinning roster gives way to the
+	# one control the player can act on, and the whole panel turns green.
+	# Same physical object the deploy gate used so the click target feels
+	# familiar. UIFeedbackScript.wire() attaches the same hover/press audio
+	# the gate's button had, so the player's existing muscle memory carries
+	# over. Wiring signals off-tree is fine; grab_focus happens after the
+	# button is in the tree.
 	_deploy_button = StampedButtonScript.new()
 	_deploy_button.legend = "DEPLOY FORCES"
 	_deploy_button.variant = StampedButtonScript.Variant.PRIMARY
@@ -227,19 +256,6 @@ func _ready() -> void:
 	_deploy_button.visible = false
 	_deploy_button.pressed.connect(_on_deploy_pressed)
 	UIFeedbackScript.wire(_deploy_button, "confirm")
-	# Anchor on the left, vertically centered. Offsets measured
-	# from the button's own min size so a future size tweak
-	# (280x52 -> 320x56) keeps it on the same spot without
-	# re-deriving the constants.
-	_deploy_button.anchor_left = 0.0
-	_deploy_button.anchor_right = 0.0
-	_deploy_button.anchor_top = 0.5
-	_deploy_button.anchor_bottom = 0.5
-	_deploy_button.offset_left = Tokens.SPACE_LG
-	_deploy_button.offset_right = Tokens.SPACE_LG + DEPLOY_BUTTON_MIN_SIZE.x
-	_deploy_button.offset_top = -DEPLOY_BUTTON_MIN_SIZE.y * 0.5
-	_deploy_button.offset_bottom = DEPLOY_BUTTON_MIN_SIZE.y * 0.5
-	add_child(_deploy_button)
 
 	if router and router.has_signal("load_progress"):
 		router.load_progress.connect(_on_progress)
@@ -420,23 +436,62 @@ func _on_director_progress(fraction: float, label: String) -> void:
 
 
 # Called when the match director flips world_ready. The build is
-# done; the player is now committed. Show DEPLOY.
+# done; the player is now committed. Turn the panel green, swap
+# the preview out for DEPLOY, and show it.
 func _on_world_ready() -> void:
 	if not is_instance_valid(_status_label):
 		return
 	_status_label.text = "ALL SYSTEMS READY"
 	_step_label.text = "Press DEPLOY to begin engagement"
+	# GREEN IS THE READY STATE. SIGNAL_GO is the palette's one "ready /
+	# confirmed" colour (see ui_tokens.gd), and this screen earns it exactly
+	# once - everything before this point is amber "attention". Status, step
+	# hint, progress fill and lamp sweep all flip together so the change
+	# reads across the whole panel, not as one recoloured label.
+	var go := Color(Tokens.SIGNAL_GO, 1.0)
+	_status_label.add_theme_color_override("font_color", go)
+	_step_label.add_theme_color_override("font_color", go)
+	if is_instance_valid(_lamps):
+		_lamps.set_sweep_colour(go)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Tokens.SIGNAL_GO
+	fill.set_corner_radius_all(1)
+	fill.set_border_width_all(1)
+	fill.border_color = Tokens.SIGNAL_GO
+	_bar.add_theme_stylebox_override("fill", fill)
 	# Bring the bar to its terminal state. The director's last
 	# progress emit should already have done this, but the
 	# "all systems ready" hand-off is the moment the player is
 	# explicitly told the wait is over; an under-filled bar would
 	# contradict the label.
 	_bar.value = 1.0
+
+	# SWAP THE PREVIEW FOR DEPLOY. The spinning roster stops rendering
+	# entirely (set_active also kills the SubViewport's UPDATE_ALWAYS cost)
+	# and a centred slot takes over exactly the space it held, so the layout
+	# does not reflow. The button was built in _ready but deliberately never
+	# entered the tree until now.
+	if _preview != null and is_instance_valid(_preview) and _preview.has_method("set_active"):
+		_preview.call("set_active", false)
+	if _col != null:
+		var slot := CenterContainer.new()
+		slot.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_col.add_child(slot)
+		_col.move_child(slot, clampi(_deploy_slot_index, 0, _col.get_child_count() - 1))
+		slot.add_child(_deploy_button)
+
 	# Reveal and arm the button. grab_focus so the player can
 	# press Enter without aiming at it - same as the deploy gate.
 	_deploy_button.disabled = false
 	_deploy_button.visible = true
 	_deploy_button.grab_focus()
+	# AUTO-DEPLOY. The match goes on its own after AUTO_DEPLOY_SECONDS if
+	# the player never touches the button; the legend counts the seconds
+	# down so "it will launch itself" is stated on the control itself
+	# rather than in fine print.
+	_auto_deploy_remaining = AUTO_DEPLOY_SECONDS
+	_auto_deploy_shown = int(ceil(AUTO_DEPLOY_SECONDS))
+	_deploy_button.legend = "%s - %d" % [DEPLOY_BUTTON_LEGEND, _auto_deploy_shown]
 
 
 # Catches the CanvasLayer(s) the Battle's _build_hud() adds during
@@ -480,6 +535,13 @@ func _on_battle_child_entered(node: Node) -> void:
 # screen stays up, the tree stays paused, and the developer sees
 # the attached_battle being null in the next debugger session.
 func _on_deploy_pressed() -> void:
+	# Re-entry latch: a player click landing the same frame as the
+	# auto-deploy expiry (or a second expiry tick after the fade tween has
+	# started) must not run the handoff twice.
+	if _deploy_started:
+		return
+	_deploy_started = true
+	_auto_deploy_remaining = -1.0
 	if _attached_battle == null:
 		push_warning("LoadingScreen: DEPLOY pressed with no attached Battle")
 		return
@@ -521,6 +583,21 @@ func _process(delta: float) -> void:
 	# Lamps own their own _process / queue_redraw since the 2026-08-13
 	# lift into scripts/ui_lamps.gd - this function is just the
 	# "STAND BY" text escalation now.
+
+	# AUTO-DEPLOY countdown. Runs through the tree pause because this screen
+	# is PROCESS_MODE_ALWAYS; the legend updates only when the displayed
+	# whole second changes (the legend setter re-resolves the button's
+	# texture set, so per-frame writes would churn the shared stage).
+	if _auto_deploy_remaining > 0.0 and not _deploy_started:
+		_auto_deploy_remaining = maxf(0.0, _auto_deploy_remaining - delta)
+		var shown := int(ceil(_auto_deploy_remaining))
+		if shown != _auto_deploy_shown and is_instance_valid(_deploy_button):
+			_auto_deploy_shown = shown
+			_deploy_button.legend = "%s - %d" % [DEPLOY_BUTTON_LEGEND, shown]
+		if _auto_deploy_remaining <= 0.0:
+			_auto_deploy_remaining = -1.0
+			_on_deploy_pressed()
+			return
 
 	# After a few seconds, say something rather than leaving the player
 	# staring at an unexplained wait. Phrased for the warm-list phase

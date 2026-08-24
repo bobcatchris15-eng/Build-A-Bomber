@@ -16,8 +16,9 @@ A Godot 4.7.1 prototype RTS where the player **designs** every unit (hull +
 modules + locomotion + armor) in a 3D lab, then fields those designs in a
 C&C-style Skirmish with an actual economy, harvester loop, base building,
 production queues, fog of war, and a utility-based AI commander. Core loop
-flows Main Menu → Design Lab → Skirmish (or Test Range) → After Action
-Report → back to the Lab. Game version `1.6.3` per `project.godot`.
+flows Main Menu → Design Lab → Skirmish / Operations (or Proving Ground) →
+After Action Report → back to the Lab. Game version `1.6.4` per
+`project.godot`.
 
 Project root: `prototype/`. Engine executables bundled in the same dir.
 All paths below are relative to `prototype/` unless I say otherwise.
@@ -52,7 +53,7 @@ following is non-negotiable and shows up everywhere — match it when adding cod
   `scene_router.gd`, `drivetrain.gd`, `audio_manager.gd`, `commander.gd`. **All
   four are template-level examples** of how to introduce a non-trivial file.
 - When you split or refactor something, leave a short "what changed and why"
-  note in the new file's header (see `suite_base.gd:1-21` for the textbook
+  note in the new file's header (see `battle_layers.gd:1-21` for the textbook
   example).
 - "WHAT THIS REPLACES, AND WHY" is a recurring section header — the team
   treats every rewrite as something that should explain its predecessor's
@@ -153,7 +154,7 @@ callers to subscribe, not to poll. `AudioManager` similar.
 
 ```
 MainMenu ──► MainLab (Design Lab)      ──► BlueprintLibrary
-         ──► Skirmish / Battle / Test Range (lands on Battle.tscn via TestRangeLauncher)
+         ──► Skirmish / Operations / Proving Ground (lands on Battle.tscn via TestRangeLauncher)
          ──► MatchSetup / OperationsSetup / OperationsDraft
          ──► Loading (transitional)
          ──► AfterActionReport
@@ -165,14 +166,15 @@ see `scene_router.gd:46-50` for why. Loading screen is pre-warmed and
 walks preload targets one per frame to keep the window responsive, since
 script compilation is the bottleneck (not disk I/O).
 
-### 3.2 Autoloads (defined in `project.godot:23-35`)
+### 3.2 Autoloads (defined in `project.godot:23-38`)
 
 | Autoload | File | Role |
 |---|---|---|
 | `WindowFit` | `scripts/window_fit.gd` | Window size/fit on boot |
 | `SceneRouter` | `scripts/scene_router.gd` | Cross-scene transitions + fade overlay + prewarm |
 | `TutorialManager` | `scripts/tutorial/tutorial_manager.gd` | First-run tutorial gating |
-| `MatchConfig` | `scripts/match_config.gd` | Relay: Skirmish/Operations read player settings from here |
+| `TwoPhaseTutorialManager` | `scripts/tutorial_two_phase/two_phase_tutorial_manager.gd` | Two-phase tutorial (build, then field) |
+| `MatchConfig` | `scripts/match_config.gd` | Relay: carries the per-mode `MatchRuleSet` into the next match |
 | `OperationsManager` | `scripts/operations_manager.gd` | Operations (iterative campaign) state |
 | `DebugSettings` | `scripts/debug_settings.gd` | Dev cheat toggles |
 | `CursorManager` | `scripts/cursor_manager.gd` | Crosshair/cursor state |
@@ -180,6 +182,8 @@ script compilation is the bottleneck (not disk I/O).
 | `SettingsService` | `scripts/core/settings_service.gd` | Persistent player settings + bus layout |
 | `InputService` | `scripts/core/input_service.gd` | Keybinding table (separate from settings on purpose) |
 | `SystemLayer` | `scripts/ui/system_layer.gd` | System-modal UI overlay (e.g. blocking dialogs) |
+| `DesignRecord` | `scripts/design_record.gd` | Per-design service record (`add_match_results` / `get_record`, persisted to `user://design_records.json`) |
+| `CommandRegistry` | `scripts/battle/orders/command_registry.gd` | Match command definitions for the command card |
 
 Autoload pattern is universal: `extends Node`, file-level `const` preloads,
 `signal`s for events, `static const` for paths/names. New autoload? Use
@@ -190,80 +194,85 @@ this shape.
 ```
 Design Lab (3D scene)
   └─ module_placer.gd (root script on MainLab.tscn)
-       ├─► stat_calculator.gd  (UI_StatBlock.tscn, the right rail)
+       ├─► telemetry_rail.gd  (UI_StatBlock.tscn, the right rail; backed by
+       │                       lab_document.gd's LabDocument model)
        └─► parts_menu.gd       (UI_PartsMenu.tscn, the parts bin)
               │
               ▼
    blueprint_manager.gd  ←→  user://blueprints/<id>.json   (saved roster)
                           ←→  user://lab_scratch.json      (in-progress design,
-                                                            also the Test Range
+                                                            also the Proving Ground
                                                             read target via
                                                             TestRangeLauncher)
-                          ←→  data/loadout/*.json          (shipped defaults)
+                          ←→  assets/blueprints/default_roster/*.json (bundled roster)
+                          ←→  data/loadout/*.json          (build palette, dummies,
+                                                            tutorial units)
                           ←→  data/enemy/*.json            (AI rosters)
 ```
 
 Note: `user://blueprint.json` (legacy single-slot pointer) and the
 `LEGACY_SLOT_PATH` it was reachable through were retired 2026-08-10
-with the rest of the pre-unification battle path. The Test Range now
+with the rest of the pre-unification battle path. The Proving Ground now
 reads `user://lab_scratch.json` (the Design Lab's own scratch slot)
 via `TestRangeLauncher`, which falls back to the most-recent-saved
 named blueprint and then to the bundled Bulwark MBT.
 
 - **Scratch vs. saved is enforced at the file level.** "Test in Arena"
-  writes the scratch file only; a real Save creates the roster entry. See
-  `blueprint_manager.gd:44-65` for the rule and the historical bug.
+  writes the scratch file only; a real Save creates the roster entry.
 - `BlueprintManager.is_named()` is the gate that decides whether a design
   counts as "user-saved enough to put in the roster." A design with the
   placeholder name `Untitled Design` does NOT pass, by design.
 - Blueprint JSON schema version is bumped only when a schema change could
-  silently mis-load older saves. Current is **2.0** (bumped when the hull
-  roster was rebuilt on SDF/Marching-Cubes).
+  silently mis-load older saves. Current is **3.0** (`blueprint_manager.gd`,
+  `CURRENT_BLUEPRINT_VERSION`; the header records the bump history and why).
 
 ### 3.4 The runtime battle path
 
 ```
-MatchSetup.gd  ──►  MatchConfig (autoload)  ──►  Skirmish (battle controller)
-                                                   │
-       ┌───────────────────────────────────────────┤
-       │                                           │
-       ▼                                           ▼
-   VisionService                          EconomyService
-   (per-team visibility scan)             (resources, trickle, building costs)
-       │                                           │
-       │   ┌─────── per unit ───────┐               │
-       ▼   ▼                       ▼               ▼
-   battle/units/unit.gd     battle/buildings/    AI: battle/ai/commander.gd
-   (constructed by              structure.gd     (utility-based: scored actions
-    unit_assembly.gd)            + placement    every tick; reads same
-                                 service         VisionService & EconomyService
-                                                as the player — no privileged
-                                                knowledge)
-       │
-       ▼
-   battle/orders/order.gd (data) + battle/orders/order_service.gd
-       │  Intent is data: IDLE / MOVE / ATTACK_MOVE / ATTACK / ATTACK_GROUND /
-       │  HARVEST / HOLD. Old code had 5 parallel fields, now a single value
-       │  type with a queue. Shift-queue = append.
-       ▼
-   battle/movement/steering.gd + flow_field/ + formation_service
-   (per-tick, reads VisionService for engagement ranges,
-    Drivetrain for speed, real nav for pathing when a match exists;
-    direct-line fallback for synthetic tests)
+MatchSetup.gd  ──►  MatchConfig (autoload: the MatchRuleSet)  ──►  match_director.gd
+                                                                    │
+        ┌───────────────────────────────────────────┤
+        │                                           │
+        ▼                                           ▼
+    VisionService                          EconomyService
+    (per-team visibility scan)             (resources, trickle, building costs)
+        │                                           │
+        │   ┌─────── per unit ───────┐               │
+        ▼   ▼                       ▼               ▼
+    battle/units/unit.gd     battle/buildings/    AI: battle/ai/commander.gd
+    (constructed by              structure.gd     (utility-based: scored actions
+     unit_assembly.gd)            + placement    every tick; reads same
+                                  service         VisionService & EconomyService
+                                                 as the player — no privileged
+                                                 knowledge)
+        │
+        ▼
+    battle/orders/order.gd (data) + battle/orders/order_service.gd
+        │  Intent is data: IDLE / MOVE / ATTACK_MOVE / ATTACK / ATTACK_GROUND /
+        │  HARVEST / HOLD. Old code had 5 parallel fields, now a single value
+        │  type with a queue. Shift-queue = append.
+        ▼
+    battle/movement/steering.gd + flow_field/ + formation_service
+    (per-tick, reads VisionService for engagement ranges,
+     Drivetrain for speed, real nav for pathing when a match exists;
+     direct-line fallback otherwise)
 ```
 
 **The rebuilt battle layer (`scripts/battle/`) is a fresh architecture** —
 keep it on its own services pattern. The legacy `battle_unit.gd` and
-`player_vehicle.gd` still ship for Test Range and AI compat, but new combat
-work should go in `battle/units/unit.gd` + `damage_model.gd` +
-`unit_assembly.gd` + `boost_controller.gd`.
+`player_vehicle.gd` were deleted on 2026-08-10; new combat work goes in
+`battle/units/unit.gd` + `damage_model.gd` + `unit_assembly.gd` +
+`boost_controller.gd`.
 
-### 3.5 Test Range path
+### 3.5 Proving Ground path
 
-`Battlefield.tscn` is its own world. Spawns the player's most-recently-saved
-design against target dummies. Reads `user://blueprint.json` (legacy
-single-slot pointer) — if you change blueprint storage, update
-`blueprint_manager.gd`'s `LEGACY_SLOT_PATH` path here.
+Every mode lands on `Battle.tscn`; the Proving Ground is no exception.
+`test_range_launcher.gd` writes a `MatchRuleSet.test_range(...)` rule set into
+`MatchConfig`, spawns the player's scratch design (`user://lab_scratch.json`,
+falling back to most-recent-saved, then the bundled Bulwark MBT) against three
+bundled dummy designs on a small artificial map (`TEST_RANGE_MAP_ID`), behind
+a chase camera. The Design Lab's "Test in Arena" button routes through the
+same launcher.
 
 ---
 
@@ -277,7 +286,7 @@ single-slot pointer) — if you change blueprint storage, update
 | `hull_loader.gd` | Hulls specifically, lazily scanned from `assets/models/hulls/*.glb`+`*.json` and `user://mods/hulls/*` | Cached `Dictionary` |
 | `faction_catalog.gd` | 10 factions: visual identity (13 shader params) + mechanical passives | `FACTIONS` dict; `get_passive()` for typed lookups |
 | `map_catalog.gd` | Maps: terrain, resources, spawns, surface zones, hills | `Dictionary` per map; JSON-backed in `data/maps/` |
-| `battle/economy/building_catalog.gd` | Static buildings: Refinery, Factory, Manufactory, defenses | Catalog + cost / prerequisite rules |
+| `battle/economy/building_catalog.gd` | Static buildings: HQ, Refinery, the three Manufactory tiers, Power Plant, tech/physics/exotics labs, defenses | Catalog + cost / prerequisite rules |
 | `battle/economy/resource_catalog.gd` | Resource types (metal, crystal, lumber, oil) | Catalog + per-type rules |
 | `dc_tables.gd`, `mc_tables.gd` | Damage / material coefficients tables | (specialized balance tables) |
 
@@ -290,21 +299,18 @@ same kind of contract** for sound: add the entry in `tools/audio/sfx.py`'s
 
 ### 4.2 Authored data files
 
-- `data/loadout/*.json` — default player blueprints (Bulwark MBT, Rattler
-  Scout, Ore Trucker, Warden AA, etc.). These are the designs that ship
-  with the game.
+- `data/loadout/*.json` — default player designs (Bulwark MBT, Rattler
+  Scout, Ore Hauler, Warden AA, etc.): the build palette, the Proving
+  Ground dummies and the tutorial units.
 - `data/enemy/*.json` — enemy roster designs used by the AI.
-- `data/hull_assemblies/*.json` — one per hull type. Each defines a CSG
-  bake (smoothness, resolution, facet_angle, fit_percent, chamfer, mirror)
-  and a list of **primitives** (BOX / SLOPE / RING) that compose the hull
-  mesh. Sidecar fields (hp, weight, metal/crystal cost, base_energy, size,
-  color) are read by `ModuleCatalog.compute_hull_*()`. The `_note` field
-  on each primitive is documentation for the hull author — keep them.
+- `assets/blueprints/default_roster/*.json` — the bundled default roster
+  read by `blueprint_manager.gd` (same JSON blueprint format).
 - `data/maps/*.json` — map definitions (terrain PNG, surface PNG, hills,
   resource nodes, spawns, surface zones, obstacles, water areas). Migrated
   out of hardcoded constants (see `CLAUDE.md` and `map_catalog.gd`).
-- `data/test_fixtures/terrain/` — fixed test terrain (PNG + JSON) used by
-  navmesh/terrain suites. Reusing them is faster than authoring new ones.
+- `data/test_fixtures/terrain/` — fixed terrain (PNG + JSON) left over
+  from the deleted navmesh/terrain test suites. No live reader right now;
+  useful as ready-made input if you write a terrain probe.
 - `Tracks/` (repo root) — externally-generated curated music. **Provenance
   unconfirmed — see CREDITS.md.** `tools/audio/curated_music.py` maps
   game states to these files. Skirmish rotates through a pool of 8 (never
@@ -313,7 +319,7 @@ same kind of contract** for sound: add the entry in `tools/audio/sfx.py`'s
 ### 4.3 Per-user storage (`user://`)
 
 - `user://blueprints/<id>.json` — saved player designs (roster)
-- `user://lab_scratch.json` — in-progress Design Lab design AND Test Range read target (via TestRangeLauncher)
+- `user://lab_scratch.json` — in-progress Design Lab design AND Proving Ground read target (via TestRangeLauncher)
 - `user://settings.cfg` — `SettingsService` config
 - `user://ui_layout.cfg` — UI dock collapsed state (own file, by design)
 - `user://tutorial_seen.cfg` — single bool, tutorial gating
@@ -330,7 +336,7 @@ same kind of contract** for sound: add the entry in `tools/audio/sfx.py`'s
 | Drivetrain / speed formula | `drivetrain.gd` (single source of truth) |
 | Hull HP/weight/cost from volume scale | `global_config.gd` scale factors + `module_catalog.gd` `compute_hull_*` |
 | A new armor material | `damage_resolver.gd` (table + helper) + `module_catalog.gd` (sidecar) |
-| A new locomotion type | `module_placer.gd` `update_locomotion()` (the 540-line elif chain) — see the golden fixture warning below |
+| A new locomotion type | `locomotion_layout.gd` (data-declared layout; `module_placer.gd` consumes it) |
 | A new building | `battle/economy/building_catalog.gd` + its GLB in `assets/models/buildings/` |
 | A new map | `data/maps/<id>.json`; hot-reload via `map_catalog.gd` |
 | A new faction | `faction_catalog.gd` `FACTIONS` (visual + passives) |
@@ -382,30 +388,32 @@ constraint is enforced by construction**, not by code review.
   colours, spacings, or type sizes in screen code** unless wrapped through
   the theme.
 
-### 6.5 Adding a new test
+### 6.5 Verifying a change
 
-1. Pick or create the right `tests/test_<area>.gd` (or a new one for a
-   new area). The split is documented at `CLAUDE.md` (Test File Layout).
-2. Function name = `test_<thing>`. Returns `bool` (true = pass).
-3. Always `extends "res://tests/suite_base.gd"`. Use `tree`, `root`,
-   `current_scene` — never call `get_tree()` from a test.
-4. `await tree.process_frame` between setup and assertions when the
-   subject uses `_ready()`.
-5. If you add a brand-new test file, also add an entry to `SUITE_FILES`
-   and to `SUITE_ORDER` in `run_tests.gd`. **Do not reorder** SUITE_ORDER
-   — navmesh/Recast suites depend on prior state.
-6. Run via the wrapper (`./run_tests.ps1` or `./run_tests.sh`); the
-   wrapper reimports first. Direct `--script run_tests.gd` will trip on
-   stale `class_name` UIDs.
+There is **no automated test suite** — it was deleted on 2026-08-10 during
+the battle-system unification. The verification loop is:
 
-### 6.6 Golden fixtures
+1. **Parse check**: put the scripts you touched in `tools/compile_check_changed.gd`'s
+   `FILES` list and run it (`--headless --path . --script res://tools/compile_check_changed.gd --quit`).
+   Reach for `compile_check_all.gd` only when something structural changed
+   (autoloads, `class_name`s) — it can run 20+ minutes.
+2. **Behavioral check**: run or write a headless probe — `tools/probe_<area>.gd`
+   SceneTree scripts boot a slice of the game and print findings. Write a new
+   probe rather than a new suite.
+3. **Manual playtest** for anything visual.
 
-`tests/suite_base.gd` holds frozen outputs (e.g. the locomotion layout
-fixture, derived from `module_placer.gd:update_locomotion()`). **If you
-intentionally change a fixture's underlying math, update the fixture in
-its own commit with a comment explaining the delta** — never as a side
-effect of a refactor. This rule has been in place since the locomotion
-rebuild (LOCOMOTION_EXPANSION_PLAN §2.3).
+If a headless script dies with a misleading `Identifier "X" not declared`,
+the `.godot` import cache is stale: reimport with `--headless --editor --import`.
+
+### 6.6 Locomotion layout stability
+
+`locomotion_layout.gd` / `module_placer.gd` compute locomotion station
+positions as pure functions of hull size. The old golden fixture
+(`GOLDEN_LOCOMOTION_LAYOUT` in `tests/suite_base.gd`) went with the deleted
+test suite, but the policy stands: **do not alter placement coordinates
+casually**, and if a coordinate change is intentional, make it its own commit
+with a comment explaining the visual improvement (LOCOMOTION_EXPANSION_PLAN
+§2.3 is where this rule came from).
 
 ### 6.7 The UI architecture (the layered stack)
 
@@ -430,8 +438,9 @@ it — the rule is "signal colour is for state, not decoration"
 │  TOKENS       ui_tokens.gd — palette, type, spacing,     │
 │               radii, motion durations/easings. ONE dict. │
 ├──────────────────────────────────────────────────────────┤
-│  AUDIT        ui_audit.gd — overflow / offscreen /       │
-│               theme-validity checks; opt-out via meta    │
+│  AUDIT        ui_audit.gd — overflow / offscreen controls /        │
+│               theme-validity / icon-cursor assets / input-binding  │
+│               collisions / luminance / layer checks; opt-out meta  │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -504,7 +513,7 @@ them is the difference between fighting the engine and using it:
 | `bomber_theme.tres` | Static StyleBoxes (the `resources/` one) | New control types or restyles |
 | `tools/build_ui_theme.gd` | **Generates** the .tres | Same — re-run after token changes |
 | `ui_shell.gd` | Screen scaffold (backdrop, margin, stat_row) | New shared out-of-match primitive |
-| `ui_dock.gd` | Edge-anchored, collapsible panel (used by stat_calculator's right rail) | When the dock metaphor itself changes |
+| `ui_dock.gd` | Edge-anchored, collapsible panel (used by the telemetry rail's right side) | When the dock metaphor itself changes |
 | `ui_flyout.gd` | Transient popover (used by the parts menu's search box and elsewhere) | When a new popover pattern emerges |
 | `ui_anim.gd` | Motion library (slide, ring, press, counter roll-up) | New motion primitive |
 | `ui_feedback.gd` | UI role → SFX binding | New UI sound or role |
@@ -513,7 +522,7 @@ them is the difference between fighting the engine and using it:
 | `ui_icons.gd` | Icon set | New icon |
 | `ui_stamp.gd`, `tweak_callout.gd`, etc. | Screen-specific affordances | When the screen needs them |
 | `ui_toolbox.gd` | The accordion tier-stack primitive (one shared widget; the four parts-menu toolboxes are NOT instances of this — they hand-roll the plate+header chrome) | New tier-stack behaviour |
-| `ui_toolbox_plate.gd` | The chamfered metal plate drawn behind a toolbox's controls. **Shared chrome** (moved from `battle/hud/` 2026-08-10): used by both `production_hud.gd` (Skirmish) and `parts_menu.gd` (Design Lab) | Plate visual language changes |
+| `ui_toolbox_plate.gd` | The chamfered metal plate drawn behind a toolbox's controls. **Shared chrome** (moved from `battle/hud/` 2026-08-10): used by `parts_menu.gd` (Design Lab), `blueprint_library_screen.gd` and `livery_screen.gd` | Plate visual language changes |
 | `ui_stamped_label.gd` | Lettering stamped into a metal plate and flooded with enamel. **Shared chrome** (moved from `battle/hud/` 2026-08-10) | Stamped-lettering tweaks |
 | `parts_menu.gd` | The Design Lab's bottom toolboxes (4 families × sub-family drawers) + magnifying-glass search. Anchored full-rect with `mouse_filter=IGNORE`; the bar's children own their own clicks. | Parts catalog presentation changes |
 | `part_button.gd` | The per-part card widget (drag source, custom tooltip card, weight label, accent stripe) | Per-part card changes |
@@ -579,7 +588,7 @@ or any other out-of-match screen, this is the pattern.
 
 ### 6.12 The right-panel "lazy label with move_child" pattern
 
-The right `UI_StatBlock` rail (`stat_calculator.gd`) is a `VBoxContainer`
+The right `UI_StatBlock` rail (`telemetry_rail.gd`) is a `VBoxContainer`
 holding a mix of scene-declared widgets and labels created lazily by
 `update_stats()` (drivetrain speed/load, power gen/storage/draw/net,
 range/vision, boost, armor thresholds, tech requirements). The lazy
@@ -614,16 +623,15 @@ first one would land at a different position than intended).
 **THE FAILURE MODE.** `armor_threshold_label` was being created in
 `update_stats()` but never `add_child`'d to `_rail_vbox` — it existed
 as a Label object with the right text, but had no parent and so was
-never rendered. `test_sim_and_stats.gd` reads its text and the test
-passes, but no player ever sees it on screen. The fix is both the
+never rendered. The fix is both the
 `add_child` AND a `move_child` — without either, the label is either
 invisible (no parent) or in the wrong place (end of VBox).
 
-### 6.13 The warning panel pattern (stat_calculator.gd)
+### 6.13 The warning panel pattern (telemetry_rail.gd)
 
 The right rail has three warning panels — OVERWEIGHT, POWER DEFICIT,
 SPOTTER REQUIRED — all sharing the same shape. Built by one helper
-(`_build_warning_panel(role)` in `stat_calculator.gd`) so the three
+(`_build_warning_panel(role)` in `telemetry_rail.gd`) so the three
 call sites cannot drift on the visual language.
 
 The shape:
@@ -746,12 +754,11 @@ fix because VBox is the simplest Container we have and it
 religiously stacks.
 
 **The "!" icon.** The verdict headline is the unprefixed label
-("UNARMED", "OVER CAPACITY", "POWER DEFICIT" — `test_design_verdict.gd`
-asserts on these exact strings). The "!" prefix is added in the
-**consumer** (`_update_verdict()` in `stat_calculator.gd`), not in
-`DesignVerdict.evaluate()` — because the test contract is the raw
-data, not the display rendering, and a presentation concern should
-not change a data contract. The two-space gap after the "!" prevents
+("UNARMED", "OVER CAPACITY", "POWER DEFICIT" — the raw strings
+`DesignVerdict.evaluate()` returns). The "!" prefix is added in the
+**consumer** (`_update_verdict()` in `telemetry_rail.gd`), not in
+`DesignVerdict.evaluate()` — a data contract should not carry a
+presentation concern. The two-space gap after the "!" prevents
 it from merging with the first letter under the phosphor's tight
 letter-spacing.
 
@@ -761,20 +768,23 @@ letter-spacing.
 
 1. **Godot version: 4.7.1**, bundled. A 4.3 pair may still be in the dir
    — **do not use it.** Downgrades `config/features` and strips UIDs.
-2. **`.uid` sidecars**: 126 of them. Don't delete them, don't regenerate
-   by hand; the editor does it. If a `class_name` change is "not
-   declared," run the wrapper.
+2. **`.uid` sidecars**: hundreds of them. Don't delete them, don't
+   regenerate by hand; the editor does it. If a `class_name` change is "not
+   declared," reimport (`--headless --editor --import`) — the `.godot`
+   cache is gitignored and goes stale when autoloads/`class_name`s land.
 3. **`compile_check_all.gd` is not actually quick** at this size; can run
-   20+ minutes. Prefer `run_tests.ps1` for verification.
+   20+ minutes. Prefer `compile_check_changed.gd` (targeted) for routine
+   verification, probes for behavior.
 4. **Autoloads in `project.godot` are ordered**; later autoloads can
    `preload` earlier ones, not the reverse. Adding a new autoload? Put
    it last or near its dependencies.
-5. **`compile_check_all.gd` and direct `--script run_tests.gd` need
-   `--path` and `--quit`**, which is why the wrappers exist.
+5. **`compile_check_all.gd` needs `--path` and `--quit`** — and Godot
+   block-buffers stdout when piped, so expect no output until it exits.
 6. **Blueprint version bump is rare and deliberate.** Don't bump
    `CURRENT_BLUEPRINT_VERSION` to fix a display bug; only bump when a
    schema change could silently mis-load older saves. The postmortem on
-   the 1.0→2.0 bump is at `blueprint_manager.gd:11-18`.
+   the 1.0→2.0 bump is in `blueprint_manager.gd`'s header comment.
+   Current version: 3.0.
 7. **`HullLoader.get_hulls()` is cached and identity-checked.**
    `ModuleCatalog._catalog_cache` invalidates when the hull dict is a
    different instance (used by `reset_cache_for_tests()`). Don't bypass
@@ -807,17 +817,15 @@ letter-spacing.
     calculation anywhere else, it's a bug.
 15. **Stat rounding is at compute time** (`GlobalConfig.round_to_half`).
     Don't display-round after compute-rounding; the two should agree.
-16. **Test order is pinned in `SUITE_ORDER`** (see `run_tests.gd:51`).
-    Reorder and navmesh tests will flake.
-17. **`visual_regression/captures/*.png` go stale silently.** The visual
-    regression tool is windowed-only (Godot's headless dummy renderer
-    cannot produce real frames), so a casual re-run is not on the
-    test pipeline. After a UI rewrite, captures from the previous
-    layout can keep sitting in `captures/` and **mislead** — they
-    look like ground truth but reflect a layout that no longer
-    exists in code. When in doubt, trash `captures/*.png` so the
-    next windowed run regenerates them as new baselines instead of
-    diff'ing against the dead layout.
+16. **There is no test suite to reorder.** The old pinned `SUITE_ORDER`
+    went with the deleted suite (navmesh/Recast suites used to flake
+    depending on execution order — worth remembering if tests ever come
+    back).
+17. **No automated visual regression.** The capture harness
+    (`tools/capture_hud.tscn`, `tools/capture_battle.gd`,
+    `visual_regression/`) was removed with the test suite. For interface
+    work, run the game in a real window and eyeball it; the debug overlay
+    and `perf_hud.gd` are there for runtime inspection.
 
 ---
 
@@ -825,7 +833,7 @@ letter-spacing.
 
 - `CLAUDE.md` — long-form project doc: architecture, commands, layout.
 - `README.md` — entry point, what the game is, how to run it.
-- `PROGRESS.md` (279 KB) — dated changelog, newest first, written after
+- `PROGRESS.md` — dated changelog, newest first, written after
   every major chunk. **The single best on-ramp for "what happened
   recently."** Read the first few sections of any given day for context
   before touching the code it describes.
@@ -835,19 +843,16 @@ letter-spacing.
   TBD.**
 - `docs/archive/` — completed implementation plans (HULL_BUILDER,
   HULL_MODDING, LOCOMOTION_EXPANSION, PERFORMANCE, SPEED_AND_NAVAL,
-  VISUAL_AND_UX_POLISH, OPERATIONS, etc.). They still describe the design
+  VISUAL_AND_UX_POLISH, OPERATIONS, FABLE_REVIEW, DECISIONS_NEEDED,
+  UNIFIED_ROADMAP, RTS_CORE_ROADMAP, etc.). They still describe the design
   and are the right place to read intent.
-- `docs/FABLE_REVIEW.md` — balance / design review that drove many of
-  the dedup passes. Cited inline all over the codebase by its section
-  numbers (e.g. `FABLE_REVIEW.md 3.5`, `FABLE_REVIEW.md 1.2`).
-- `docs/DECISIONS_NEEDED.md`, `docs/UNIFIED_ROADMAP.md`,
-  `docs/RTS_CORE_ROADMAP.md` — roadmap-level.
-- `docs/HULL_MASSING_SPEC.md`, `docs/Damage_And_Armor_Model.md`,
-  `docs/MOUNTING_AND_ARMOR_SPEC.md`, `docs/ENERGY_AND_BALANCE_SPEC.md`,
-  `docs/DESIGN_VISION.md`, `docs/CORE_DESIGN_LANGUAGE.md`,
-  `docs/VISUAL_ART_DIRECTION.md` — design-language specs cited in
-  comments by filename + section.
+- `docs/specs/` — HULL_MASSING_SPEC, Damage_And_Armor_Model,
+  MOUNTING_AND_ARMOR_SPEC, ENERGY_AND_BALANCE_SPEC,
+  Arsenal_Weapons_List, ECONOMY_BALANCE, Design_Lab_UI_UX.
+- `docs/design/` — DESIGN_VISION, CORE_DESIGN_LANGUAGE,
+  VISUAL_ART_DIRECTION, Factions_and_Buildings, Map_Guidance.
 - `prototype/docs/UI_STYLE_GUIDE.md` — UI tokens, type, materials, motion.
+- `prototype/llm_directives.md` — GDScript style rules + superseded-systems list.
 - `prototype/scratch/` — throwaway probe scripts and design-doc
   scratchpads. Don't ship; don't trust as ground truth; but the
   *logs* (e.g. `sponson_*.log`) are sometimes the only record of a
@@ -867,10 +872,10 @@ letter-spacing.
   drivetrain formula in `drivetrain.gd`, not a new file).
 - New tunables go in `GlobalConfig` only if they're global; otherwise
   on the relevant system as a named `const`.
-- New tests go in the right `tests/test_<area>.gd`; new file + new
-  `SUITE_FILES` entry + a `SUITE_ORDER` placement.
-- Re-run the test wrapper (not raw `--script`) before declaring done.
-- If I touch a golden fixture, that's its own commit with a comment.
+- Verify with the targeted parse check plus a headless probe; full-tree
+  `compile_check_all.gd` only for structural changes.
+- If I change locomotion placement coordinates deliberately, that's its
+  own commit with a comment.
 - If I'm not sure where something lives, the `Key files cheat sheet`
   in §5 is the first lookup.
 
@@ -882,7 +887,8 @@ letter-spacing.
 2. **Read CLAUDE.md end-to-end** if you haven't recently.
 3. **Skim the latest few sections of PROGRESS.md** to see what's been
    touched.
-4. **Pick the right area** via the test-file layout in CLAUDE.md or the
-   cheat sheet in §5.
+4. **Pick the right area** via the cheat sheet in §5 or CLAUDE.md's
+   architecture section.
 5. **Match the comment style** of the file I'm editing.
-6. **Run the tests** via the wrapper before and after my change.
+6. **Run the targeted parse check and a probe** before declaring done;
+   manual playtest for anything visual.

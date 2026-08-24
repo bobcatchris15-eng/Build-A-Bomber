@@ -122,14 +122,40 @@ static func should_use_field(unit_count: int) -> bool:
 # The field for `destination`, building it if this is the first ask. Returns null
 # when fields are switched off for this group size, so callers can treat "no
 # field" and "small group" identically.
+#
+# STALE-WHILE-REVALIDATE (2026-08-24, tools/probe_navmesh_repath_storm.gd).
+# A field build is a whole-map passability sample (one NavigationServer3D
+# map_get_closest_point PER CELL - ~14 k calls on lake_crossing at scale 4,
+# seconds of main-thread time) plus a GDScript Dijkstra over the same grid.
+# invalidate() fires on EVERY navmesh rebake, so before this change the first
+# unit to ask after each bake rebuilt its field synchronously inside
+# unit.steer_nav. Now invalidated fields move to a stale shelf and keep
+# serving - their routes predate the newest holes by at most one sync interval,
+# and units slide along any new building's collision body regardless - while
+# fresh builds are gated to one per FIELD_REBUILD_MIN_INTERVAL_MS, spread well
+# away from the navmesh sync storms the same events cause. A destination never
+# built before also waits out the gate rather than freezing a frame; its units
+# steer on their NavigationAgent3Ds until then, which is measured cheap.
+const FIELD_REBUILD_MIN_INTERVAL_MS := 20000
+
+var _fields_stale: Dictionary = {}
+var _stale_order: Array = []
+var _last_build_ms: int = -(1 << 30)
+
 func field_for(destination: Vector3, unit_count: int, trip_distance: float = INF) -> FlowField:
 	if not should_use_field(unit_count) or trip_distance < MIN_TRIP_DISTANCE:
 		return null
 	var key := _key(destination)
 	if _fields.has(key):
 		return _fields[key]
-
+	var now_ms := Time.get_ticks_msec()
+	var gate_open := now_ms - _last_build_ms >= FIELD_REBUILD_MIN_INTERVAL_MS
+	if not gate_open:
+		# Serve whatever previous knowledge exists; agents carry the unit
+		# meanwhile. No build is attempted, so nothing bills to this tick.
+		return _fields_stale.get(key)
 	var field: FlowField = FlowFieldScript.build(_nav_map, _map_half_extents, destination, _world_scale)
+	_last_build_ms = now_ms
 	_fields[key] = field
 	_order.append(key)
 	while _order.size() > MAX_CACHED:
@@ -141,9 +167,18 @@ func field_for(destination: Vector3, unit_count: int, trip_distance: float = INF
 # up or coming down alters exactly the passability the fields were sampled from,
 # and a stale field routes units straight through the new structure. Called from
 # the same place that repaths live agents, for the same reason.
+#
+# Since 2026-08-24 the fields are DEMOTED rather than dropped: see the
+# stale-while-revalidate note on field_for().
 func invalidate() -> void:
+	for key in _fields:
+		if not _fields_stale.has(key):
+			_fields_stale[key] = _fields[key]
+			_stale_order.append(key)
 	_fields.clear()
 	_order.clear()
+	while _stale_order.size() > MAX_CACHED:
+		_fields_stale.erase(_stale_order.pop_front())
 
 
 func _key(destination: Vector3) -> Vector2i:

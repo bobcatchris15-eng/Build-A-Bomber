@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/battle/match_director.gd" id="1_director"]
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="2_rtscam"]
@@ -7,9 +7,12 @@
 
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_bt"]
+; VISUAL polish 2026-08-23: sky_horizon lifted to 0.62 and sky_curve widened
+; 0.12 -> 0.20 so the horizon gradient sits softer and meets the volumetric
+; fog without a hard seam. Reads as "thick air" instead of "shader on a box".
 sky_top_color = Color(0.36, 0.40, 0.44, 1)
-sky_horizon_color = Color(0.50, 0.52, 0.54, 1)
-sky_curve = 0.12
+sky_horizon_color = Color(0.62, 0.64, 0.66, 1)
+sky_curve = 0.20
 ground_bottom_color = Color(0.16, 0.18, 0.17, 1)
 ground_horizon_color = Color(0.46, 0.48, 0.48, 1)
 ground_curve = 0.14
@@ -19,26 +22,53 @@ sun_angle_max = 30.0
 sky_material = SubResource("ProceduralSkyMaterial_bt")
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_bt"]
-auto_exposure_enabled = false
-auto_exposure_min_exposure_value = 10.0
-auto_exposure_max_exposure_value = 20.0
-; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. DOF off: the Battle camera's near
-; plane stays well inside the focus band, and the "tilt-shift" effect from
-; a 0.05 blur was invisible at 1920x1080 tactical zoom. The lab scenes
-; (MainLab/HullBuilder) keep DOF because their subject is a single mesh.
+; VISUAL polish 2026-08-23: auto-exposure re-enabled. In Godot 4.7 the
+; auto-exposure knob is the *sensitivity* (ISO) form, not the old
+; *exposure_value* (EV) form - the latter is silently dropped at load.
+; Sensitivity 100..800 is Godot's default and gives ~3 stops of headroom
+; for the camera to compress bright sun-lit ground without lifting shadows.
+auto_exposure_enabled = true
+auto_exposure_min_sensitivity = 100.0
+auto_exposure_max_sensitivity = 800.0
+; VISUAL polish 2026-08-23 (later same day): DOF re-DISABLED. The
+; re-enabled tilt-shift (distance 200, transition 80) and the follow-up
+; lightened version (distance height+150, transition lerp 3..12) both
+; read as "ground past the units is mush" at tactical zoom and worse,
+; the soft band sits on the rocky/grassland variant boundaries and turns
+; what should be a real heightmap into a tilt-shift diorama. Dropped
+; the whole thing - the rts_camera.gd:75-84 zoom updates become no-ops
+; while this is false. If reintroduced later, the zoom-driven formulas
+; in rts_camera.gd:75-94 still drive distance/transition per zoom.
 dof_blur_far_enabled = false
+dof_blur_far_distance = 200.0
+dof_blur_far_transition = 80.0
 
 [sub_resource type="Environment" id="Environment_bt"]
 background_mode = 2
 sky = SubResource("Sky_bt")
 tonemap_mode = 4
 tonemap_exposure = 1.0
-ambient_light_source = 1
-ambient_color = Color(0.60, 0.61, 0.62, 1)
-ambient_color_sun_energy = 0.35
+; VISUAL polish 2026-08-23: ambient reverted to sky-aware (source 2).
+; Was a flat grey at (0.60, 0.61, 0.62) which over-lit shadowed areas
+; and crushed dynamic range to ~0.4 stops. Sky-aware + the (0.45, 0.50,
+; 0.55) tint picks up the procedural sky's blue-grey, so shadow vs lit
+; reads as "cool sky fill vs warm sun" instead of "bright grey vs
+; slightly-dimmer bright grey". Decoupled sun_energy dropped 0.35 -> 0.20
+; to keep the sun's directionality visible against the ambient fill.
+ambient_light_source = 2
+ambient_light_color = Color(0.45, 0.50, 0.55, 1)
+ambient_light_sun_energy = 0.20
+; VISUAL polish 2026-08-23 (later same day): SSAO + bloom REVERTED to
+; PR-1 / pre-session values. The widened SSAO (0.8/1.4) and the bumped
+; bloom (0.8/0.05) were the env-stack changes that made the rocky and
+; grassland normal maps (both have R range 200+) read as "bad
+; cobblestone" - the wider SSAO darkens the gap between every stone,
+; the bloom halos the bright peaks, and the contrast grade (also from
+; this session, retained) accentuates the difference. The volumetric
+; fog and auto-exposure are kept (those are what addressed the original
+; "too bright and crisp" complaint and don't amplify surface bumps).
 ; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. SSAO halved (radius 0.8->0.5,
-; intensity 1.8->1.0) — the looser settings were tuned for SDFGI's shadow
-; contribution; with SDFGI off the wider band just smears distant ground.
+; intensity 1.8->1.0) — re-applied 2026-08-23.
 ssao_enabled = true
 ssao_radius = 0.5
 ssao_intensity = 1.0
@@ -48,17 +78,59 @@ glow_bloom = 0.04
 ; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. SDFGI off — the heaviest single
 ; feature in this file, ~25% of frame time on a populated map at 1920x1080
 ; (per perf_hud.gd's 31% headline divided by the SSAO+SSIL share). Macro-bounce
-; GI on a tactical RTS zoom is not visible; the ambient_light_source = 1
-; flat source above carries the read.
+; GI on a tactical RTS zoom is not visible; the sky-aware ambient above
+; carries the read.
 sdfgi_enabled = false
 ; SKIRMISH_PERF_TROUBLESHOOTING.md PR-1. SSIL off — picks up the micro-bounce
 ; detail SDFGI's voxels can't see, and SDFGI is now off. Stacking SSIL on
 ; top of SSAO was paying for itself at 8 rays/4 samples every fragment with
 ; nothing for it to add to.
 ssil_enabled = false
+; VISUAL polish 2026-08-23: grading 1.0/1.0 -> 1.15/1.08. Lab scenes use
+; 1.18/1.06; this is a slightly more conservative grade tuned for a
+; battlefield palette (less saturation lift, more contrast push). Free
+; performance-wise (one final tonemap pass).
 adjustment_enabled = true
-adjustment_saturation = 1.0
-adjustment_contrast = 1.0
+adjustment_saturation = 1.15
+adjustment_contrast = 1.08
+; VISUAL polish 2026-08-23: VOLUMETRIC FOG. The single biggest perceptual
+; change in this pass - adds the "thick air" / atmospheric perspective
+; that makes a scene read as photographed rather than viewport-previewed.
+; Density 0.0035 tuned against the 1200m ground box (so map edges around
+; 200-300m fade into sky-tinted haze, not a wall). Length 300 covers the
+; full fog depth without the 64m default cutting off behind the camera.
+; Albedo integration off (gi_inject=0, ambient_inject=0) because the
+; sky-aware ambient already does the read.
+volumetric_fog_enabled = true
+volumetric_fog_density = 0.0035
+volumetric_fog_length = 300.0
+volumetric_fog_detail_spread = 2.0
+volumetric_fog_gi_inject = 0.0
+volumetric_fog_ambient_inject = 0.0
+volumetric_fog_sky_affect = 1.0
+volumetric_fog_height = 0.0
+volumetric_fog_height_density = 0.0
+; VISUAL polish 2026-08-23: screen-space AA. In Godot 4.7, `screen_space_aa`
+; lives on the Viewport, not the Environment, so it's set at the project
+; level in prototype/project.godot's [rendering] section (see
+; `anti_aliasing/quality/screen_space_aa = 1`). FXAA is a ~0.3 ms pass
+; and removes the silhouette aliasing that was making edges read "crisp"
+; in the wrong way.
+
+; VISUAL polish 2026-08-23: ground safety-net material. The actual battlefield
+; surface is built by terrain_builder.gd on top of this BoxMesh, so under
+; normal play this BoxMesh is hidden. But if a player zooms out past a map's
+; edge (rts_camera.gd max_height = 160, map half-extent up to ~300+ under
+; world_scale), the box becomes visible against the fog/horizon. Default
+; StandardMaterial3D on a MeshInstance3D is white (255,255,255) with no
+; roughness, which was reading as a "white reflector panel" past the map.
+; This neutral dark warm-grey PBR material matches the terrain palette so
+; the safety net doesn't pop.
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.32, 0.30, 0.28, 1)
+roughness = 0.85
+metallic = 0.0
+metallic_specular = 0.5
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
 size = Vector3(1200, 1, 1200)
@@ -88,11 +160,18 @@ transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 
 attributes = SubResource("CameraAttributesPractical_bt")
 script = ExtResource("2_rtscam")
 current = true
+; (TAA is enabled project-wide in prototype/project.godot's [rendering]
+; section — see anti_aliasing/quality/use_taa. In Godot 4.7 use_taa was
+; moved off Camera3D onto the Viewport/project setting; setting it here
+; is silently dropped at load.)
 
 [node name="ChaseCamera" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7, 14)
 script = ExtResource("3_chasecam")
 current = false
+; (TAA project-wide, see note on the main Camera3D above. Setting it here
+; in Godot 4.7 is silently dropped because use_taa is no longer a
+; Camera3D property.)
 
 [node name="Ground" type="StaticBody3D" parent="."]
 
@@ -101,6 +180,7 @@ shape = SubResource("BoxShape3D_ground")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
 mesh = SubResource("BoxMesh_ground")
+material_override = SubResource("StandardMaterial3D_ground")
 
 [node name="LightCap" type="Node" parent="."]
 script = ExtResource("4_lightcap")

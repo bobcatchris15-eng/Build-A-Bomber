@@ -96,7 +96,7 @@ Note: the `.godot` import cache is gitignored and goes stale whenever a new auto
 - Enemy AI: wave-based (`battle/ai/`), counter-picks player composition, places defenses when HQ threatened.
 
 **Terrain & Navigation** (`terrain_builder.gd`, `map_catalog.gd`)
-- Maps are JSON (migrated from hardcoded constants). Heightmap-based terrain with 7 surface types.
+- Maps are JSON (migrated from hardcoded constants). Heightmap-based terrain; surface types are data-driven from `SURFACE_PALETTE` in `terrain_builder.gd` (14 named types).
 - Multiple navmeshes: ground, water, deep water, amphibious (combined ground+water for screw-drive).
 - Hull draught routes naval units onto deep_water_map vs water_map.
 
@@ -359,6 +359,6 @@ interface, ambience — to be played straight. Ordnance banks come from
 | `docs/design/VISUAL_ART_DIRECTION.md` | Faction material/shader parameters, the ten factions, per-terrain-type texture direction, weapon-module modelling rules. |
 | `prototype/docs/UI_STYLE_GUIDE.md` | Interface chrome only — tokens, type scale, materials, elevation, motion. |
 
-- **No emoji/dingbats in UI text** — a standing rule, but note it is **not** currently enforced by anything. `ui_audit.gd` checks theme-resource validity, icon/cursor assets, input-binding collisions, material luminance and layer discipline. Box-drawing and arrows are allowed (technical notation).
+- **No emoji/dingbats in UI text** — a standing rule, but note it is **not** currently enforced by anything. `ui_audit.gd` checks panel overflow / offscreen controls, theme-resource validity, icon/cursor assets, input-binding collisions, material luminance and layer discipline. Box-drawing and arrows are allowed (technical notation).
 - **Blueprint version**: Only bumped when JSON schema changes could silently mis-load older saves (currently 3.0).
 - **Scratch vs Saved designs**: "Test in Arena" writes a scratch file (`user://lab_scratch.json`), never a roster entry. Only explicit Save creates `user://blueprints/<id>.json`.

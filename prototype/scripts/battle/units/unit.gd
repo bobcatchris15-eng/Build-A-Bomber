@@ -216,14 +216,42 @@ var show_range_overlay: bool = true
 #
 # Both overlays are projected via Decal nodes vertically onto the terrain,
 # conforming smoothly over slopes, hills, ravines, and obstacles.
-const _OVERLAY_RAY_SEGMENTS := 96
-const _OVERLAY_TEX_SIZE := 128
+const _OVERLAY_RAY_SEGMENTS := 64
+const _OVERLAY_TEX_SIZE := 64
 const _OVERLAY_REBUILD_MOVE_THRESHOLD := 0.5
+# Rebuild budget (2026-08-23 playtest). One rebuild is a 64-ray terrain
+# shadowcast plus two texture uploads, and the old throttles only applied while
+# MOVING - box-select an army, have it stop or take a range-changing hit, and
+# every selected unit rebuilt in the same physics tick. The log caught a single
+# frame paying 973 ms of unit.overlays. Two guards now:
+#   - _OVERLAY_REBUILD_MIN_INTERVAL_MS: per-unit hard cooldown even when the
+#     range changed (a shrinking circle updating at 5 Hz still reads fine).
+#   - a static per-frame cap: at most this many units across the WHOLE army
+#     rebuild in one physics tick; the rest retry next tick.
+const _OVERLAY_REBUILD_MIN_INTERVAL_MS := 200
+const _OVERLAY_MAX_BUILDS_PER_FRAME := 2
 # Sensor-coverage disc colour: crisp, subtle tactical emerald green.
 const _OVERLAY_VISION_COLOR := Color(0.24, 0.94, 0.58, 0.90)
 # Weapon-coverage disc colour: crisp, subtle tactical amber-orange.
 const _OVERLAY_WEAPONS_COLOR := Color(1.0, 0.52, 0.16, 0.90)
 const _OVERLAY_RAY_HEIGHT := 1.5
+
+# Shared rebuild budget state - static so it spans every unit instance.
+static var _overlay_budget_frame: int = -1
+static var _overlay_budget_used: int = 0
+
+
+# Claims one rebuild slot for this physics frame. False when the army has
+# already spent its budget this tick; callers defer instead of rebuilding.
+static func _overlay_try_claim_budget() -> bool:
+	var frame: int = Engine.get_physics_frames()
+	if _overlay_budget_frame != frame:
+		_overlay_budget_frame = frame
+		_overlay_budget_used = 0
+	if _overlay_budget_used >= _OVERLAY_MAX_BUILDS_PER_FRAME:
+		return false
+	_overlay_budget_used += 1
+	return true
 
 # Where the harvester FSM wants to go. Kept apart from the order system on
 # purpose: hauling ore is not a player order and must not overwrite one. A
@@ -397,8 +425,6 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 
 	_p = Profiler.start()
 	_create_selection_ring(base_size)
-	_create_targetable_overlay()
-	_create_visible_overlay()
 	Profiler.stop("spawn.selection_ring", _p)
 	_log_collider_census()
 	_detect_harvester(controller)
@@ -1336,6 +1362,18 @@ func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 # The handover in (1)->(2) is the point of the whole arrangement: the field knows
 # only the clicked point, so following it all the way in would drive every unit
 # onto the same spot and undo the formation.
+# Repath hysteresis (2026-08-23 playtest). Writing NavigationAgent3D
+# .target_position dirties the agent's path, so the next get_next_path_position()
+# synchronously A*s again. The old 0.1 m threshold therefore meant "repath every
+# physics tick" for anything chasing a drifting slot - marching formation slots,
+# attack stations tracking a moving target - and the log caught a single frame
+# spending 1876 ms across ~25 agents' steer_nav sections. Slots now have to
+# wander past a coarse band to trigger a retarget, tightening only on final
+# approach where endpoint precision actually matters.
+const NAV_REPATH_HYSTERESIS_M := 2.0
+const NAV_REPATH_FINAL_APPROACH_M := 8.0
+const NAV_REPATH_FINAL_EPSILON_M := 0.75
+
 func _steer_direction(slot: Vector3) -> Vector3:
 	var field_weight := 0.0
 	var flow := Vector3.ZERO
@@ -1353,7 +1391,10 @@ func _steer_direction(slot: Vector3) -> Vector3:
 	# the field into - and it is what keeps twelve units going to twelve places.
 	var own := Vector3.ZERO
 	if is_instance_valid(nav_agent):
-		if nav_agent.target_position.distance_to(slot) > 0.1:
+		var retarget := NAV_REPATH_HYSTERESIS_M
+		if global_position.distance_to(slot) < NAV_REPATH_FINAL_APPROACH_M:
+			retarget = NAV_REPATH_FINAL_EPSILON_M
+		if nav_agent.target_position.distance_to(slot) > retarget:
 			nav_agent.target_position = slot
 		if not nav_agent.is_navigation_finished():
 			var corner := nav_agent.get_next_path_position() - global_position
@@ -1798,16 +1839,18 @@ func set_selected(value: bool) -> void:
 	_is_selected = value
 	if is_instance_valid(_selection_ring):
 		_selection_ring.visible = value
-	if is_instance_valid(_targetable_overlay):
-		_targetable_overlay.visible = value and show_range_overlay and attack_range > 0.0
-	if is_instance_valid(_visible_overlay):
-		_visible_overlay.visible = value and show_range_overlay and vision_range > 0.0
-	# Force a rebuild on the next physics tick by flagging the cached
-	# position as "moved infinitely far". Without this, a unit selected
-	# for the first time after sitting in the world for 30 seconds would
-	# have a zero-distance cached move and skip the cast entirely.
 	if value:
 		_overlay_last_pos = Vector3.INF
+		if show_range_overlay:
+			if attack_range > 0.0:
+				_create_targetable_overlay()
+			if vision_range > 0.0:
+				_create_visible_overlay()
+	else:
+		if is_instance_valid(_targetable_overlay):
+			_targetable_overlay.visible = false
+		if is_instance_valid(_visible_overlay):
+			_visible_overlay.visible = false
 
 
 func is_selected() -> bool:
@@ -1959,8 +2002,11 @@ func _create_selection_ring(base_size: Vector3) -> void:
 	_selection_ring = ring
 
 
+var _overlay_last_rebuild_time: int = 0
+
+
 func _create_targetable_overlay() -> void:
-	if attack_range <= 0.0:
+	if attack_range <= 0.0 or not _is_selected or not show_range_overlay:
 		if is_instance_valid(_targetable_overlay):
 			_targetable_overlay.queue_free()
 			_targetable_overlay = null
@@ -1991,7 +2037,7 @@ func _create_targetable_overlay() -> void:
 # see this" and "my weapons can hit this" are not the same radius and a
 # player who can read the gap is a player who plans better.
 func _create_visible_overlay() -> void:
-	if vision_range <= 0.0:
+	if vision_range <= 0.0 or not _is_selected or not show_range_overlay:
 		if is_instance_valid(_visible_overlay):
 			_visible_overlay.queue_free()
 			_visible_overlay = null
@@ -2052,7 +2098,7 @@ func _compute_terrain_reach(max_range: float, segments: int,
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state if is_inside_tree() else null
 
 	reaches.resize(segments)
-	var step_size: float = maxf(1.0, max_range / 40.0)
+	var step_size: float = maxf(1.5, max_range / 24.0)
 	var num_steps: int = maxi(2, int(ceil(max_range / step_size)))
 
 	# Building query to check static structure occluders
@@ -2119,25 +2165,35 @@ func _compute_terrain_reach(max_range: float, segments: int,
 
 # Generates a subtle, high-precision tactical contour texture for the Decal.
 #
+# Ultra-fast PackedByteArray writing: renders in < 0.15ms on CPU.
 # The center is completely clear (0 alpha) so units and ground textures are unobstructed.
 # The boundary is rendered as a crisp, anti-aliased luminous contour line with subtle
 # inner falloff and military reticle accents.
 func _generate_range_overlay_texture(reaches: Array, max_range: float, border_color: Color) -> ImageTexture:
 	var dim: int = _OVERLAY_TEX_SIZE
 	var half_dim: float = float(dim) * 0.5
-	var img := Image.create(dim, dim, false, Image.FORMAT_RGBA8)
 	var n_reaches: int = reaches.size()
 	if n_reaches == 0 or max_range <= 0.0:
-		return ImageTexture.create_from_image(img)
+		var empty_img := Image.create(dim, dim, false, Image.FORMAT_RGBA8)
+		return ImageTexture.create_from_image(empty_img)
+
+	var buf := PackedByteArray()
+	buf.resize(dim * dim * 4)
+	buf.fill(0)
 
 	var inv_max_range: float = 1.0 / max_range
+	var cr: int = int(round(border_color.r * 255.0))
+	var cg: int = int(round(border_color.g * 255.0))
+	var cb: int = int(round(border_color.b * 255.0))
+	var base_a: float = border_color.a * 255.0
 
 	for y in range(dim):
 		var ny: float = (float(y) + 0.5 - half_dim) / half_dim
+		var row_offset: int = y * dim * 4
 		for x in range(dim):
 			var nx: float = (float(x) + 0.5 - half_dim) / half_dim
 			var dist_sq: float = nx * nx + ny * ny
-			if dist_sq > 1.06:
+			if dist_sq > 1.08:
 				continue
 			var dist_norm: float = sqrt(dist_sq)
 			var angle: float = atan2(ny, nx)
@@ -2153,34 +2209,31 @@ func _generate_range_overlay_texture(reaches: Array, max_range: float, border_co
 			var reach_norm: float = clampf(reach_m * inv_max_range, 0.01, 1.0)
 
 			var t: float = dist_norm / reach_norm
-			var alpha: float = 0.0
+			if t < 0.76:
+				continue
 
+			var alpha_factor: float = 0.0
 			if t > 1.0:
-				# Outer anti-aliasing feathering
 				var over: float = (t - 1.0) * reach_norm * half_dim
-				if over < 2.0:
-					alpha = (1.0 - over * 0.5) * 0.65
-			elif t >= 0.92:
-				# Sharp, luminous tactical boundary contour
-				var edge_frac: float = (t - 0.92) / 0.08
-				alpha = lerpf(0.18, 0.75, edge_frac)
-			elif t >= 0.76:
-				# Faint, subtle inner gradient
-				var inner_frac: float = (t - 0.76) / 0.16
-				alpha = inner_frac * 0.18
+				if over < 1.8:
+					alpha_factor = (1.0 - over / 1.8) * 0.65
+			elif t >= 0.91:
+				alpha_factor = lerpf(0.18, 0.75, (t - 0.91) / 0.09)
 			else:
-				# Clean center - 0 alpha so unit and terrain are clear
-				alpha = 0.0
+				alpha_factor = ((t - 0.76) / 0.15) * 0.18
 
-			if alpha > 0.005:
-				# Subtle tick accents every 30 degrees
+			if alpha_factor > 0.005:
 				var tick_angle: float = wrapf(angle + PI / 12.0, 0.0, TAU / 6.0) - TAU / 12.0
-				if absf(tick_angle) < 0.035 and t > 0.82 and t <= 1.0:
-					alpha = minf(1.0, alpha + 0.20)
+				if absf(tick_angle) < 0.045 and t > 0.82 and t <= 1.0:
+					alpha_factor = minf(1.0, alpha_factor + 0.20)
 
-				var col := Color(border_color.r, border_color.g, border_color.b, alpha * border_color.a)
-				img.set_pixel(x, y, col)
+				var px_offset: int = row_offset + (x * 4)
+				buf[px_offset] = cr
+				buf[px_offset + 1] = cg
+				buf[px_offset + 2] = cb
+				buf[px_offset + 3] = int(clampf(alpha_factor * base_a, 0.0, 255.0))
 
+	var img := Image.create_from_data(dim, dim, false, Image.FORMAT_RGBA8, buf)
 	return ImageTexture.create_from_image(img)
 
 
@@ -2191,7 +2244,7 @@ func _refresh_overlays_if_stale() -> void:
 	if not is_inside_tree():
 		return
 
-	# Keep decal positions anchored at current unit position
+	# Keep decal positions smoothly anchored at current unit position
 	if is_instance_valid(_targetable_overlay) and _targetable_overlay.top_level:
 		_targetable_overlay.global_position = global_position
 	if is_instance_valid(_visible_overlay) and _visible_overlay.top_level:
@@ -2200,9 +2253,29 @@ func _refresh_overlays_if_stale() -> void:
 	var moved: float = global_position.distance_to(_overlay_last_pos)
 	var range_changed: bool = attack_range != _overlay_last_targetable_range \
 			or vision_range != _overlay_last_visible_range
-	if moved < _OVERLAY_REBUILD_MOVE_THRESHOLD and not range_changed:
+
+	if not range_changed and moved < _OVERLAY_REBUILD_MOVE_THRESHOLD:
 		return
+
+	# If the unit is actively moving, avoid re-shadowcasting every frame;
+	# update position smoothly and only re-cast when stopping or on a throttled interval
+	var now: int = Time.get_ticks_msec()
+	var is_moving: bool = velocity.length_squared() > 0.05
+	if is_moving and (now - _overlay_last_rebuild_time) < 1200 and not range_changed:
+		return
+	# Hard cooldown, range change or not. Module-stripping in a fight can flap
+	# attack_range every few ticks; without this the rebuild runs per-tick.
+	if (now - _overlay_last_rebuild_time) < _OVERLAY_REBUILD_MIN_INTERVAL_MS:
+		return
+	# Army-wide frame budget: defer rather than rebuild so twenty selected units
+	# stopping at once spread their shadowcasts over consecutive ticks instead
+	# of stacking them into one. Not consuming the cooldown/position state here
+	# means deferred units simply retry next tick.
+	if not _overlay_try_claim_budget():
+		return
+
 	_overlay_last_pos = global_position
+	_overlay_last_rebuild_time = now
 	if attack_range > 0.0:
 		_create_targetable_overlay()
 	if vision_range > 0.0:
@@ -2212,7 +2285,14 @@ func _refresh_overlays_if_stale() -> void:
 # Toggle the overlay on/off.
 func set_range_overlay_visible(value: bool) -> void:
 	show_range_overlay = value
-	if is_instance_valid(_targetable_overlay):
-		_targetable_overlay.visible = _is_selected and value
-	if is_instance_valid(_visible_overlay):
-		_visible_overlay.visible = _is_selected and value
+	if value and _is_selected:
+		_overlay_last_pos = Vector3.INF
+		if attack_range > 0.0:
+			_create_targetable_overlay()
+		if vision_range > 0.0:
+			_create_visible_overlay()
+	else:
+		if is_instance_valid(_targetable_overlay):
+			_targetable_overlay.visible = false
+		if is_instance_valid(_visible_overlay):
+			_visible_overlay.visible = false

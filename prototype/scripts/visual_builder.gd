@@ -348,7 +348,7 @@ const LOCOMOTION_MODULAR_TYPES := {
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"buoyant_envelope": true, "screw_drive": true,
 	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
-	"anti_grav_plate": true, "pontoon_wheels": true,
+	"anti_grav_plate": true,
 }
 
 # Firing elevation applied as a PIVOT ROTATION for the two weapons whose barrels
@@ -430,7 +430,7 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"buoyant_envelope": true, "screw_drive": true,
 	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
-	"anti_grav_plate": true, "pontoon_wheels": true,
+	"anti_grav_plate": true,
 	# Support modules with dedicated modular assembly code - must bypass the
 	# monolithic _part(type_id) path or their sub-part assembly branches are never reached.
 	"sensor_suite": true, "resource_harvester": true, "resource_bay": true,
@@ -502,7 +502,6 @@ const MODULAR_AUTHORED_SIZES := {
 	"rocker_bogie": Vector3(0.65, 0.9, 2.6),
 	"air_cushion_skirt": Vector3(1.6, 0.45, 1.6),
 	"anti_grav_plate": Vector3(0.9, 0.25, 0.9),
-	"pontoon_wheels": Vector3(0.75, 0.7, 0.75),
 	"sensor_suite": Vector3(0.5, 2.5, 0.5),
 	"directional_radar": Vector3(0.9, 2.2, 0.6),
 	"topographic_radar": Vector3(1.2, 2.0, 1.2),
@@ -731,7 +730,6 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			"rocker_bogie": _build_rocker_bogie(parent_node, base_size, base_color, tweaks)
 			"air_cushion_skirt": _build_air_cushion_skirt(parent_node, base_size, base_color, tweaks)
 			"anti_grav_plate": _build_anti_grav_plate(parent_node, base_size, base_color, tweaks)
-			"pontoon_wheels": _build_pontoon_wheels(parent_node, base_size, base_color, tweaks)
 		_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
 
 		return
@@ -4201,6 +4199,46 @@ static func _deform_tread_loop_mesh(source_mesh: Mesh, front_z: float, rear_z: f
 		mdt.commit_to_surface(new_mesh)
 	return new_mesh
 
+
+## Builds a thick trapezoid block gearbox for track sprockets: longer than wide,
+## wider than tall, with narrow side inboard.
+static func _make_trapezoid_gearbox_mesh(r: float) -> ArrayMesh:
+	var l_out: float = r * 1.50
+	var l_in: float = r * 0.85
+	var w: float = r * 1.05
+	var h: float = r * 0.60
+
+	var v0 := Vector3(0.0, h * 0.5, -l_out * 0.5)
+	var v1 := Vector3(0.0, h * 0.5, l_out * 0.5)
+	var v2 := Vector3(-w, h * 0.5, l_in * 0.5)
+	var v3 := Vector3(-w, h * 0.5, -l_in * 0.5)
+	var v4 := Vector3(0.0, -h * 0.5, -l_out * 0.5)
+	var v5 := Vector3(0.0, -h * 0.5, l_out * 0.5)
+	var v6 := Vector3(-w, -h * 0.5, l_in * 0.5)
+	var v7 := Vector3(-w, -h * 0.5, -l_in * 0.5)
+
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+	var add_quad = func(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3):
+		st.set_normal(n)
+		st.add_vertex(a)
+		st.add_vertex(b)
+		st.add_vertex(c)
+		st.add_vertex(a)
+		st.add_vertex(c)
+		st.add_vertex(d)
+
+	add_quad.call(v0, v4, v5, v1, Vector3.RIGHT)
+	add_quad.call(v3, v2, v6, v7, Vector3.LEFT)
+	add_quad.call(v0, v1, v2, v3, Vector3.UP)
+	add_quad.call(v4, v7, v6, v5, Vector3.DOWN)
+	add_quad.call(v0, v3, v7, v4, (v3 - v0).cross(v4 - v0).normalized())
+	add_quad.call(v1, v5, v6, v2, (v1 - v5).cross(v6 - v5).normalized())
+
+	return st.commit()
+
+
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
 	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
 	var road_wheels = 5
@@ -4216,15 +4254,6 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	var length_scale = target_length / base_size.z
 	var actual_size = Vector3(base_size.x * length_scale, base_size.y * length_scale, target_length)
 
-	# two diagonal transitions, so the road wheels ride notably lower than
-	# the sprocket axle line. Because the authored mesh is asymmetric
-	# (top = +radius, bottom = -(radius+drop)), the loop's local origin is
-	# NOT its vertical center - placement below has to account for that,
-	# unlike the old symmetric-stadium math.
-	# 0.48, up from 0.42. Chris, calibrating the roster against this type: the
-	# treads are the one that is close to the right size, "if a bit too small
-	# still". Since tracked_treads is now the sizing REFERENCE every other
-	# ground type is judged against, it wants to be right first.
 	var target_radius = actual_size.y * 0.48
 	var target_half_span = actual_size.z * 0.5 - target_radius
 	var authored_radius = 0.45
@@ -4232,76 +4261,28 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	var authored_half_span = 1.0
 	var y_scale = target_radius / authored_radius
 	var target_drop = authored_drop * y_scale
-	# Vertical offset from the loop's own local origin down to its lowest
-	# point (the bottom of the trapezoid dip) - placing the loop/sprockets
-	# at this height puts that lowest point at world Y=0 (ground), matching
-	# where the road wheels also sit.
 	var ground_offset = target_radius + target_drop
-
-	# Drop the WHOLE assembly further down (Chris: "road wheels below the
-	# hull altogether" - they were still clipping into the hull's
-	# underside) - a uniform Y shift applied to every element below, purely
-	# visual (the actual ground-contact collider is the separate invisible
-	# running-gear StaticBody3D sized by ModuleCatalog.get_running_gear_size(),
-	# untouched by this).
 	var y_shift = -target_radius * 0.9
 
-	# Move the WHOLE assembly (loop, sprockets, wheels, gearbox/driveshaft)
-	# outboard along local X - originally 35% of the tread's own width, then
-	# pulled back inboard by half that (Chris: "so the sprockets and
-	# driveshafts intersect with the hull"), netting 17.5% outboard.
-	# "Extending past the hull is fine" applies to length (Z); this is the
-	# separate width (X) axis.
-	var outboard_x = actual_size.x * 0.175
+	var outboard_x = 0.0
 
-	# Both drive_sprocket and tread_belt_loop are authored with the same
-	# 0.3 width along their own local Y/X (build_drive_sprocket's `width` and
-	# build_tread_belt_loop's `belt_width` in build_meshes.py) - the sprocket
-	# is a cylinder spanning local Y=[0, 0.3] that gets rotated so that span
-	# maps to world X=[position.x - 0.3*sprocket_scale, position.x], i.e.
-	# entirely INBOARD of its own position (see the wheel/sprocket rotation
-	# comments below). The loop, unrotated, is symmetric about its own
-	# position.x instead - so scaling it by the same sprocket_scale factor
-	# alone still leaves half the loop hanging past the sprocket's outboard
-	# face and the other half short of its inboard face. Deliberately NOT
-	# multiplied by `width` (tread_width) - sprocket_scale also sizes the
-	# actual sprockets/feeds belt_center_x below, and Chris's ask is for
-	# tread_width to widen only the belt loop itself, not resize or reposition
-	# the sprockets/wheels. Computed here (before the loop is built) so both
-	# the loop and the sprockets below share one value.
-	# ONE SCALE FOR THE WHOLE TRACK GROUP.
-	#
-	# The belt was scaled non-uniformly - y_scale on height, a separate
-	# (half_span + radius) ratio on length - while the sprockets were scaled
-	# uniformly by target_radius/0.4. Two different mappings cannot line up, so
-	# the belt's end arcs were never the sprocket's radius and the track cut
-	# THROUGH the sprockets instead of wrapping them (Chris's report). The belt
-	# mesh is authored with the sprockets, road wheels and belt path all
-	# coincident; scaling that one assembly uniformly keeps them coincident, and
-	# is the only way they stay aligned at every hull size.
-	#
-	# tread_width still widens the belt alone, on top of this.
-	var belt_scale: float = target_length / (BELT_HALF_SPAN * 2.0 + BELT_DRIVE_RADIUS * 2.0)
-	var sprocket_scale = (BELT_DRIVE_RADIUS * belt_scale) / 0.4
-	var sprocket_width_authored = 0.3
-	# Center of the sprocket's own footprint (which sits entirely inboard of
-	# outboard_x, its outer edge) - the loop anchors to THIS instead of
-	# outboard_x directly, so it's centered over the sprocket's actual
-	# footprint rather than straddling empty space past its outboard face.
-	# BELT_OUTBOARD_NUDGE. The station moved INBOARD (locomotion_layout.gd's
-	# x_inset_frac) so the mount struts bite into the hull; without this the
-	# belt would have gone in with it and buried itself in the hull's side.
-	# Chris asked for both at once: "they need to move in further, so their
-	# struts actually intersect the hull, BUT the tread itself needs to move
-	# outboard some, so that it sits on the sprockets and wheels, not embedded
-	# in the hull." So the belt is pushed back out by the same amount the
-	# station came in, and now rides just PROUD of the sprocket's outer face
-	# rather than centred half a sprocket-width inboard of it.
-	var belt_center_x = outboard_x - sprocket_width_authored * 0.5 * sprocket_scale
-	var front_z: float = -BELT_HALF_SPAN * belt_scale
-	var rear_z: float = BELT_HALF_SPAN * belt_scale
-	# Match radius of treads radius curves to wheels + 5% (1.05 * sprocket_radius)
+	# Pin front and rear sprockets to the front and rear corners of the visible hull mesh
+	var front_z: float = -target_length * 0.5
+	var rear_z: float = target_length * 0.5
+	var span: float = target_length
+
+	var belt_scale: float = span / (BELT_HALF_SPAN * 2.0)
+	var sprocket_scale: float = (BELT_DRIVE_RADIUS * belt_scale) / 0.4
+	var sprocket_width_authored: float = 0.3
 	var sprocket_radius: float = BELT_DRIVE_RADIUS * belt_scale
+
+	var belt_center_x: float = outboard_x - sprocket_width_authored * 0.5 * sprocket_scale
+
+	# Lower the track assembly so the upper side of the sprockets aligns with
+	# the hull's lower chine (Y = 0 in module local space).
+	var loop_center_y: float = -sprocket_radius
+
+	# Match radius of treads radius curves to wheels + 5% (1.05 * sprocket_radius)
 	var tread_arc_radius: float = sprocket_radius * 1.05
 	var radius_scale_val: float = tread_arc_radius / 0.45
 	var width_scale_val: float = sprocket_scale * width
@@ -4318,69 +4299,108 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		var loop_mat = StandardMaterial3D.new()
 		loop_mat.albedo_color = base_color
 		loop.material_override = loop_mat
-	loop.position = Vector3(belt_center_x, ground_offset + y_shift, 0)
+	loop.position = Vector3(belt_center_x, loop_center_y, 0)
 	parent_node.add_child(loop)
 
-	# Sprockets at the true forward/rear corners, at the loop's own wrap-
-	# circle height (ground_offset, matching the loop's local Z=0 - NOT
-	# ground level itself, the sprocket axle sits above the road wheels),
-	# sized to the loop's own wrap radius (authored drive_sprocket radius =
-	# 0.4) so the belt visibly hugs them instead of floating around an
-	# unrelated-sized wheel.
+	# Helper to build an armored gearbox and MountReach-verified driveshaft.
+	# Checks for actual hull intersection before finalizing - never spawns floating shafts.
+	var _add_track_mount = func(axle_y: float, z_pos: float, r: float, is_sprocket: bool = false):
+		var station := MountReachScript.station_from(tweaks)
+		var node_scale := MountReachScript.node_scale_from(tweaks)
+		var shaft_angle := deg_to_rad(40.0)
+		var bottom_target := Vector3.ZERO
+		var shaft_thickness := 0.0
+
+		if is_sprocket:
+			var sp_inboard_x: float = outboard_x - sprocket_width_authored * sprocket_scale
+			var trap_mesh := _make_trapezoid_gearbox_mesh(r)
+			var trap_inst := _mesh_inst(trap_mesh, base_color.darkened(0.15).lightened(0.25))
+			trap_inst.position = Vector3(sp_inboard_x, axle_y, z_pos)
+			parent_node.add_child(trap_inst)
+
+			var w: float = r * 1.05
+			bottom_target = Vector3(sp_inboard_x - w, axle_y, z_pos)
+			shaft_thickness = r * 0.70
+		else:
+			if gearbox_mesh:
+				var gb_size: float = r * 1.25
+				var gearbox := _mesh_inst(gearbox_mesh, base_color.darkened(0.15).lightened(0.25))
+				gearbox.scale = Vector3(gb_size, gb_size, gb_size)
+				gearbox.position = Vector3(outboard_x - r * 0.50, axle_y, z_pos)
+				parent_node.add_child(gearbox)
+
+			bottom_target = Vector3(outboard_x - r * 0.40, axle_y + r * 0.35, z_pos)
+			shaft_thickness = r * 0.80
+
+		if driveshaft_mesh:
+			var candidate_dirs: Array[Vector3] = []
+			var z_bias := 0.0
+			if is_sprocket:
+				z_bias = 0.60 if z_pos < 0.0 else -0.60
+			elif absf(z_pos) > 0.1:
+				z_bias = -signf(z_pos) * 0.35
+
+			var elev_angles := [35.0, 45.0, 25.0, 55.0, 15.0, 0.0]
+			var z_offsets := [z_bias, z_bias * 1.4, z_bias * 0.6, 0.0, -z_bias * 0.5]
+			for el in elev_angles:
+				var r_el := deg_to_rad(el)
+				for zo in z_offsets:
+					var v := Vector3(-cos(r_el), sin(r_el), zo).normalized()
+					if not candidate_dirs.has(v):
+						candidate_dirs.append(v)
+
+			var solved_dir := Vector3.ZERO
+			var solved_len := -1.0
+			for c_dir in candidate_dirs:
+				var l := MountReachScript.solve(parent_node, station, bottom_target, c_dir, -1.0, node_scale)
+				if l > 0.0:
+					solved_dir = c_dir
+					solved_len = l
+					break
+
+			# ONLY spawn the driveshaft if it genuinely intersects the hull skin!
+			if solved_len > 0.0:
+				var shaft := _mesh_inst(driveshaft_mesh, base_color.darkened(0.3).lightened(0.3))
+				var top_pos := bottom_target + solved_dir * solved_len
+				var up_vec := solved_dir
+				var side_vec := up_vec.cross(Vector3.FORWARD).normalized()
+				if side_vec.length_squared() < 0.001:
+					side_vec = Vector3.RIGHT
+				var fwd_vec := side_vec.cross(up_vec).normalized()
+				shaft.transform = Transform3D(
+					Basis(side_vec * shaft_thickness, up_vec * solved_len, fwd_vec * shaft_thickness),
+					top_pos
+				)
+				parent_node.add_child(shaft)
+
+	# Sprockets at the true forward/rear corners, at the loop's wrap height
 	if sprocket and sprocket_mesh:
-		# Drive sprockets turn on their own axles, so each gets a named spin
-		# pivot at its own station - rotating the module node would swing the
-		# whole track assembly about the mount point instead.
 		var sp_front_axle = Node3D.new()
 		sp_front_axle.name = SPIN_PIVOT_TREAD
-		sp_front_axle.position = Vector3(outboard_x, ground_offset + y_shift, -BELT_HALF_SPAN * belt_scale)
+		sp_front_axle.position = Vector3(outboard_x, loop_center_y, front_z)
 		parent_node.add_child(sp_front_axle)
 		var sp_front = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
 		sp_front.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
 		sp_front.rotation = Vector3(0, 0, PI / 2.0)
 		sp_front_axle.add_child(sp_front)
+		_add_track_mount.call(loop_center_y, front_z, sprocket_radius, true)
 
 		var sp_rear_axle = Node3D.new()
 		sp_rear_axle.name = SPIN_PIVOT_TREAD
-		sp_rear_axle.position = Vector3(outboard_x, ground_offset + y_shift, BELT_HALF_SPAN * belt_scale)
+		sp_rear_axle.position = Vector3(outboard_x, loop_center_y, rear_z)
 		parent_node.add_child(sp_rear_axle)
 		var sp_rear = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
 		sp_rear.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
 		sp_rear.rotation = Vector3(0, 0, PI / 2.0)
 		sp_rear_axle.add_child(sp_rear)
+		_add_track_mount.call(loop_center_y, rear_z, sprocket_radius, true)
 
-	# Road wheels: smaller than the sprockets, riding low at true ground
-	# level (Y=0, same as the loop's own lowest point - see ground_offset
-	# above), evenly spaced strictly BETWEEN the two sprockets. Wheel radius
-	# is derived from the resulting spacing (not a fixed constant) rather
-	# than hardcoded, even though road_wheels is now fixed at 3, so it stays
-	# consistent with how every other size here scales off the hull.
-	# wheel_span keyed directly to the hull's own actual length (actual_size.z
-	# == target_length) rather than target_half_span/sprocket spacing - Chris
-	# wants all 3 road wheels clustered in the middle, spaced regularly
-	# across the center 50% of the hull's length, not spread out toward the
-	# sprockets. Outer wheels would land at +-wheel_span/2 (see
-	# _repeat_along_axis), so half of actual_size.z puts them at +-25% of
-	# hull length, i.e. the center 50% - sized off THIS span first so
-	# wheel_radius_target doesn't shrink from the inward pull below.
-	var wheel_span = BELT_HALF_SPAN * 2.0 * belt_scale * 0.55
-	var wheel_radius_target = BELT_ROAD_RADIUS * belt_scale
-	var wheel_scale = wheel_radius_target / 0.45
-	var spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
-
-	# Gearbox + driveshaft behind each road wheel, angled and sized to
-	# actually intersect the wheel - Chris's ask. The earlier attempt
-	# offset the gearbox by a fraction of the TREAD's overall width
-	# (actual_size.x, which after hull-length scaling could be a couple of
-	# units) instead of the wheel's own (much smaller) radius, so it
-	# rendered nowhere near the wheel; fixed by basing every offset here on
-	# wheel_radius_target instead. The driveshaft is anchored at its BOTTOM
-	# (a fixed point inside the wheel/gearbox, guaranteeing the overlap)
-	# with its TOP computed backward from length+angle, same trick used for
-	# the wheels locomotion type's own driveshaft.
-	# Where the hull's underside sits in this module's own local space, so the
-	# suspension arms below can be solved to reach it rather than guessed.
-	var hull_line_y: float = float(tweaks.get("kit_reach", 0.0))
+	# Road wheels: clustered along the lower run strictly between sprockets
+	var wheel_span: float = span * 0.58
+	var wheel_radius_target: float = BELT_ROAD_RADIUS * belt_scale
+	var wheel_scale: float = wheel_radius_target / 0.45
+	var spacing: float = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
+	var roller_y: float = loop_center_y - BELT_ROAD_DROP * belt_scale
 
 	_repeat_along_axis(parent_node, road_wheels, spacing, Vector3.FORWARD, func(p, pos, _idx):
 		var roller: MeshInstance3D
@@ -4400,36 +4420,12 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		# Road wheels spin with the belt, same as the sprockets.
 		var roller_axle = Node3D.new()
 		roller_axle.name = SPIN_PIVOT_TREAD
-		# Seated on the belt's own road-wheel line rather than on its own radius,
-		# so the wheel sits INSIDE the loop with the bottom run passing under it.
-		roller_axle.position = Vector3(outboard_x,
-			ground_offset + y_shift - BELT_ROAD_DROP * belt_scale, pos.z)
+		roller_axle.position = Vector3(outboard_x, roller_y, pos.z)
 		p.add_child(roller_axle)
 		roller.rotation = Vector3(0, 0, PI / 2.0)
 		roller_axle.add_child(roller)
 
-		# Gearbox and driveshaft behind each road wheel - the original, restored.
-		# It is anchored to the ROLLER's own axle rather than to a separately
-		# computed height, which is what stranded it on the bottom run before.
-		if gearbox_mesh:
-			var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.15).lightened(0.25))
-			var gb_size: float = wheel_radius_target * 1.2
-			gearbox.scale = Vector3(gb_size, gb_size, gb_size)
-			gearbox.position = Vector3(outboard_x - wheel_radius_target * 0.85,
-				roller_axle.position.y, pos.z)
-			p.add_child(gearbox)
-		if driveshaft_mesh:
-			var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.3).lightened(0.3))
-			var gb_size2: float = wheel_radius_target * 1.2
-			var shaft_len: float = wheel_radius_target * 2.4
-			var shaft_angle := deg_to_rad(25.0)
-			var bottom_target: Vector3 = Vector3(outboard_x - wheel_radius_target * 0.34,
-				roller_axle.position.y + wheel_radius_target * 0.35, pos.z)
-			var shaft_drop := Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
-			shaft.scale = Vector3(gb_size2 * 0.55, shaft_len, gb_size2 * 0.55)
-			shaft.position = bottom_target - shaft_drop
-			shaft.rotation = Vector3(0, 0, shaft_angle)
-			p.add_child(shaft)
+		_add_track_mount.call(roller_y, pos.z, wheel_radius_target, false)
 	)
 
 
@@ -7134,38 +7130,6 @@ static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base
 		# but its own small quad is not.
 		lens.extra_cull_margin = 4.0
 		parent_node.add_child(lens)
-
-
-## Pontoon wheels: sealed buoyant drums that are simultaneously the wheel and
-## the float. One part doing both jobs is the point of the type.
-static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.36, 0.34, 0.30), tweaks: Dictionary = {}):
-	var psize := float(tweaks.get("pontoon_size", 1.0))
-	var vanes: bool = bool(tweaks.get("paddle_vanes", true))
-
-	# Mounting copied wholesale from _build_wheels (Chris's instruction): the
-	# same angled driveshaft and inboard gearbox, sized off pontoon_size the way
-	# wheels size off wheel_size. A pontoon drum is a wheel that floats, so it
-	# should hang off the hull the same way one does.
-	#
-	# DRUM_SCALE oversizes the drum against the mount that carries it (Chris:
-	# the mounting is right, "the wheels themselves are too small"). It applies
-	# to the drum only - scaling `psize` instead would grow the gearbox and
-	# driveshaft in lockstep and leave the proportions exactly where they were.
-	const DRUM_SCALE := 1.5
-	var hub := build_wheel_mount(parent_node, base_color, psize, 0.0, 0.3 * psize, -1.0, tweaks)
-
-	var pontoon_mesh := _part("pw_pontoon")
-	if pontoon_mesh:
-		var axle := Node3D.new()
-		axle.name = SPIN_PIVOT_WHEEL
-		axle.position = hub
-		parent_node.add_child(axle)
-		var drum := _mesh_inst(pontoon_mesh, base_color)
-		# Dropping the vanes narrows the drum: a plain float rather than a
-		# paddle, which is what the thrust penalty is describing.
-		var d := psize * DRUM_SCALE
-		drum.scale = Vector3(d * (1.0 if vanes else 0.82), d, d)
-		axle.add_child(drum)
 
 
 # ===========================================================================
